@@ -22,6 +22,8 @@ class AggregationFunction(OptionsEnum):
     NANMEAN = "nanmean"
     NANMEDIAN = "nanmedian"
     NANSTD = "nanstd"
+    ARGMIN = "argmin"
+    ARGMAX = "argmax"
 
 
 AGGREGATORS = {
@@ -35,7 +37,9 @@ AGGREGATORS = {
     AggregationFunction.NANMIN: np.nanmin,
     AggregationFunction.NANMEAN: np.nanmean,
     AggregationFunction.NANMEDIAN: np.nanmedian,
-    AggregationFunction.NANSTD: np.nanstd
+    AggregationFunction.NANSTD: np.nanstd,
+    AggregationFunction.ARGMIN: np.argmin,
+    AggregationFunction.ARGMAX: np.argmax,
 }
 
 
@@ -104,6 +108,13 @@ def ranged_aggregate(
                 k: (v if k != axis_name else out_axis)
                 for k, v in axis_arr_out.axes.items()
             }
+            if operation in [AggregationFunction.ARGMIN, AggregationFunction.ARGMAX]:
+                # Convert indices returned by argmin/argmax into the value along the axis.
+                out_data = []
+                for sl_ix, sl in enumerate(slices):
+                    offsets = np.take(axis_arr_out.data, [sl_ix], axis=ax_idx)
+                    out_data.append(ax_vec[sl][offsets])
+                axis_arr_out.data = np.concatenate(out_data, axis=ax_idx)
 
 
 class RangedAggregateSettings(ez.Settings):
