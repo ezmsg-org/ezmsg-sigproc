@@ -1,8 +1,10 @@
+import copy
+
 import numpy as np
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.sigproc.bandpower import bandpower, SpectrogramSettings
 
-from util import create_messages_with_periodic_signal
+from util import create_messages_with_periodic_signal, assert_messages_equal
 
 
 def _debug_plot(result):
@@ -30,6 +32,10 @@ def test_bandpower():
         win_step_dur=None  # The spectrogram will do the windowing
     )
 
+    # Grab a deepcopy backup of the inputs, so we can check the inputs didn't change
+    #  while being processed.
+    backup = [copy.deepcopy(_) for _ in messages]
+
     gen = bandpower(
         spectrogram_settings=SpectrogramSettings(
             window_dur=win_dur,
@@ -37,7 +43,9 @@ def test_bandpower():
         ),
         bands=bands
     )
-    results = [gen.send(msg) for msg in messages]
+    results = [gen.send(_) for _ in messages]
+
+    assert_messages_equal(messages, backup)
 
     result = AxisArray.concatenate(*results, dim="time")
     # _debug_plot(result)

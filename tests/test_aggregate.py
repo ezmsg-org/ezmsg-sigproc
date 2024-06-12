@@ -6,6 +6,8 @@ from ezmsg.util.messages.axisarray import AxisArray
 
 from ezmsg.sigproc.aggregate import ranged_aggregate, AggregationFunction
 
+from util import assert_messages_equal
+
 
 def get_msg_gen():
     n_chans = 20
@@ -41,8 +43,16 @@ def test_aggregate(agg_func: AggregationFunction):
     targ_ax = "freq"
 
     in_msgs = [_ for _ in get_msg_gen()]
+
+    # Grab a deepcopy backup of the inputs so we can check the inputs didn't change
+    #  while being processed.
+    import copy
+    backup = [copy.deepcopy(_) for _ in in_msgs]
+
     gen = ranged_aggregate(axis=targ_ax, bands=bands, operation=agg_func)
     out_msgs = [gen.send(_) for _ in in_msgs]
+
+    assert_messages_equal(in_msgs, backup)
 
     assert all([type(_) is AxisArray for _ in out_msgs])
 

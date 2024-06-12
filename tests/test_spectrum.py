@@ -1,9 +1,10 @@
+import copy
 import pytest
 import numpy as np
 
 from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
 from ezmsg.sigproc.spectrum import spectrum, SpectralTransform, SpectralOutput, WindowFunction
-from util import get_test_fn, create_messages_with_periodic_signal
+from util import get_test_fn, create_messages_with_periodic_signal, assert_messages_equal
 
 
 def _debug_plot_welch(raw: AxisArray, result: AxisArray, welch_db: bool = True):
@@ -112,8 +113,12 @@ def test_spectrum_gen(
         msg_dur=win_dur,
         win_step_dur=win_step_dur
     )
+    backup = [copy.deepcopy(_) for _ in messages]
+
     gen = spectrum(axis="time", window=window, transform=transform, output=output)
     results = [gen.send(msg) for msg in messages]
+
+    assert_messages_equal(messages, backup)
 
     assert "freq" in results[0].dims
     assert "ch" in results[0].dims
