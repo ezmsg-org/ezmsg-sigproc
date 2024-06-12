@@ -16,10 +16,9 @@ def const_difference(
     result = (in_data - value) if subtrahend else (value - in_data)
     https://en.wikipedia.org/wiki/Template:Arithmetic_operations
     """
-    msg_in = AxisArray(np.array([]), dims=[""])
     msg_out = AxisArray(np.array([]), dims=[""])
     while True:
-        msg_in = yield msg_out
+        msg_in: AxisArray = yield msg_out
         msg_out = copy.copy(msg_in)
         msg_out.data = (msg_out.data - value) if subtrahend else (value - msg_out.data)
 
@@ -44,6 +43,4 @@ class ConstDifference(GenAxisArray):
     @ez.subscriber(INPUT_SIGNAL, zero_copy=True)
     @ez.publisher(OUTPUT_SIGNAL)
     async def on_message(self, message: AxisArray) -> typing.AsyncGenerator:
-        ret = self.STATE.gen.send(message)
-        if ret is not None:
-            yield self.OUTPUT_SIGNAL, ret
+        yield self.OUTPUT_SIGNAL, self.STATE.gen.send(message)

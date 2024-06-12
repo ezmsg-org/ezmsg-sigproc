@@ -24,10 +24,9 @@ def expdecay(
         coefs = [alpha], [1, alpha - 1]
         zi: typing.Optional[npt.NDArray] = None
 
-    msg_in = AxisArray(np.array([]), dims=[""])
     msg_out = AxisArray(np.array([]), dims=[""])
     while True:
-        msg_in = yield msg_out
+        msg_in: AxisArray = yield msg_out
 
         targ_ax = msg_in.get_axis_idx(axis)
         data = np.moveaxis(msg_in.data, targ_ax, 0)
@@ -75,6 +74,4 @@ class ExpDecay(GenAxisArray):
     @ez.subscriber(INPUT_SIGNAL, zero_copy=True)
     @ez.publisher(OUTPUT_SIGNAL)
     async def on_message(self, message: AxisArray) -> typing.AsyncGenerator:
-        ret = self.STATE.gen.send(message)
-        if ret is not None:
-            yield self.OUTPUT_SIGNAL, ret
+        yield self.OUTPUT_SIGNAL, self.STATE.gen.send(message)
