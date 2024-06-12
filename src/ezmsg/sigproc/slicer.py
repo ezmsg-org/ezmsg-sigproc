@@ -44,16 +44,16 @@ def parse_slice(s: str) -> typing.Tuple[typing.Union[slice, int], ...]:
 
 @consumer
 def slicer(
-    selection: str = "", axis: typing.Optional[str] = None
+    selection: str = "",
+    axis: typing.Optional[str] = None
 ) -> typing.Generator[AxisArray, AxisArray, None]:
-    axis_arr_in = AxisArray(np.array([]), dims=[""])
     axis_arr_out = AxisArray(np.array([]), dims=[""])
     _slice = None
     b_change_dims = False
     new_axis = None  # Will hold updated metadata
 
     while True:
-        axis_arr_in = yield axis_arr_out
+        axis_arr_in: AxisArray = yield axis_arr_out
 
         if axis is None:
             axis = axis_arr_in.dims[-1]
@@ -115,5 +115,6 @@ class Slicer(GenAxisArray):
     @ez.publisher(OUTPUT_SIGNAL)
     async def on_message(self, message: AxisArray) -> typing.AsyncGenerator:
         ret = self.STATE.gen.send(message)
-        if ret is not None:
+        # Slice might be size-0
+        if ret.data.size > 0:
             yield self.OUTPUT_SIGNAL, ret

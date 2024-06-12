@@ -29,7 +29,6 @@ def affine_transform(
         A primed generator object that yields an :obj:`AxisArray` object for every
         :obj:`AxisArray` it receives via `send`.
     """
-    axis_arr_in = AxisArray(np.array([]), dims=[""])
     axis_arr_out = AxisArray(np.array([]), dims=[""])
 
     if isinstance(weights, str):
@@ -44,7 +43,7 @@ def affine_transform(
     new_xform_ax: typing.Optional[AxisArray.Axis] = None
 
     while True:
-        axis_arr_in = yield axis_arr_out
+        axis_arr_in: AxisArray = yield axis_arr_out
 
         if axis is None:
             axis = axis_arr_in.dims[-1]
@@ -142,9 +141,9 @@ class AffineTransform(GenAxisArray):
     @ez.publisher(OUTPUT_SIGNAL)
     async def on_message(self, message: AxisArray) -> typing.AsyncGenerator:
         ret = self.STATE.gen.send(message)
-        if ret is not None:
+        # Possibility that affine transform eliminates all data.
+        if ret.data.size > 0:
             yield self.OUTPUT_SIGNAL, ret
-
 
 
 def zeros_for_noop(data: npt.NDArray, **ignore_kwargs) -> npt.NDArray:
@@ -167,7 +166,6 @@ def common_rereference(
         A primed generator object that yields an :obj:`AxisArray` object
         for every :obj:`AxisArray` it receives via `send`.
     """
-    axis_arr_in = AxisArray(np.array([]), dims=[""])
     axis_arr_out = AxisArray(np.array([]), dims=[""])
 
     if mode == "passthrough":
@@ -176,7 +174,7 @@ def common_rereference(
     func = {"mean": np.mean, "median": np.median, "passthrough": zeros_for_noop}[mode]
 
     while True:
-        axis_arr_in = yield axis_arr_out
+        axis_arr_in: AxisArray = yield axis_arr_out
 
         if axis is None:
             axis = axis_arr_in.dims[-1]
@@ -234,7 +232,4 @@ class CommonRereference(GenAxisArray):
     @ez.subscriber(INPUT_SIGNAL, zero_copy=True)
     @ez.publisher(OUTPUT_SIGNAL)
     async def on_message(self, message: AxisArray) -> typing.AsyncGenerator:
-        ret = self.STATE.gen.send(message)
-        if ret is not None:
-            yield self.OUTPUT_SIGNAL, ret
-
+        yield self.OUTPUT_SIGNAL, self.STATE.gen.send(message)

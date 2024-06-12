@@ -20,7 +20,7 @@ def spectrogram(
     window: WindowFunction = WindowFunction.HANNING,
     transform: SpectralTransform = SpectralTransform.REL_DB,
     output: SpectralOutput = SpectralOutput.POSITIVE
-) -> typing.Generator[typing.Optional[AxisArray], AxisArray, None]:
+) -> typing.Generator[AxisArray, AxisArray, None]:
     """
     Calculate a spectrogram on streaming data.
 
@@ -47,11 +47,10 @@ def spectrogram(
     )
 
     # State variables
-    axis_arr_in = AxisArray(np.array([]), dims=[""])
     axis_arr_out: typing.Optional[AxisArray] = None
 
     while True:
-        axis_arr_in = yield axis_arr_out
+        axis_arr_in: AxisArray = yield axis_arr_out
         axis_arr_out = pipeline(axis_arr_in)
 
 

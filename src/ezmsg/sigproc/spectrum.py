@@ -81,7 +81,6 @@ def spectrum(
     """
 
     # State variables
-    axis_arr_in = AxisArray(np.array([]), dims=[""])
     axis_arr_out = AxisArray(np.array([]), dims=[""])
 
     axis_name = axis
@@ -90,7 +89,7 @@ def spectrum(
     freq_axis: Optional[AxisArray.Axis] = None
 
     while True:
-        axis_arr_in = yield axis_arr_out
+        axis_arr_in: AxisArray = yield axis_arr_out
 
         if axis_name is None:
             axis_name = axis_arr_in.dims[0]
@@ -200,6 +199,4 @@ class Spectrum(ez.Unit):
     @ez.subscriber(INPUT_SIGNAL, zero_copy=True)
     @ez.publisher(OUTPUT_SIGNAL)
     async def on_message(self, message: AxisArray) -> AsyncGenerator:
-        ret = self.STATE.gen.send(message)
-        if ret is not None:
-            yield self.OUTPUT_SIGNAL, ret
+        yield self.OUTPUT_SIGNAL, self.STATE.gen.send(message)

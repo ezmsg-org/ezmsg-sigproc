@@ -1,5 +1,4 @@
 import copy
-from dataclasses import replace
 import traceback
 from typing import AsyncGenerator, Optional, Tuple, List, Generator
 
@@ -57,7 +56,6 @@ def windowing(
     elif window_shift is not None and zero_pad_until == "input":
         ez.logger.warning("windowing is non-deterministic with `zero_pad_until='input'` as it depends on the size "
                           "of the first input. We recommend using 'shift' when `window_shift` is float-valued.")
-    axis_arr_in = AxisArray(np.array([]), dims=[""])
     axis_arr_out = AxisArray(np.array([]), dims=[""])
 
     # State variables
@@ -72,7 +70,7 @@ def windowing(
     out_newaxis: Optional[AxisArray.Axis] = None
 
     while True:
-        axis_arr_in = yield axis_arr_out
+        axis_arr_in: AxisArray = yield axis_arr_out
 
         if window_dur is None:
             axis_arr_out = axis_arr_in
@@ -226,23 +224,24 @@ class Window(ez.Unit):
     async def on_signal(self, msg: AxisArray) -> AsyncGenerator:
         try:
             out_msg = self.STATE.gen.send(msg)
-            if self.STATE.cur_settings.newaxis is not None or self.STATE.cur_settings.window_dur is None:
-                # Multi-win mode or pass-through mode.
-                yield self.OUTPUT_SIGNAL, out_msg
-            else:
-                # We need to split out_msg into multiple yields, dropping newaxis.
-                axis_idx = out_msg.get_axis_idx("win")
-                win_axis = out_msg.axes["win"]
-                offsets = np.arange(out_msg.data.shape[axis_idx]) * win_axis.gain + win_axis.offset
-                for msg_ix in range(out_msg.data.shape[axis_idx]):
-                    _out_msg = copy.copy(out_msg)
-                    _out_msg.data = slice_along_axis(_out_msg.data, msg_ix, axis_idx)
-                    _out_msg.dims = _out_msg.dims[:axis_idx] + _out_msg.dims[axis_idx + 1:]
-                    _out_axinfo = copy.copy(_out_msg.axes[self.STATE.cur_settings.axis])
-                    _out_axinfo.offset = offsets[msg_ix]
-                    _out_msg.axes = {k: v for k, v in msg.axes.items() if k != self.STATE.cur_settings.axis}
-                    _out_msg.axes[self.STATE.cur_settings.axis] = _out_axinfo
-                    yield self.OUTPUT_SIGNAL, _out_msg
+            if out_msg.data.size > 0:
+                if self.STATE.cur_settings.newaxis is not None or self.STATE.cur_settings.window_dur is None:
+                    # Multi-win mode or pass-through mode.
+                    yield self.OUTPUT_SIGNAL, out_msg
+                else:
+                    # We need to split out_msg into multiple yields, dropping newaxis.
+                    axis_idx = out_msg.get_axis_idx("win")
+                    win_axis = out_msg.axes["win"]
+                    offsets = np.arange(out_msg.data.shape[axis_idx]) * win_axis.gain + win_axis.offset
+                    for msg_ix in range(out_msg.data.shape[axis_idx]):
+                        _out_msg = copy.copy(out_msg)
+                        _out_msg.data = slice_along_axis(_out_msg.data, msg_ix, axis_idx)
+                        _out_msg.dims = _out_msg.dims[:axis_idx] + _out_msg.dims[axis_idx + 1:]
+                        _out_axinfo = copy.copy(_out_msg.axes[self.STATE.cur_settings.axis])
+                        _out_axinfo.offset = offsets[msg_ix]
+                        _out_msg.axes = {k: v for k, v in msg.axes.items() if k != self.STATE.cur_settings.axis}
+                        _out_msg.axes[self.STATE.cur_settings.axis] = _out_axinfo
+                        yield self.OUTPUT_SIGNAL, _out_msg
         except (StopIteration, GeneratorExit):
             ez.logger.debug(f"Window closed in {self.address}")
         except Exception:

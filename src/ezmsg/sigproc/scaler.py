@@ -92,7 +92,6 @@ def scaler_np(
         A primed generator object that expects `.send(axis_array)` and yields a
         standardized, or "Z-scored" version of the input.
     """
-    axis_arr_in = AxisArray(np.array([]), dims=[""])
     axis_arr_out = AxisArray(np.array([]), dims=[""])
     means = vars_means = vars_sq_means = None
     alpha = None
@@ -105,7 +104,7 @@ def scaler_np(
         return prev + _alpha * (arr - prev)
 
     while True:
-        axis_arr_in = yield axis_arr_out
+        axis_arr_in: AxisArray = yield axis_arr_out
 
         data = axis_arr_in.data
         if axis is None:
@@ -165,6 +164,4 @@ class AdaptiveStandardScaler(GenAxisArray):
     @ez.subscriber(INPUT_SIGNAL, zero_copy=True)
     @ez.publisher(OUTPUT_SIGNAL)
     async def on_message(self, message: AxisArray) -> typing.AsyncGenerator:
-        ret = self.STATE.gen.send(message)
-        if ret is not None:
-            yield self.OUTPUT_SIGNAL, ret
+        yield self.OUTPUT_SIGNAL, self.STATE.gen.send(message)

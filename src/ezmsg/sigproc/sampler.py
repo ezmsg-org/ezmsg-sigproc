@@ -2,7 +2,7 @@ from collections import deque
 import copy
 from dataclasses import dataclass, replace, field
 import time
-from typing import Optional, Any, Tuple, List, Union, AsyncGenerator, Generator
+import typing
 
 import ezmsg.core as ez
 import numpy as np
@@ -19,10 +19,10 @@ class SampleTriggerMessage:
     timestamp: float = field(default_factory=time.time)
     """Time of the trigger, in seconds. The Clock depends on the input but defaults to time.time"""
 
-    period: Optional[Tuple[float, float]] = None
+    period: typing.Optional[typing.Tuple[float, float]] = None
     """The period around the timestamp, in seconds"""
 
-    value: Any = None
+    value: typing.Any = None
     """A value or 'label' associated with the trigger."""
 
 
@@ -39,11 +39,11 @@ class SampleMessage:
 @consumer
 def sampler(
         buffer_dur: float,
-        axis: Optional[str] = None,
-        period: Optional[Tuple[float, float]] = None,
-        value: Any = None,
+        axis: typing.Optional[str] = None,
+        period: typing.Optional[typing.Tuple[float, float]] = None,
+        value: typing.Any = None,
         estimate_alignment: bool = True
-) -> Generator[Union[AxisArray, SampleTriggerMessage], List[SampleMessage], None]:
+) -> typing.Generator[typing.List[SampleMessage], typing.Union[AxisArray, SampleTriggerMessage], None]:
     """
     A generator function that samples data into a buffer, accepts triggers, and returns slices of sampled
     data around the trigger time.
@@ -67,8 +67,7 @@ def sampler(
         A generator that expects `.send` either an :obj:`AxisArray` containing streaming data messages,
         or a :obj:`SampleTriggerMessage` containing a trigger, and yields the list of :obj:`SampleMessage` s.
     """
-    msg_in = None
-    msg_out: Optional[list[SampleMessage]] = None
+    msg_out: typing.Optional[list[SampleMessage]] = None
 
     # State variables (most shared between trigger- and data-processing.
     triggers: deque[SampleTriggerMessage] = deque()
@@ -191,11 +190,11 @@ class SamplerSettings(ez.Settings):
     See :obj:`sampler` for a description of the fields.
     """
     buffer_dur: float
-    axis: Optional[str] = None
-    period: Optional[
-        Tuple[float, float]
+    axis: typing.Optional[str] = None
+    period: typing.Optional[
+        typing.Tuple[float, float]
     ] = None  # Optional default period if unspecified in SampleTriggerMessage
-    value: Any = None  # Optional default value if unspecified in SampleTriggerMessage
+    value: typing.Any = None  # Optional default value if unspecified in SampleTriggerMessage
 
     estimate_alignment: bool = True
     # If true, use message timestamp fields and reported sampling rate to estimate
@@ -207,7 +206,7 @@ class SamplerSettings(ez.Settings):
 
 class SamplerState(ez.State):
     cur_settings: SamplerSettings
-    gen: Generator[Union[AxisArray, SampleTriggerMessage], List[SampleMessage], None]
+    gen: typing.Generator[typing.List[SampleMessage], typing.Union[AxisArray, SampleTriggerMessage], None]
 
 
 class Sampler(ez.Unit):
@@ -244,14 +243,14 @@ class Sampler(ez.Unit):
 
     @ez.subscriber(INPUT_SIGNAL, zero_copy=True)
     @ez.publisher(OUTPUT_SAMPLE)
-    async def on_signal(self, msg: AxisArray) -> AsyncGenerator:
+    async def on_signal(self, msg: AxisArray) -> typing.AsyncGenerator:
         pub_samples = self.STATE.gen.send(msg)
         for sample in pub_samples:
             yield self.OUTPUT_SAMPLE, sample
 
 
 class TriggerGeneratorSettings(ez.Settings):
-    period: Tuple[float, float]
+    period: typing.Tuple[float, float]
     """The period around the trigger event."""
 
     prewait: float = 0.5
@@ -271,7 +270,7 @@ class TriggerGenerator(ez.Unit):
     OUTPUT_TRIGGER = ez.OutputStream(SampleTriggerMessage)
 
     @ez.publisher(OUTPUT_TRIGGER)
-    async def generate(self) -> AsyncGenerator:
+    async def generate(self) -> typing.AsyncGenerator:
         await asyncio.sleep(self.SETTINGS.prewait)
 
         output = 0

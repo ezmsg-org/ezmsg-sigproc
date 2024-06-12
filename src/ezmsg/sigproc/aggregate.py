@@ -48,7 +48,7 @@ def ranged_aggregate(
     axis: typing.Optional[str] = None,
     bands: typing.Optional[typing.List[typing.Tuple[float, float]]] = None,
     operation: AggregationFunction = AggregationFunction.MEAN
-):
+) -> typing.Generator[AxisArray, AxisArray, None]:
     """
     Apply an aggregation operation over one or more bands.
 
@@ -61,7 +61,6 @@ def ranged_aggregate(
     Returns:
         A primed generator object ready to yield an AxisArray for each .send(axis_array)
     """
-    axis_arr_in = AxisArray(np.array([]), dims=[""])
     axis_arr_out = AxisArray(np.array([]), dims=[""])
 
     target_axis: typing.Optional[AxisArray.Axis] = None
@@ -70,7 +69,7 @@ def ranged_aggregate(
     axis_name = ""
 
     while True:
-        axis_arr_in = yield axis_arr_out
+        axis_arr_in: AxisArray = yield axis_arr_out
         if bands is None:
             axis_arr_out = axis_arr_in
         else:
@@ -147,6 +146,7 @@ class RangedAggregate(GenAxisArray):
     @ez.publisher(OUTPUT_SIGNAL)
     async def on_message(self, message: AxisArray) -> typing.AsyncGenerator:
         ret = self.STATE.gen.send(message)
-        if ret is not None:
+        # It's possible that aggregate returns zero-sized array.
+        if ret.data.size > 0:
             yield self.OUTPUT_SIGNAL, ret
 

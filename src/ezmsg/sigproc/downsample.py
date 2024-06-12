@@ -1,5 +1,4 @@
 import copy
-from dataclasses import replace
 import traceback
 import typing
 
@@ -32,14 +31,13 @@ def downsample(
         next downsample interval then `None` is yielded.
 
     """
-    axis_arr_in = AxisArray(np.array([]), dims=[""])
     axis_arr_out = AxisArray(np.array([]), dims=[""])
 
     # state variables
     s_idx: int = 0  # Index of the next msg's first sample into the virtual rotating ds_factor counter.
 
     while True:
-        axis_arr_in = yield axis_arr_out
+        axis_arr_in: AxisArray = yield axis_arr_out
 
         if axis is None:
             axis = axis_arr_in.dims[0]
@@ -110,6 +108,7 @@ class Downsample(ez.Unit):
 
         try:
             out_msg = self.STATE.gen.send(msg)
+            # `downsample` might return size-0 if this chunk was between picked samples.
             if out_msg.data.size > 0:
                 yield self.OUTPUT_SIGNAL, out_msg
         except (StopIteration, GeneratorExit):

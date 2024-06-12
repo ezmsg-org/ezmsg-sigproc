@@ -25,7 +25,6 @@ def bandpower(
     Returns:
         A primed generator object ready to yield an AxisArray for each .send(axis_array)
     """
-    axis_arr_in = AxisArray(np.array([]), dims=[""])
     axis_arr_out = AxisArray(np.array([]), dims=[""])
 
     f_spec = spectrogram(
@@ -43,7 +42,7 @@ def bandpower(
     pipeline = compose(f_spec, f_agg)
 
     while True:
-        axis_arr_in = yield axis_arr_out
+        axis_arr_in: AxisArray = yield axis_arr_out
         axis_arr_out = pipeline(axis_arr_in)
 
 
