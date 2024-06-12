@@ -60,8 +60,19 @@ class BandPower(GenAxisArray):
     """:obj:`Unit` for :obj:`bandpower`."""
     SETTINGS: BandPowerSettings
 
+    INPUT_SIGNAL = ez.InputStream(AxisArray)
+    OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
+
     def construct_generator(self):
         self.STATE.gen = bandpower(
             spectrogram_settings=self.SETTINGS.spectrogram_settings,
             bands=self.SETTINGS.bands
         )
+    
+    @ez.subscriber(INPUT_SIGNAL, zero_copy=True)
+    @ez.publisher(OUTPUT_SIGNAL)
+    async def on_message(self, msg: AxisArray) -> typing.AsyncGenerator:
+        ret = self.STATE.gen.send(msg)
+        # bandpower might return 0-sized array due to windowing in spectrogram or ranged_aggregate
+        if ret.data.size > 0:
+            yield self.OUTPUT_SIGNAL, ret

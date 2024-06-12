@@ -73,6 +73,9 @@ class Spectrogram(GenAxisArray):
     """
     SETTINGS: SpectrogramSettings
 
+    INPUT_SIGNAL = ez.InputStream(AxisArray)
+    OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
+
     def construct_generator(self):
         self.STATE.gen = spectrogram(
             window_dur=self.SETTINGS.window_dur,
@@ -81,3 +84,12 @@ class Spectrogram(GenAxisArray):
             transform=self.SETTINGS.transform,
             output=self.SETTINGS.output
         )
+    
+    @ez.subscriber(INPUT_SIGNAL, zero_copy=True)
+    @ez.publisher(OUTPUT_SIGNAL)
+    async def on_message(self, msg: AxisArray) -> typing.AsyncGenerator:
+        out_msg = self.STATE.gen.send(msg)
+        # There's a chance the return will be empty because windowing
+        #  might not have received enough data.
+        if out_msg.data.size > 0:
+            yield self.OUTPUT_SIGNAL, out_msg
