@@ -94,21 +94,28 @@ test = ["pytest (>=6)"]
 
 [[package]]
 name = "ezmsg"
-version = "3.3.3"
+version = "3.3.4"
 description = "A simple DAG-based computation model"
 optional = false
-python-versions = ">=3.8"
-files = [
-    {file = "ezmsg-3.3.3-py3-none-any.whl", hash = "sha256:62920470d8a692fcd986e980a80e27d0ec3c0a36677d2068ee75b8cf301a0cde"},
-    {file = "ezmsg-3.3.3.tar.gz", hash = "sha256:411dd4e027e37bb322bfbcef75264d47134ea64efa2b428522c257d959ca439f"},
-]
+python-versions = "^3.8"
+files = []
+develop = false
 
 [package.dependencies]
-typing-extensions = "*"
+typing-extensions = "^4.9.0"
 
 [package.extras]
-all-ext = ["ezmsg-sigproc", "ezmsg-websocket", "ezmsg-zmq"]
-test = ["numpy", "pytest", "pytest-asyncio", "pytest-cov"]
+all-ext = ["ezmsg-sigproc", "ezmsg-vispy", "ezmsg-websocket", "ezmsg-zmq"]
+sigproc = ["ezmsg-sigproc"]
+vispy = ["ezmsg-vispy"]
+websocket = ["ezmsg-websocket"]
+zmq = ["ezmsg-zmq"]
+
+[package.source]
+type = "git"
+url = "https://github.com/iscoe/ezmsg.git"
+reference = "dev"
+resolved_reference = "326e1b19e12d8e3b7ed0d4dd0c2191901c1b8c90"
 
 [[package]]
 name = "flake8"
@@ -336,4 +343,4 @@ files = [
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.8"
-content-hash = "d756a65b9a8219c7a325db5d69ee835ddda0f93d6071465687ff3bb18c267315"
+content-hash = "a783a8fa15b17575423d1ceed998e04a22040bc8c2a079b35719df82c6986b6b"
