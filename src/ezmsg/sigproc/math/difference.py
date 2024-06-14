@@ -44,3 +44,24 @@ class ConstDifference(GenAxisArray):
     @ez.publisher(OUTPUT_SIGNAL)
     async def on_message(self, message: AxisArray) -> typing.AsyncGenerator:
         yield self.OUTPUT_SIGNAL, self.STATE.gen.send(message)
+
+
+class DifferenceSettings(ez.Settings):
+    pass
+
+
+class Difference(ez.Unit):
+    SETTINGS = DifferenceSettings
+
+    INPUT_SIGNAL_1 = ez.InputStream(AxisArray)
+    INPUT_SIGNAL_2 = ez.InputStream(AxisArray)
+    OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
+
+    @ez.subscriber(INPUT_SIGNAL_2, zero_copy=True)
+    @ez.publisher(OUTPUT_SIGNAL)
+    async def on_input_2(self, message: AxisArray) -> typing.AsyncGenerator:
+        # TODO: buffer_2
+        # TODO: take buffer_1 - buffer_2 for ranges that align
+        # TODO: Drop samples from buffer_1 and buffer_2
+        if ret is not None:
+            yield self.OUTPUT_SIGNAL, ret
