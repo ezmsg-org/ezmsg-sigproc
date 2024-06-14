@@ -19,6 +19,7 @@ scipy = "^1.6.3"
 [tool.poetry.group.test.dependencies]
 pytest = "^7.0.0"
 pytest-cov = "*"
+flake8 = "*"
 
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib"]
