@@ -240,7 +240,7 @@ class Sampler(ez.Unit):
     async def on_trigger(self, msg: SampleTriggerMessage) -> None:
         _ = self.STATE.gen.send(msg)
 
-    @ez.subscriber(INPUT_SIGNAL)
+    @ez.subscriber(INPUT_SIGNAL, zero_copy=True)
     @ez.publisher(OUTPUT_SAMPLE)
     async def on_signal(self, msg: AxisArray) -> AsyncGenerator:
         pub_samples = self.STATE.gen.send(msg)

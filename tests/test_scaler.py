@@ -1,20 +1,19 @@
+import copy
 import os
 from typing import Optional, List
 from dataclasses import field
 import numpy as np
-
-from ezmsg.util.messages.axisarray import AxisArray
-
-from ezmsg.sigproc.scaler import scaler, scaler_np
-
-# For test system
-from util import get_test_fn
-from ezmsg.sigproc.scaler import AdaptiveStandardScalerSettings, AdaptiveStandardScaler
 import ezmsg.core as ez
-from ezmsg.sigproc.synth import Counter, CounterSettings
+from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.terminate import TerminateOnTotalSettings, TerminateOnTotal
 from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
 from ezmsg.util.messagecodec import message_log
+
+from ezmsg.sigproc.scaler import scaler, scaler_np
+from ezmsg.sigproc.scaler import AdaptiveStandardScalerSettings, AdaptiveStandardScaler
+from ezmsg.sigproc.synth import Counter, CounterSettings
+
+from util import get_test_fn, assert_messages_equal
 
 
 def test_adaptive_standard_scaler_river():
@@ -26,16 +25,20 @@ def test_adaptive_standard_scaler_river():
 
         test_input = AxisArray(np.tile(data, (2, 1)), dims=["ch", "time"], axes={"time": AxisArray.Axis()})
 
+        backup = [copy.deepcopy(test_input)]
+
         # The River example used alpha = 0.6
         # tau = -gain / np.log(1 - alpha) and here we're using gain = 1.0
         tau = 1.0914
         _scaler = scaler(time_constant=tau, axis="time")
         output = _scaler.send(test_input)
         assert np.allclose(output.data[0], expected_result, atol=1e-3)
+        assert_messages_equal([test_input], backup)
 
         _scaler_np = scaler_np(time_constant=tau, axis="time")
         output = _scaler_np.send(test_input)
         assert np.allclose(output.data[0], expected_result, atol=1e-3)
+        assert_messages_equal([test_input], backup)
     except ModuleNotFoundError:
         pass  # Do not fail if river not installed.
 

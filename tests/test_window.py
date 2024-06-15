@@ -1,26 +1,24 @@
+import copy
 from dataclasses import field, replace
-
 import os
-import json
+from typing import Optional, Dict, Any, List, Tuple
 
 import pytest
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 import ezmsg.core as ez
-
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messagegate import MessageGate, MessageGateSettings
 from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
 from ezmsg.util.messagecodec import message_log
-from ezmsg.sigproc.synth import Counter, CounterSettings
-from ezmsg.sigproc.window import Window, WindowSettings, windowing
-
-from util import get_test_fn
 from ezmsg.util.terminate import TerminateOnTimeout as TerminateTest
 from ezmsg.util.terminate import TerminateOnTimeoutSettings as TerminateTestSettings
 from ezmsg.util.debuglog import DebugLog
 
-from typing import Optional, Dict, Any, List, Tuple
+from ezmsg.sigproc.synth import Counter, CounterSettings
+from ezmsg.sigproc.window import Window, WindowSettings, windowing
+
+from util import get_test_fn, assert_messages_equal
 
 
 def calculate_expected_results(orig, fs, win_shift, zero_pad, msg_block_size, shift_len, win_len, nchans, data_len, n_msgs, win_ax):
@@ -74,8 +72,10 @@ def test_window_gen_nodur():
         dims=["ch", "time"],
         axes={"time": AxisArray.Axis.TimeAxis(fs=500., offset=0.)}
     )
+    backup = [copy.deepcopy(test_msg)]
     gen = windowing(window_dur=None)
     result = gen.send(test_msg)
+    assert_messages_equal([test_msg], backup)
     assert result is test_msg
     assert np.shares_memory(result.data, test_msg.data)
 
@@ -118,6 +118,8 @@ def test_window_generator(
         dims=["ch", "time"] if time_ax == 1 else ["time", "ch"],
         axes={"time": AxisArray.Axis.TimeAxis(fs=fs, offset=0.)}
     )
+    messages = []
+    backup = []
     results = []
     for msg_ix in range(n_msgs):
         msg_data = data[..., msg_ix * msg_block_size:(msg_ix+1) * msg_block_size]
@@ -126,8 +128,12 @@ def test_window_generator(
         test_msg = replace(test_msg, data=msg_data, axes={
             "time": AxisArray.Axis.TimeAxis(fs=fs, offset=tvec[msg_ix * msg_block_size])
         })
+        messages.append(test_msg)
+        backup.append(copy.deepcopy(test_msg))
         win_msg = gen.send(test_msg)
         results.append(win_msg)
+
+    assert_messages_equal(messages, backup)
 
     # Check each return value's metadata (offsets checked at end)
     expected_dims = test_msg.dims[:time_ax] + [newaxis or "win"] + test_msg.dims[time_ax:]

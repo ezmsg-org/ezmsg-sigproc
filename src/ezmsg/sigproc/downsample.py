@@ -4,15 +4,17 @@ import traceback
 import typing
 
 import numpy as np
-
 from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
 from ezmsg.util.generator import consumer
 import ezmsg.core as ez
 
+from .base import GenAxisArray
+
 
 @consumer
 def downsample(
-        axis: typing.Optional[str] = None, factor: int = 1
+        axis: typing.Optional[str] = None,
+        factor: int = 1
 ) -> typing.Generator[AxisArray, AxisArray, None]:
     """
     Construct a generator that yields a downsampled version of the data .send() to it.
@@ -34,6 +36,9 @@ def downsample(
     """
     axis_arr_in = AxisArray(np.array([]), dims=[""])
     axis_arr_out = AxisArray(np.array([]), dims=[""])
+
+    if factor < 1:
+        raise ValueError("Downsample factor must be at least 1 (no downsampling)")
 
     # state variables
     s_idx: int = 0  # Index of the next msg's first sample into the virtual rotating ds_factor counter.
@@ -63,20 +68,23 @@ def downsample(
 
         pub_samples = np.where(samples == 0)[0]
         if len(pub_samples) > 0:
-            # Update the template directly, because we want
-            #  future size-0 msgs to have approx. correct offset.
-            update_ax = template.axes[axis]
-            update_ax.offset = axis_info.offset + axis_info.gain * pub_samples[0].item()
-            axis_arr_out = replace(
-                template,
-                data=slice_along_axis(axis_arr_in.data, pub_samples, axis=axis_idx),
-                axes={**template.axes, axis: replace(update_ax, offset=update_ax.offset)}
-            )
-            template.axes[axis].offset = axis_info.offset + axis_info.gain * (n_samples + 1)
+            n_step = pub_samples[0].item()
+            data_slice = pub_samples
         else:
-            # This iteration did not yield any samples. Return a size-0 array
-            #  with time offset expected for _next_ sample.
-            axis_arr_out = template
+            n_step = 0
+            data_slice = slice(None, 0, None)
+        axis_arr_out = replace(
+            axis_arr_in,
+            data=slice_along_axis(axis_arr_in.data, data_slice, axis=axis_idx),
+            axes={
+                **axis_arr_in.axes,
+                axis: replace(
+                    axis_info,
+                    gain=axis_info.gain * factor,
+                    offset=axis_info.offset + axis_info.gain * n_step
+                )
+            }
+        )
 
 
 class DownsampleSettings(ez.Settings):
@@ -88,45 +96,12 @@ class DownsampleSettings(ez.Settings):
     factor: int = 1
 
 
-class DownsampleState(ez.State):
-    cur_settings: DownsampleSettings
-    gen: typing.Generator
-
-
-class Downsample(ez.Unit):
-    """
-    :obj:`Unit` for :obj:`downsample`.
-    """
+class Downsample(GenAxisArray):
+    """:obj:`Unit` for :obj:`bandpower`."""
     SETTINGS: DownsampleSettings
-    STATE: DownsampleState
-
-    INPUT_SETTINGS = ez.InputStream(DownsampleSettings)
-    INPUT_SIGNAL = ez.InputStream(AxisArray)
-    OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
 
     def construct_generator(self):
-        self.STATE.gen = downsample(axis=self.STATE.cur_settings.axis, factor=self.STATE.cur_settings.factor)
-
-    def initialize(self) -> None:
-        self.STATE.cur_settings = self.SETTINGS
-        self.construct_generator()
-
-    @ez.subscriber(INPUT_SETTINGS)
-    async def on_settings(self, msg: DownsampleSettings) -> None:
-        self.STATE.cur_settings = msg
-        self.construct_generator()
-
-    @ez.subscriber(INPUT_SIGNAL, zero_copy=True)
-    @ez.publisher(OUTPUT_SIGNAL)
-    async def on_signal(self, msg: AxisArray) -> typing.AsyncGenerator:
-        if self.STATE.cur_settings.factor < 1:
-            raise ValueError("Downsample factor must be at least 1 (no downsampling)")
-
-        try:
-            out_msg = self.STATE.gen.send(msg)
-            if out_msg.data.size > 0:
-                yield self.OUTPUT_SIGNAL, out_msg
-        except (StopIteration, GeneratorExit):
-            ez.logger.debug(f"Downsample closed in {self.address}")
-        except Exception:
-            ez.logger.info(traceback.format_exc())
+        self.STATE.gen = downsample(
+            axis=self.SETTINGS.axis,
+            factor=self.SETTINGS.factor
+        )
