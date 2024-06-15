@@ -128,9 +128,8 @@ def spectrum(
                     else:
                         f_transform = f1
 
-        new_axes = {**axis_arr_in.axes, **{out_axis: freq_axis}}
-        if out_axis != axis_name:
-            new_axes.pop(axis_name, None)
+        new_axes = {k: v for k, v in axis_arr_in.axes.items() if k not in [out_axis, axis_name]}
+        new_axes[out_axis] = freq_axis
 
         spec = np.fft.fft(axis_arr_in.data * window, axis=axis_idx) / n_time
         spec = np.fft.fftshift(spec, axes=axis_idx)

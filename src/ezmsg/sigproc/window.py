@@ -68,7 +68,7 @@ def windowing(
     shift_deficit: int = 0  # Number of incoming samples to ignore. Only relevant when shift > window.
     b_1to1 = window_shift is None
     newaxis_warned: bool = b_1to1
-    out_template: Optional[AxisArray] = None  # Template for building return values.
+    out_newaxis: Optional[AxisArray.Axis] = None
 
     while True:
         axis_arr_in = yield axis_arr_out
@@ -102,8 +102,7 @@ def windowing(
             else:  # i.e. zero_pad_until == "input"
                 req_samples = axis_arr_in.data.shape[axis_idx]
             n_zero = max(0, window_samples - req_samples)
-            buffer_shape = axis_arr_in.data.shape[:axis_idx] + (n_zero,) + axis_arr_in.data.shape[axis_idx + 1:]
-            buffer = np.zeros(buffer_shape)
+            buffer = np.zeros(axis_arr_in.data.shape[:axis_idx] + (n_zero,) + axis_arr_in.data.shape[axis_idx + 1:])
             prev_samp_shape = samp_shape
             prev_fs = fs
 
@@ -132,63 +131,59 @@ def windowing(
                 shift_deficit -= n_skip
 
         # Prepare reusable parts of output
-        if out_template is None:
-            template_data_shape = (axis_arr_in.data.shape[:axis_idx]
-                                   + (0, window_samples)
-                                   + axis_arr_in.data.shape[axis_idx + 1:])
+        if out_newaxis is None:
             out_dims = axis_arr_in.dims[:axis_idx] + [newaxis] + axis_arr_in.dims[axis_idx:]
-            out_axes = {
-                **axis_arr_in.axes,
-                axis: replace(axis_info, offset=0.0),  # Sliced axis is relative to newaxis offset
-                newaxis: AxisArray.Axis(
-                    unit=axis_info.unit,
-                    gain=0.0 if b_1to1 else axis_info.gain * window_shift_samples,
-                    offset=0.0  # offset modified below
-                )
-            }
-            out_template = replace(
-                axis_arr_in,
-                data=np.zeros(template_data_shape, dtype=axis_arr_in.data.dtype),
-                dims=out_dims,
-                axes=out_axes
+            out_newaxis = replace(
+                axis_info,
+                gain=0.0 if b_1to1 else axis_info.gain * window_shift_samples,
+                offset=0.0  # offset modified per-msg below
             )
 
         # Generate outputs.
+        # Preliminary copy of axes without the axes that we are modifying.
+        out_axes = {k: v for k, v in axis_arr_in.axes.items() if k not in [newaxis, axis]}
+
+        # Update targeted (windowed) axis so that its offset is relative to the new axis
+        # TODO: If we have `anchor_newest=True` then offset should be -win_dur
+        out_axes[axis] = replace(axis_info, offset=0.0)
+
+        # How we update .data and .axes[newaxis] depends on the windowing mode.
         if b_1to1:
             # one-to-one mode -- Each send yields exactly one window containing only the most recent samples.
             buffer = slice_along_axis(buffer, np.s_[-window_samples:], axis_idx)
-            axis_arr_out = replace(
-                    out_template,
-                    data=np.expand_dims(buffer, axis=axis_idx),
-                    axes={
-                        **out_axes,
-                        newaxis: replace(
-                            out_axes[newaxis],
-                            offset=buffer_offset[-window_samples]
-                        )
-                    }
-            )
+            out_dat = np.expand_dims(buffer, axis=axis_idx)
+            out_newaxis = replace(out_newaxis, offset=buffer_offset[-window_samples])
         elif buffer.shape[axis_idx] >= window_samples:
             # Deterministic window shifts.
-            win_view = sliding_win_oneaxis(buffer, window_samples, axis_idx)
-            win_view = slice_along_axis(win_view, np.s_[::window_shift_samples], axis_idx)
+            out_dat = sliding_win_oneaxis(buffer, window_samples, axis_idx)
+            out_dat = slice_along_axis(out_dat, np.s_[::window_shift_samples], axis_idx)
             offset_view = sliding_win_oneaxis(buffer_offset, window_samples, 0)[::window_shift_samples]
-            axis_arr_out = replace(
-                out_template,
-                data=win_view,
-                axes={
-                    **out_axes,
-                    newaxis: replace(out_axes[newaxis], offset=offset_view[0, 0])
-                }
-            )
+            out_newaxis = replace(out_newaxis, offset=offset_view[0, 0])
 
             # Drop expired beginning of buffer and update shift_deficit
-            multi_shift = window_shift_samples * win_view.shape[axis_idx]
+            multi_shift = window_shift_samples * out_dat.shape[axis_idx]
             shift_deficit = max(0, multi_shift - buffer.shape[axis_idx])
             buffer = slice_along_axis(buffer, np.s_[multi_shift:], axis_idx)
         else:
             # Not enough data to make a new window. Return empty data.
-            axis_arr_out = out_template
+            empty_data_shape = (
+                    axis_arr_in.data.shape[:axis_idx]
+                    + (0, window_samples)
+                    + axis_arr_in.data.shape[axis_idx + 1:]
+            )
+            out_dat = np.zeros(empty_data_shape, dtype=axis_arr_in.data.dtype)
+            # out_newaxis will have first timestamp in input... but mostly meaningless because output is size-zero.
+            out_newaxis = replace(out_newaxis, offset=axis_info.offset)
+
+        axis_arr_out = replace(
+            axis_arr_in,
+            data=out_dat,
+            dims=out_dims,
+            axes={
+                **out_axes,
+                newaxis: out_newaxis
+            }
+        )
 
 
 class WindowSettings(ez.Settings):
@@ -235,26 +230,29 @@ class Window(ez.Unit):
     async def on_signal(self, msg: AxisArray) -> AsyncGenerator:
         try:
             out_msg = self.STATE.gen.send(msg)
-            if self.STATE.cur_settings.newaxis is not None or self.STATE.cur_settings.window_dur is None:
-                # Multi-win mode or pass-through mode.
-                yield self.OUTPUT_SIGNAL, out_msg
-            else:
-                # We need to split out_msg into multiple yields, dropping newaxis.
-                axis_idx = out_msg.get_axis_idx("win")
-                win_axis = out_msg.axes["win"]
-                offsets = np.arange(out_msg.data.shape[axis_idx]) * win_axis.gain + win_axis.offset
-                for msg_ix in range(out_msg.data.shape[axis_idx]):
-                    yield self.OUTPUT_SIGNAL, replace(
-                        msg,
-                        data=slice_along_axis(out_msg.data, msg_ix, axis_idx),
-                        axes={
-                            **msg.axes,
-                            self.STATE.cur_settings.axis: replace(
-                                msg.axes[self.STATE.cur_settings.axis],
-                                offset=offsets[msg_ix]
-                            ),
-                        }
-                    )
+            if out_msg.data.size > 0:
+                if self.STATE.cur_settings.newaxis is not None or self.STATE.cur_settings.window_dur is None:
+                    # Multi-win mode or pass-through mode.
+                    yield self.OUTPUT_SIGNAL, out_msg
+                else:
+                    # We need to split out_msg into multiple yields, dropping newaxis.
+                    axis_idx = out_msg.get_axis_idx("win")
+                    win_axis = out_msg.axes["win"]
+                    offsets = np.arange(out_msg.data.shape[axis_idx]) * win_axis.gain + win_axis.offset
+                    for msg_ix in range(out_msg.data.shape[axis_idx]):
+                        _out_msg = replace(
+                            out_msg,
+                            data=slice_along_axis(out_msg.data, msg_ix, axis_idx),
+                            dims=out_msg.dims[:axis_idx] + out_msg.dims[axis_idx + 1:],
+                            axes={
+                                **out_msg.axes,
+                                self.STATE.cur_settings.axis: replace(
+                                    out_msg.axes[self.STATE.cur_settings.axis],
+                                    offset=offsets[msg_ix]
+                                )
+                            }
+                        )
+                        yield self.OUTPUT_SIGNAL, _out_msg
         except (StopIteration, GeneratorExit):
             ez.logger.debug(f"Window closed in {self.address}")
         except Exception:
