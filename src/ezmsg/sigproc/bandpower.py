@@ -4,10 +4,11 @@ import typing
 import numpy as np
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.util.generator import consumer, compose, GenAxisArray
+from ezmsg.util.generator import consumer, compose
 
 from .spectrogram import spectrogram, SpectrogramSettings
 from .aggregate import ranged_aggregate, AggregationFunction
+from .base import GenAxisArray
 
 
 @consumer

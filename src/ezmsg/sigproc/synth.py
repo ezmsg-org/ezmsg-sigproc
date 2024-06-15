@@ -6,10 +6,11 @@ from typing import Optional, Generator, AsyncGenerator, Union
 
 import numpy as np
 import ezmsg.core as ez
-from ezmsg.util.generator import consumer, GenAxisArray
+from ezmsg.util.generator import consumer
 from ezmsg.util.messages.axisarray import AxisArray
 
 from .butterworthfilter import ButterworthFilter, ButterworthFilterSettings
+from .base import GenAxisArray
 
 
 def clock(

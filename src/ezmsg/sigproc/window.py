@@ -9,6 +9,8 @@ import numpy.typing as npt
 from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis, sliding_win_oneaxis
 from ezmsg.util.generator import consumer
 
+from .base import GenAxisArray
+
 
 @consumer
 def windowing(
@@ -199,39 +201,29 @@ class WindowState(ez.State):
     gen: Generator
 
 
-class Window(ez.Unit):
-    STATE: WindowState
+class Window(GenAxisArray):
+    """:obj:`Unit` for :obj:`bandpower`."""
     SETTINGS: WindowSettings
 
     INPUT_SIGNAL = ez.InputStream(AxisArray)
     OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
-    INPUT_SETTINGS = ez.InputStream(WindowSettings)
-
-    def initialize(self) -> None:
-        self.STATE.cur_settings = self.SETTINGS
-        self.construct_generator()
-
-    @ez.subscriber(INPUT_SETTINGS)
-    async def on_settings(self, msg: WindowSettings) -> None:
-        self.STATE.cur_settings = msg
-        self.construct_generator()
 
     def construct_generator(self):
         self.STATE.gen = windowing(
-            axis=self.STATE.cur_settings.axis,
-            newaxis=self.STATE.cur_settings.newaxis,
-            window_dur=self.STATE.cur_settings.window_dur,
-            window_shift=self.STATE.cur_settings.window_shift,
-            zero_pad_until=self.STATE.cur_settings.zero_pad_until
+            axis=self.SETTINGS.axis,
+            newaxis=self.SETTINGS.newaxis,
+            window_dur=self.SETTINGS.window_dur,
+            window_shift=self.SETTINGS.window_shift,
+            zero_pad_until=self.SETTINGS.zero_pad_until
         )
 
-    @ez.subscriber(INPUT_SIGNAL)
+    @ez.subscriber(INPUT_SIGNAL, zero_copy=True)
     @ez.publisher(OUTPUT_SIGNAL)
     async def on_signal(self, msg: AxisArray) -> AsyncGenerator:
         try:
             out_msg = self.STATE.gen.send(msg)
             if out_msg.data.size > 0:
-                if self.STATE.cur_settings.newaxis is not None or self.STATE.cur_settings.window_dur is None:
+                if self.SETTINGS.newaxis is not None or self.SETTINGS.window_dur is None:
                     # Multi-win mode or pass-through mode.
                     yield self.OUTPUT_SIGNAL, out_msg
                 else:
@@ -246,8 +238,8 @@ class Window(ez.Unit):
                             dims=out_msg.dims[:axis_idx] + out_msg.dims[axis_idx + 1:],
                             axes={
                                 **out_msg.axes,
-                                self.STATE.cur_settings.axis: replace(
-                                    out_msg.axes[self.STATE.cur_settings.axis],
+                                self.SETTINGS.axis: replace(
+                                    out_msg.axes[self.SETTINGS.axis],
                                     offset=offsets[msg_ix]
                                 )
                             }

@@ -4,7 +4,9 @@ import typing
 import numpy as np
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
-from ezmsg.util.generator import consumer, GenAxisArray
+from ezmsg.util.generator import consumer
+
+from .base import GenAxisArray
 
 
 """
