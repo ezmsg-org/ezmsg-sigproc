@@ -1,3 +1,4 @@
+import copy
 import os
 from typing import Optional, List
 
@@ -17,7 +18,7 @@ from ezmsg.sigproc.synth import Oscillator, OscillatorSettings
 from ezmsg.util.terminate import TerminateOnTotal, TerminateOnTotalSettings
 from ezmsg.util.debuglog import DebugLog
 
-from util import get_test_fn
+from util import get_test_fn, assert_messages_equal
 
 
 def test_sampler_gen():
@@ -41,6 +42,8 @@ def test_sampler_gen():
         )
         for ix in range(n_chunks)
     ]
+    backup_signal = [copy.deepcopy(_) for _ in signal_msgs]
+
     # Prepare triggers
     n_trigs = 7
     trig_ts = np.linspace(0.1, data_dur - 1.0, n_trigs) + np.random.randn(n_trigs) / fs
@@ -53,6 +56,8 @@ def test_sampler_gen():
         )
         for _ix, _ts in enumerate(trig_ts)
     ]
+    backup_trigger = [copy.deepcopy(_) for _ in trigger_msgs]
+
     # Mix the messages and sort by time
     msg_ts = [_.axes["time"].offset for _ in signal_msgs] + [_.timestamp for _ in trigger_msgs]
     mix_msgs = signal_msgs + trigger_msgs
@@ -67,6 +72,9 @@ def test_sampler_gen():
     samples = []
     for msg in mix_msgs:
         samples.extend(gen.send(msg))
+
+    assert_messages_equal(signal_msgs, backup_signal)
+    assert_messages_equal(trigger_msgs, backup_trigger)
 
     assert len(samples) == n_trigs
     # Check sample data size

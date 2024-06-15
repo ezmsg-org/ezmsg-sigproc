@@ -1,5 +1,6 @@
+import copy
 import os
-import json
+from typing import Optional, List
 
 import pytest
 import numpy as np
@@ -12,12 +13,10 @@ from ezmsg.util.messagecodec import message_log
 from ezmsg.sigproc.downsample import downsample, Downsample, DownsampleSettings
 from ezmsg.sigproc.synth import Counter, CounterSettings
 
-from util import get_test_fn
+from util import get_test_fn, assert_messages_equal
 from ezmsg.util.terminate import TerminateOnTimeout as TerminateTest
 from ezmsg.util.terminate import TerminateOnTimeoutSettings as TerminateTestSettings
 from ezmsg.util.debuglog import DebugLog
-
-from typing import Optional, List
 
 
 @pytest.mark.parametrize("block_size", [1, 5, 10, 20])
@@ -44,12 +43,17 @@ def test_downsample_core(block_size: int, factor: int):
             )
             yield msg
 
+    in_msgs = list(msg_generator())
+    backup = [copy.deepcopy(msg) for msg in in_msgs]
+
     proc = downsample(axis="time", factor=factor)
     out_msgs = []
-    for msg in msg_generator():
+    for msg in in_msgs:
         res = proc.send(msg)
         if res.data.size:
             out_msgs.append(res)
+
+    assert_messages_equal(in_msgs, backup)
 
     # Assert correctness of gain
     assert all(msg.axes["time"].gain == factor / in_fs for msg in out_msgs)
