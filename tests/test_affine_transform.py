@@ -1,9 +1,12 @@
+import copy
 from pathlib import Path
 
 import numpy as np
 from ezmsg.util.messages.axisarray import AxisArray
 
 from ezmsg.sigproc.affinetransform import affine_transform, common_rereference
+
+from util import assert_messages_equal
 
 
 def test_affine_generator():
@@ -12,11 +15,15 @@ def test_affine_generator():
     in_dat = np.arange(n_times * n_chans).reshape(n_times, n_chans)
     axis_arr_in = AxisArray(in_dat, dims=["time", "ch"])
 
+    backup = [copy.deepcopy(axis_arr_in)]
+
     gen = affine_transform(weights=np.eye(n_chans), axis="ch")
     ax_arr_out = gen.send(axis_arr_in)
     assert ax_arr_out.data.shape == in_dat.shape
     assert np.allclose(ax_arr_out.data, in_dat)
     assert not np.may_share_memory(ax_arr_out.data, in_dat)
+
+    assert_messages_equal([axis_arr_in], backup)
 
     # Test with weights from a CSV file.
     csv_path = Path(__file__).parent / "resources" / "xform.csv"
@@ -50,12 +57,16 @@ def test_common_rereference():
     in_dat = np.arange(n_times * n_chans).reshape(n_times, n_chans)
     axis_arr_in = AxisArray(in_dat, dims=["time", "ch"])
 
+    backup = [copy.deepcopy(axis_arr_in)]
+
     gen = common_rereference(mode="mean", axis="ch", include_current=True)
     axis_arr_out = gen.send(axis_arr_in)
     assert np.array_equal(
         axis_arr_out.data,
         axis_arr_in.data - np.mean(axis_arr_in.data, axis=1, keepdims=True),
     )
+
+    assert_messages_equal([axis_arr_in], backup)
 
     # Use a slow deliberate way of calculating the CAR uniquely for each channel, excluding itself.
     #  common_rereference uses a faster way of doing this, but we test against something intuitive.
