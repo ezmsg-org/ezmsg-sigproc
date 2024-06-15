@@ -63,20 +63,23 @@ def downsample(
 
         pub_samples = np.where(samples == 0)[0]
         if len(pub_samples) > 0:
-            # Update the template directly, because we want
-            #  future size-0 msgs to have approx. correct offset.
-            update_ax = template.axes[axis]
-            update_ax.offset = axis_info.offset + axis_info.gain * pub_samples[0].item()
-            axis_arr_out = replace(
-                template,
-                data=slice_along_axis(axis_arr_in.data, pub_samples, axis=axis_idx),
-                axes={**template.axes, axis: replace(update_ax, offset=update_ax.offset)}
-            )
-            template.axes[axis].offset = axis_info.offset + axis_info.gain * (n_samples + 1)
+            n_step = pub_samples[0].item()
+            data_slice = pub_samples
         else:
-            # This iteration did not yield any samples. Return a size-0 array
-            #  with time offset expected for _next_ sample.
-            axis_arr_out = template
+            n_step = 0
+            data_slice = slice(None, 0, None)
+        axis_arr_out = replace(
+            axis_arr_in,
+            data=slice_along_axis(axis_arr_in.data, data_slice, axis=axis_idx),
+            axes={
+                **axis_arr_in.axes,
+                axis: replace(
+                    axis_info,
+                    gain=axis_info.gain * factor,
+                    offset=axis_info.offset + axis_info.gain * n_step
+                )
+            }
+        )
 
 
 class DownsampleSettings(ez.Settings):
