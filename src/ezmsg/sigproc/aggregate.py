@@ -23,6 +23,8 @@ class AggregationFunction(OptionsEnum):
     NANMEAN = "nanmean"
     NANMEDIAN = "nanmedian"
     NANSTD = "nanstd"
+    ARGMIN = "argmin"
+    ARGMAX = "argmax"
 
 
 AGGREGATORS = {
@@ -36,7 +38,9 @@ AGGREGATORS = {
     AggregationFunction.NANMIN: np.nanmin,
     AggregationFunction.NANMEAN: np.nanmean,
     AggregationFunction.NANMEDIAN: np.nanmedian,
-    AggregationFunction.NANSTD: np.nanstd
+    AggregationFunction.NANSTD: np.nanstd,
+    AggregationFunction.ARGMIN: np.argmin,
+    AggregationFunction.ARGMAX: np.argmax,
 }
 
 
@@ -72,7 +76,8 @@ def ranged_aggregate(
             axis_arr_out = axis_arr_in
         else:
             if slices is None or target_axis != axis_arr_in.get_axis(axis_name):
-                # Calculate the slices. If we are operating on time axis then
+                # If we have yet to calculate slices, or if the axis we are operating on
+                #  has changed (e.g., "time" or "win" axis always changes), then recalculate slices.
                 axis_name = axis or axis_arr_in.dims[0]
                 ax_idx = axis_arr_in.get_axis_idx(axis_name)
                 target_axis = axis_arr_in.axes[axis_name]
@@ -104,6 +109,13 @@ def ranged_aggregate(
                 data=np.stack(out_data, axis=ax_idx),
                 axes=new_axes
             )
+            if operation in [AggregationFunction.ARGMIN, AggregationFunction.ARGMAX]:
+                # Convert indices returned by argmin/argmax into the value along the axis.
+                out_data = []
+                for sl_ix, sl in enumerate(slices):
+                    offsets = np.take(axis_arr_out.data, [sl_ix], axis=ax_idx)
+                    out_data.append(ax_vec[sl][offsets])
+                axis_arr_out.data = np.concatenate(out_data, axis=ax_idx)
 
 
 class RangedAggregateSettings(ez.Settings):
