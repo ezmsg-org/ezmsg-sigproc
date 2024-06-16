@@ -79,3 +79,21 @@ def test_aggregate(agg_func: AggregationFunction):
     ], axis=-1)
     received_data = AxisArray.concatenate(*out_msgs, dim="time").data
     assert np.allclose(received_data, expected_data)
+
+
+@pytest.mark.parametrize(
+    "agg_func", [AggregationFunction.ARGMIN, AggregationFunction.ARGMAX]
+)
+def test_arg_aggregate(agg_func: AggregationFunction):
+    bands = [(5.0, 20.0), (30.0, 50.0)]
+    in_msgs = [_ for _ in get_msg_gen()]
+    gen = ranged_aggregate(axis="freq", bands=bands, operation=agg_func)
+    out_msgs = [gen.send(_) for _ in in_msgs]
+
+    if agg_func == AggregationFunction.ARGMIN:
+        expected_vals = np.array([np.min(_) for _ in bands])
+    else:
+        expected_vals = np.array([np.max(_) for _ in bands])
+    out_dat = AxisArray.concatenate(*out_msgs, dim="time").data
+    expected_dat = np.zeros(out_dat.shape[:-1] + (1,)) + expected_vals[None, None, :]
+    assert np.array_equal(out_dat, expected_dat)
