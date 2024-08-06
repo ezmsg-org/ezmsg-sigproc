@@ -12,13 +12,14 @@ packages = [{ include = "ezmsg", from = "src" }]
 
 [tool.poetry.dependencies]
 python = "^3.8"
-ezmsg = { git = "https://github.com/iscoe/ezmsg.git", branch = "dev" }
+ezmsg = "^3.4.0"
 numpy = "^1.19.5"
 scipy = "^1.6.3"
 
 [tool.poetry.group.test.dependencies]
 pytest = "^7.0.0"
 pytest-cov = "*"
+pytest-asyncio = "*"
 flake8 = "*"
 
 [tool.pytest.ini_options]

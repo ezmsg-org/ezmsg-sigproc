@@ -76,3 +76,20 @@ def create_messages_with_periodic_signal(
         )
         offset += split_dat.shape[0] / fs
     return messages
+
+
+def assert_messages_equal(messages1, messages2):
+    # Verify the inputs have not changed as a result of processing.
+    for msg_ix in range(len(messages1)):
+        msg1 = messages1[msg_ix]
+        msg2 = messages2[msg_ix]
+        assert type(msg1) is type(msg2)
+        if isinstance(msg1, AxisArray):
+            assert np.array_equal(msg1.data, msg2.data)
+            assert msg1.dims == msg2.dims
+            assert list(msg1.axes.keys()) == list(msg2.axes.keys())
+            for k, v in msg1.axes.items():
+                assert k in msg2.axes
+                assert v == msg2.axes[k]
+        else:
+            assert msg1.__dict__ == msg2.__dict__
