@@ -6,7 +6,7 @@ import ezmsg.core as ez
 from ezmsg.util.generator import consumer
 from ezmsg.util.messages.axisarray import AxisArray
 
-from .base import GenAxisArray
+from ..base import GenAxisArray
 
 
 @consumer
