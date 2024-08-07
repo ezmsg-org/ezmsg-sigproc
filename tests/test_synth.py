@@ -16,7 +16,8 @@ from util import get_test_fn
 from ezmsg.sigproc.synth import (
     clock, aclock, Clock, ClockSettings,
     acounter, Counter, CounterSettings,
-    sin, SinGenerator, SinGeneratorSettings
+    sin, SinGenerator, SinGeneratorSettings,
+    EEGSynth, EEGSynthSettings
 )
 
 
@@ -300,3 +301,65 @@ def test_sin_gen(
 
 
 # TODO: test SinGenerator in a system.
+
+
+class TestEEGSynthSettings(ez.Settings):
+    synth_settings: EEGSynthSettings
+    log_settings: MessageLoggerSettings
+    term_settings: TerminateOnTotalSettings = field(default_factory=TerminateOnTotalSettings)
+
+
+class TestEEGSynthIntegration(ez.Collection):
+    SETTINGS: TestEEGSynthSettings
+
+    SOURCE = EEGSynth()
+    SINK = MessageLogger()
+    TERM = TerminateOnTotal()
+
+    def configure(self) -> None:
+        self.SOURCE.apply_settings(self.SETTINGS.synth_settings)
+        self.SINK.apply_settings(self.SETTINGS.log_settings)
+        self.TERM.apply_settings(self.SETTINGS.term_settings)
+
+    def network(self) -> ez.NetworkDefinition:
+        return (
+            (self.SOURCE.OUTPUT_SIGNAL, self.SINK.INPUT_MESSAGE),
+            (self.SINK.OUTPUT_MESSAGE, self.TERM.INPUT_MESSAGE)
+        )
+
+
+def test_eegsynth_system(
+    test_name: typing.Optional[str] = None,
+):
+    # Just a quick test to make sure the system runs. We aren't checking validity of values or anything.
+    fs = 500.
+    n_time = 100  # samples per block. dispatch_rate = fs / n_time
+    target_dur = 2.0
+    target_messages = int(target_dur * fs / n_time)
+
+    test_filename = get_test_fn(test_name)
+    ez.logger.info(test_filename)
+
+    settings = TestEEGSynthSettings(
+        synth_settings=EEGSynthSettings(
+            fs=fs,
+            n_time=n_time,
+            alpha_freq=10.5,
+            n_ch=8,
+        ),
+        log_settings=MessageLoggerSettings(
+            output=test_filename,
+        ),
+        term_settings=TerminateOnTotalSettings(
+            total=target_messages,
+        )
+    )
+
+    system = TestEEGSynthIntegration(settings)
+    ez.run(SYSTEM=system)
+
+    messages: typing.List[AxisArray] = [_ for _ in message_log(test_filename)]
+    os.remove(test_filename)
+    agg = AxisArray.concatenate(*messages, dim="time")
+    assert agg.axes["time"].gain == 1 / fs
+    assert agg.data.ndim == 2
