@@ -103,7 +103,7 @@ def spectrum(
             n_time = axis_arr_in.data.shape[axis_idx]
             freqs = np.fft.fftshift(np.fft.fftfreq(n_time, d=_axis.gain), axes=-1)
             window = WINDOWS[window](n_time)
-            window = window.reshape([1] * axis_idx + [len(window),] + [1] * (axis_arr_in.data.ndim-2))
+            window = window.reshape([1] * axis_idx + [len(window),] + [1] * (axis_arr_in.data.ndim - 1 - axis_idx))
             if (transform != SpectralTransform.RAW_COMPLEX and
                     not (transform == SpectralTransform.REAL or transform == SpectralTransform.IMAG)):
                 scale = np.sum(window ** 2.0) * _axis.gain
