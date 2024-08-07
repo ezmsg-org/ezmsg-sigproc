@@ -232,17 +232,19 @@ class Window(GenAxisArray):
                     win_axis = out_msg.axes["win"]
                     offsets = np.arange(out_msg.data.shape[axis_idx]) * win_axis.gain + win_axis.offset
                     for msg_ix in range(out_msg.data.shape[axis_idx]):
+                        # Need to drop 'win' and replace self.SETTINGS.axis from axes.
+                        _out_axes = {
+                            **{k: v for k, v in out_msg.axes.items() if k not in ["win", self.SETTINGS.axis]},
+                            self.SETTINGS.axis: replace(
+                                out_msg.axes[self.SETTINGS.axis],
+                                offset=offsets[msg_ix]
+                            )
+                        }
                         _out_msg = replace(
                             out_msg,
                             data=slice_along_axis(out_msg.data, msg_ix, axis_idx),
                             dims=out_msg.dims[:axis_idx] + out_msg.dims[axis_idx + 1:],
-                            axes={
-                                **out_msg.axes,
-                                self.SETTINGS.axis: replace(
-                                    out_msg.axes[self.SETTINGS.axis],
-                                    offset=offsets[msg_ix]
-                                )
-                            }
+                            axes=_out_axes
                         )
                         yield self.OUTPUT_SIGNAL, _out_msg
         except (StopIteration, GeneratorExit):
