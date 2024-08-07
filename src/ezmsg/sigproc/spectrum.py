@@ -159,32 +159,17 @@ class SpectrumSettings(ez.Settings):
     output: SpectralOutput = SpectralOutput.POSITIVE
 
 
-class SpectrumState(ez.State):
-    gen: Generator
-    cur_settings: SpectrumSettings
-
-
 class Spectrum(GenAxisArray):
     """Unit for :obj:`spectrum`"""
     SETTINGS: SpectrumSettings
-    STATE: SpectrumState
 
     INPUT_SETTINGS = ez.InputStream(SpectrumSettings)
 
-    def initialize(self) -> None:
-        self.STATE.cur_settings = self.SETTINGS
-        super().initialize()
-
-    @ez.subscriber(INPUT_SETTINGS)
-    async def on_settings(self, msg: SpectrumSettings):
-        self.STATE.cur_settings = msg
-        self.construct_generator()
-
     def construct_generator(self):
         self.STATE.gen = spectrum(
-            axis=self.STATE.cur_settings.axis,
-            out_axis=self.STATE.cur_settings.out_axis,
-            window=self.STATE.cur_settings.window,
-            transform=self.STATE.cur_settings.transform,
-            output=self.STATE.cur_settings.output
+            axis=self.SETTINGS.axis,
+            out_axis=self.SETTINGS.out_axis,
+            window=self.SETTINGS.window,
+            transform=self.SETTINGS.transform,
+            output=self.SETTINGS.output
         )
