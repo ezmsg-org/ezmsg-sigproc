@@ -1,3 +1,4 @@
+import traceback
 import typing
 
 import ezmsg.core as ez
