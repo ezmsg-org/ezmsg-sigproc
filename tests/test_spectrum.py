@@ -154,6 +154,7 @@ def test_spectrum_cmplx_vs_sps_fft():
         msg_dur=win_dur,
         win_step_dur=win_step_dur
     )
+    nfft = 1 << (messages[0].data.shape[0] - 1).bit_length()  # nextpow2
     gen = spectrum(
         axis="time",
         window=WindowFunction.NONE,
@@ -161,10 +162,11 @@ def test_spectrum_cmplx_vs_sps_fft():
         output=SpectralOutput.FULL,
         norm="backward",
         do_fftshift=False,
+        nfft=nfft
     )
     results = [gen.send(msg) for msg in messages]
     test_spec = results[0].data
-    sp_res = sp_fft.fft(messages[0].data, axis=0)
+    sp_res = sp_fft.fft(messages[0].data, n=nfft, axis=0)
     assert np.allclose(test_spec, sp_res)
 
 
