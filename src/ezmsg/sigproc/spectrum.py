@@ -116,7 +116,7 @@ def spectrum(
             nfft = nfft or n_time
             freqs = np.fft.fftfreq(nfft, d=_axis.gain * n_time / nfft)
             if b_shift:
-                freqs = np.fft.fftshift(freqs, axis=-1)
+                freqs = np.fft.fftshift(freqs, axes=-1)
             window = WINDOWS[window](n_time)
             window = window.reshape([1] * axis_idx + [len(window),] + [1] * (axis_arr_in.data.ndim - 1 - axis_idx))
             if (transform != SpectralTransform.RAW_COMPLEX and
