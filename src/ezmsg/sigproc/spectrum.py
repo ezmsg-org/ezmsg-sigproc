@@ -89,6 +89,7 @@ def spectrum(
     axis_name = axis
     axis_idx = None
     n_time = None
+    apply_window = window != WindowFunction.NONE
 
     while True:
         axis_arr_in = yield axis_arr_out
@@ -133,7 +134,11 @@ def spectrum(
         new_axes = {k: v for k, v in axis_arr_in.axes.items() if k not in [out_axis, axis_name]}
         new_axes[out_axis] = freq_axis
 
-        spec = np.fft.fft(axis_arr_in.data * window, axis=axis_idx) / n_time
+        if apply_window:
+            win_dat = axis_arr_in.data * window
+        else:
+            win_dat = axis_arr_in.data
+        spec = np.fft.fft(win_dat, axis=axis_idx) / n_time
         spec = np.fft.fftshift(spec, axes=axis_idx)
         spec = f_transform(spec)
 
