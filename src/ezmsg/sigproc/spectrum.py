@@ -68,6 +68,7 @@ def spectrum(
     output: SpectralOutput = SpectralOutput.POSITIVE,
     norm: typing.Optional[str] = "forward",
     do_fftshift: bool = True,
+    nfft: typing.Optional[int] = None,
 ) -> typing.Generator[AxisArray, AxisArray, None]:
     """
     Calculate a spectrum on a data slice.
@@ -84,6 +85,7 @@ def spectrum(
           See numpy.fft.fft for details.
         do_fftshift: Whether to apply fftshift to the output. Default is True. This value is ignored unless
           output is SpectralOutput.FULL.
+        nfft: The number of points to use for the FFT. If None, the length of the input data is used.
 
     Returns:
         A primed generator object that expects `.send(axis_array)` of continuous data
@@ -111,7 +113,8 @@ def spectrum(
             axis_idx = axis_arr_in.get_axis_idx(axis_name)
             _axis = axis_arr_in.get_axis(axis_name)
             n_time = axis_arr_in.data.shape[axis_idx]
-            freqs = np.fft.fftfreq(n_time, d=_axis.gain)
+            nfft = nfft or n_time
+            freqs = np.fft.fftfreq(nfft, d=_axis.gain * n_time / nfft)
             if b_shift:
                 freqs = np.fft.fftshift(freqs, axis=-1)
             window = WINDOWS[window](n_time)
@@ -121,9 +124,9 @@ def spectrum(
                 scale = np.sum(window ** 2.0) * _axis.gain
             axis_offset = freqs[0]
             if output == SpectralOutput.POSITIVE:
-                axis_offset = freqs[n_time // 2]
+                axis_offset = freqs[nfft // 2]
             freq_axis = AxisArray.Axis(
-                unit="Hz", gain=1.0 / (_axis.gain * n_time), offset=axis_offset
+                unit="Hz", gain=1.0 / (_axis.gain * nfft), offset=axis_offset
             )
             if out_axis is None:
                 out_axis = axis_name
@@ -149,16 +152,16 @@ def spectrum(
             win_dat = axis_arr_in.data * window
         else:
             win_dat = axis_arr_in.data
-        spec = np.fft.fft(win_dat, axis=axis_idx, norm=norm)  # norm="forward" equivalent to `/ n_time`
+        spec = np.fft.fft(win_dat, n=nfft, axis=axis_idx, norm=norm)  # norm="forward" equivalent to `/ nfft`
         if b_shift:
             spec = np.fft.fftshift(spec, axes=axis_idx)
         spec = f_transform(spec)
 
         if output == SpectralOutput.POSITIVE:
-            spec = slice_along_axis(spec, slice(n_time // 2, None), axis_idx)
+            spec = slice_along_axis(spec, slice(nfft // 2, None), axis_idx)
 
         elif output == SpectralOutput.NEGATIVE:
-            spec = slice_along_axis(spec, slice(None, n_time // 2), axis_idx)
+            spec = slice_along_axis(spec, slice(None, nfft // 2), axis_idx)
 
         axis_arr_out = replace(axis_arr_in, data=spec, dims=new_dims, axes=new_axes)
 
