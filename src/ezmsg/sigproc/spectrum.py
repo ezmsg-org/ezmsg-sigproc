@@ -1,6 +1,6 @@
 from dataclasses import replace
 import enum
-from typing import Optional, Generator, AsyncGenerator
+import typing
 
 import numpy as np
 import ezmsg.core as ez
@@ -61,12 +61,14 @@ class SpectralOutput(OptionsEnum):
 
 @consumer
 def spectrum(
-    axis: Optional[str] = None,
-    out_axis: Optional[str] = "freq",
+    axis: typing.Optional[str] = None,
+    out_axis: typing.Optional[str] = "freq",
     window: WindowFunction = WindowFunction.HANNING,
     transform: SpectralTransform = SpectralTransform.REL_DB,
-    output: SpectralOutput = SpectralOutput.POSITIVE
-) -> Generator[AxisArray, AxisArray, None]:
+    output: SpectralOutput = SpectralOutput.POSITIVE,
+    # norm: typing.Optional[str] = "forward",
+    # do_fftshift: bool = True,
+) -> typing.Generator[AxisArray, AxisArray, None]:
     """
     Calculate a spectrum on a data slice.
 
@@ -156,9 +158,9 @@ class SpectrumSettings(ez.Settings):
     Settings for :obj:`Spectrum.
     See :obj:`spectrum` for a description of the parameters.
     """
-    axis: Optional[str] = None
-    # n: Optional[int] = None # n parameter for fft
-    out_axis: Optional[str] = "freq"  # If none; don't change dim name
+    axis: typing.Optional[str] = None
+    # n: typing.Optional[int] = None # n parameter for fft
+    out_axis: typing.Optional[str] = "freq"  # If none; don't change dim name
     window: WindowFunction = WindowFunction.HAMMING
     transform: SpectralTransform = SpectralTransform.REL_DB
     output: SpectralOutput = SpectralOutput.POSITIVE
