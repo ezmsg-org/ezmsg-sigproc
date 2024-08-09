@@ -138,7 +138,7 @@ def test_spectrum_gen(
     # _debug_plot_welch(messages[0], results[0], welch_db=True)
 
 
-def test_spectrum_cmplx_vs_sps_fftn():
+def test_spectrum_cmplx_vs_sps_fft():
     # spectrum uses np.fft. Here we compare the output of spectrum against scipy.fft.fftn
     win_dur = 1.0
     win_step_dur = 0.5
@@ -158,17 +158,13 @@ def test_spectrum_cmplx_vs_sps_fftn():
         axis="time",
         window=WindowFunction.NONE,
         transform=SpectralTransform.RAW_COMPLEX,
-        output=SpectralOutput.FULL
+        output=SpectralOutput.FULL,
+        norm="backward",
+        do_fftshift=False,
     )
     results = [gen.send(msg) for msg in messages]
-    # Unshift the freq axis to match sp_fft.fftn
-    # fvec = results[0].axes["freq"].offset + np.arange(results[0].data.shape[0]) * results[0].axes["freq"].gain
-    # fvec = np.fft.ifftshift(fvec)
-    test_spec = np.fft.ifftshift(results[0].data, axes=0)
-    # Unscale.
-    s = messages[0].data.shape[0]
-    test_spec *= s
-    sp_res = sp_fft.fftn(messages[0].data, s=s, axes=(0,))
+    test_spec = results[0].data
+    sp_res = sp_fft.fft(messages[0].data, axis=0)
     assert np.allclose(test_spec, sp_res)
 
 
