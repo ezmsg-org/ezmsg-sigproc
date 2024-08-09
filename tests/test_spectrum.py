@@ -5,6 +5,8 @@ import pytest
 import typing
 
 import numpy as np
+import scipy.signal as sps
+import scipy.fft as sp_fft
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
 from ezmsg.sigproc.spectrum import (
@@ -19,7 +21,6 @@ from util import get_test_fn, create_messages_with_periodic_signal, assert_messa
 
 
 def _debug_plot_welch(raw: AxisArray, result: AxisArray, welch_db: bool = True):
-    import scipy.signal
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots(2, 1)
@@ -41,7 +42,7 @@ def _debug_plot_welch(raw: AxisArray, result: AxisArray, welch_db: bool = True):
     ax[1].plot(f_vec, ch0_spec, label="calculated", linewidth=2.0)
     ax[1].set_xlabel("Frequency (Hz)")
 
-    f, Pxx = scipy.signal.welch(ch0_raw, fs=1 / raw.axes["time"].gain, window="hamming", nperseg=len(ch0_raw))
+    f, Pxx = sps.welch(ch0_raw, fs=1 / raw.axes["time"].gain, window="hamming", nperseg=len(ch0_raw))
     if welch_db:
         Pxx = 10 * np.log10(Pxx)
     ax[1].plot(f, Pxx, label="welch", color="tab:orange", linestyle="--")
@@ -135,6 +136,40 @@ def test_spectrum_gen(
     assert "ch" in results[0].dims
     assert "win" not in results[0].dims
     # _debug_plot_welch(messages[0], results[0], welch_db=True)
+
+
+def test_spectrum_cmplx_vs_sps_fftn():
+    # spectrum uses np.fft. Here we compare the output of spectrum against scipy.fft.fftn
+    win_dur = 1.0
+    win_step_dur = 0.5
+    fs = 1000.0
+    sin_params = [
+        {"a": 1.0, "f": 10.0, "p": 0.0, "dur": 20.0},
+        {"a": 0.5, "f": 20.0, "p": np.pi / 7, "dur": 20.0},
+        {"a": 0.2, "f": 200.0, "p": np.pi / 11, "dur": 20.0},
+    ]
+    messages = create_messages_with_periodic_signal(
+        sin_params=sin_params,
+        fs=fs,
+        msg_dur=win_dur,
+        win_step_dur=win_step_dur
+    )
+    gen = spectrum(
+        axis="time",
+        window=WindowFunction.NONE,
+        transform=SpectralTransform.RAW_COMPLEX,
+        output=SpectralOutput.FULL
+    )
+    results = [gen.send(msg) for msg in messages]
+    # Unshift the freq axis to match sp_fft.fftn
+    # fvec = results[0].axes["freq"].offset + np.arange(results[0].data.shape[0]) * results[0].axes["freq"].gain
+    # fvec = np.fft.ifftshift(fvec)
+    test_spec = np.fft.ifftshift(results[0].data, axes=0)
+    # Unscale.
+    s = messages[0].data.shape[0]
+    test_spec *= s
+    sp_res = sp_fft.fftn(messages[0].data, s=s, axes=(0,))
+    assert np.allclose(test_spec, sp_res)
 
 
 class TestSpectrumSettings(ez.Settings):
