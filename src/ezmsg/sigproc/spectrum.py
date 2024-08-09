@@ -66,8 +66,8 @@ def spectrum(
     window: WindowFunction = WindowFunction.HANNING,
     transform: SpectralTransform = SpectralTransform.REL_DB,
     output: SpectralOutput = SpectralOutput.POSITIVE,
-    # norm: typing.Optional[str] = "forward",
-    # do_fftshift: bool = True,
+    norm: typing.Optional[str] = "forward",
+    do_fftshift: bool = True,
 ) -> typing.Generator[AxisArray, AxisArray, None]:
     """
     Calculate a spectrum on a data slice.
@@ -78,6 +78,12 @@ def spectrum(
         window: The :obj:`WindowFunction` to apply to the data slice prior to calculating the spectrum.
         transform: The :obj:`SpectralTransform` to apply to the spectral magnitude.
         output: The :obj:`SpectralOutput` format.
+        norm: Normalization mode. Default "forward" is best used when the inverse transform is not needed,
+          for example when the goal is to get spectral power. Use "backward" (equivalent to None) to not
+          scale the spectrum which is useful when the spectra will be manipulated and possibly inverse-transformed.
+          See numpy.fft.fft for details.
+        do_fftshift: Whether to apply fftshift to the output. Default is True. This value is ignored unless
+          output is SpectralOutput.FULL.
 
     Returns:
         A primed generator object that expects `.send(axis_array)` of continuous data
@@ -92,6 +98,7 @@ def spectrum(
     axis_idx = None
     n_time = None
     apply_window = window != WindowFunction.NONE
+    b_shift = do_fftshift or output != SpectralOutput.FULL
 
     while True:
         axis_arr_in = yield axis_arr_out
@@ -104,7 +111,9 @@ def spectrum(
             axis_idx = axis_arr_in.get_axis_idx(axis_name)
             _axis = axis_arr_in.get_axis(axis_name)
             n_time = axis_arr_in.data.shape[axis_idx]
-            freqs = np.fft.fftshift(np.fft.fftfreq(n_time, d=_axis.gain), axes=-1)
+            freqs = np.fft.fftfreq(n_time, d=_axis.gain)
+            if b_shift:
+                freqs = np.fft.fftshift(freqs, axis=-1)
             window = WINDOWS[window](n_time)
             window = window.reshape([1] * axis_idx + [len(window),] + [1] * (axis_arr_in.data.ndim - 1 - axis_idx))
             if (transform != SpectralTransform.RAW_COMPLEX and
@@ -140,8 +149,9 @@ def spectrum(
             win_dat = axis_arr_in.data * window
         else:
             win_dat = axis_arr_in.data
-        spec = np.fft.fft(win_dat, axis=axis_idx) / n_time
-        spec = np.fft.fftshift(spec, axes=axis_idx)
+        spec = np.fft.fft(win_dat, axis=axis_idx, norm=norm)  # norm="forward" equivalent to `/ n_time`
+        if b_shift:
+            spec = np.fft.fftshift(spec, axes=axis_idx)
         spec = f_transform(spec)
 
         if output == SpectralOutput.POSITIVE:
