@@ -8,6 +8,7 @@ import scipy.signal as sps
 import scipy.fft as sp_fft
 from scipy.special import lambertw
 import numpy.typing as npt
+import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.generator import consumer
 from ezmsg.sigproc.filter import filtergen
@@ -179,3 +180,21 @@ def filterbank(
                 data=res,
                 axes={**template.axes, axis: msg_in.axes[axis]}
             )
+
+
+class FilterbankSettings(ez.Settings):
+    kernels: typing.Union[list[npt.NDArray], tuple[npt.NDArray, ...]]
+    mode: FilterbankMode = FilterbankMode.CONV
+    axis: str = "time"
+
+
+class Filterbank(GenAxisArray):
+    """Unit for :obj:`spectrum`"""
+    SETTINGS: FilterbankSettings
+
+    INPUT_SETTINGS = ez.InputStream(FilterbankSettings)
+
+    def construct_generator(self):
+        self.STATE.gen = filterbank(
+            kernels=self.SETTINGS.kernels, mode=self.SETTINGS.mode, axis=self.SETTINGS.axis
+        )
