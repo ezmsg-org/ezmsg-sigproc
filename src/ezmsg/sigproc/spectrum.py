@@ -1,5 +1,6 @@
 from dataclasses import replace
 import enum
+from functools import partial
 import typing
 
 import numpy as np
@@ -100,7 +101,8 @@ def spectrum(
     axis_idx = None
     n_time = None
     apply_window = window != WindowFunction.NONE
-    b_shift = do_fftshift or output != SpectralOutput.FULL
+    do_fftshift &= output == SpectralOutput.FULL
+    f_sl = slice(None)
 
     while True:
         axis_arr_in = yield axis_arr_out
@@ -114,19 +116,34 @@ def spectrum(
             _axis = axis_arr_in.get_axis(axis_name)
             n_time = axis_arr_in.data.shape[axis_idx]
             nfft = nfft or n_time
-            freqs = np.fft.fftfreq(nfft, d=_axis.gain * n_time / nfft)
-            if b_shift:
-                freqs = np.fft.fftshift(freqs, axes=-1)
+
+            # Pre-calculate windowing
             window = WINDOWS[window](n_time)
             window = window.reshape([1] * axis_idx + [len(window),] + [1] * (axis_arr_in.data.ndim - 1 - axis_idx))
             if (transform != SpectralTransform.RAW_COMPLEX and
                     not (transform == SpectralTransform.REAL or transform == SpectralTransform.IMAG)):
                 scale = np.sum(window ** 2.0) * _axis.gain
-            axis_offset = freqs[0]
-            if output == SpectralOutput.POSITIVE:
-                axis_offset = freqs[nfft // 2]
+
+            # Pre-calculate frequencies and select our fft function.
+            b_complex = axis_arr_in.data.dtype.kind == "c"
+            if (not b_complex) and output == SpectralOutput.POSITIVE:
+                # If input is not complex and desired output is SpectralOutput.POSITIVE, we can save some computation
+                #  by using rfft and rfftfreq.
+                fftfun = partial(np.fft.rfft, n=nfft, axis=axis_idx, norm=norm)
+                freqs = np.fft.rfftfreq(nfft, d=_axis.gain * n_time / nfft)
+            else:
+                fftfun = partial(np.fft.fft, n=nfft, axis=axis_idx, norm=norm)
+                freqs = np.fft.fftfreq(nfft, d=_axis.gain * n_time / nfft)
+                if output == SpectralOutput.POSITIVE:
+                    f_sl = slice(None, nfft // 2 + 1 - (nfft % 2))
+                elif output == SpectralOutput.NEGATIVE:
+                    freqs = np.fft.fftshift(freqs, axes=-1)
+                    f_sl = slice(None, nfft // 2 + 1)
+                elif do_fftshift:  # and FULL
+                    freqs = np.fft.fftshift(freqs, axes=-1)
+                freqs = freqs[f_sl]
             freq_axis = AxisArray.Axis(
-                unit="Hz", gain=1.0 / (_axis.gain * nfft), offset=axis_offset
+                unit="Hz", gain=freqs[1] - freqs[0], offset=freqs[0]
             )
             if out_axis is None:
                 out_axis = axis_name
@@ -152,16 +169,11 @@ def spectrum(
             win_dat = axis_arr_in.data * window
         else:
             win_dat = axis_arr_in.data
-        spec = np.fft.fft(win_dat, n=nfft, axis=axis_idx, norm=norm)  # norm="forward" equivalent to `/ nfft`
-        if b_shift:
+        spec = fftfun(win_dat, n=nfft, axis=axis_idx, norm=norm)  # norm="forward" equivalent to `/ nfft`
+        if do_fftshift or output == SpectralOutput.NEGATIVE:
             spec = np.fft.fftshift(spec, axes=axis_idx)
         spec = f_transform(spec)
-
-        if output == SpectralOutput.POSITIVE:
-            spec = slice_along_axis(spec, slice(nfft // 2, None), axis_idx)
-
-        elif output == SpectralOutput.NEGATIVE:
-            spec = slice_along_axis(spec, slice(None, nfft // 2), axis_idx)
+        spec = slice_along_axis(spec, f_sl, axis_idx)
 
         axis_arr_out = replace(axis_arr_in, data=spec, dims=new_dims, axes=new_axes)
 
