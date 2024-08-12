@@ -13,11 +13,21 @@ from ezmsg.util.generator import consumer
 from ezmsg.sigproc.filter import filtergen
 from ezmsg.sigproc.window import windowing
 
+from .base import GenAxisArray
+from .spectrum import OptionsEnum
+
+
+class FilterbankMode(OptionsEnum):
+    """The mode of operation for the filterbank."""
+    CONV = "Direct Convolution"
+    FFT = "FFT Convolution"
+    AUTO = "Automatic"
+
 
 @consumer
 def filterbank(
     kernels: typing.Union[list[npt.NDArray], tuple[npt.NDArray, ...]],
-    mode: str = "conv",
+    mode: FilterbankMode = FilterbankMode.CONV,
     axis: str = "time",
 ) -> typing.Generator[AxisArray, AxisArray, None]:
     """
@@ -43,18 +53,18 @@ def filterbank(
     while True:
         msg_in: AxisArray = yield msg_out
 
-        if template is None or mode == "auto":  # or (mode == "fft" and win_len < in_dat.shape[ax_ix] < max_win_len):
+        if template is None or mode == FilterbankMode.AUTO:
             fs = 1 / msg_in.axes["time"].gain if "time" in msg_in.axes else 1.0
             ax_ix = msg_in.get_axis_idx(axis)
-            if mode == "auto":
+            if mode == FilterbankMode.AUTO:
                 # concatenate kernels into 1 mega kernel then check what's faster.
                 # Will typically return fft when combined kernel length is > 1500.
                 concat_kernel = np.concatenate(kernels)
                 n_dummy = max(2 * len(concat_kernel), int(0.1 * fs))
                 dummy_arr = np.zeros(n_dummy)
                 mode = sps.choose_conv_method(dummy_arr, concat_kernel, mode="full")
-                mode = "conv" if mode == "direct" else "fft"
-            if mode == "conv":
+                mode = FilterbankMode.CONV if mode == "direct" else FilterbankMode.FFT
+            if mode == FilterbankMode.CONV:
                 # Note: Instead of filtergen, we could use np.convolve directly and manually manage overlap-add.
                 #  We should reconsider this after we finish managing overlap add for fft filtering.
                 #  out_full = np.apply_along_axis(lambda y: np.convolve(b, y), axis, x)
@@ -66,7 +76,7 @@ def filterbank(
                     dims=msg_in.dims[:ax_ix] + msg_in.dims[ax_ix + 1:] + ["filter", axis],
                     axes=msg_in.axes.copy()  # No idea what to use to fill 'filter' axis.
                 )
-            elif mode == "fft":
+            elif mode == FilterbankMode.FFT:
                 # Note: We should not pass this off to multiple (non-existing) fftconvolve nodes, because here we
                 #  can calculate the FFT on the data only once which is then shared across kernels.
 
@@ -130,7 +140,7 @@ def filterbank(
                     axes=msg_in.axes.copy()  # No idea what to use to fill 'filter' axis.
                 )
 
-        if mode == "conv":
+        if mode == FilterbankMode.CONV:
             # for each filtergen, send the message, accumulate outputs, stack along "filter" axis.
             filtres = [fg.send(msg_in).data for fg in filtergens]  # TODO: parallelize!?
             msg_out = replace(
@@ -138,7 +148,7 @@ def filterbank(
                 data=np.stack(filtres, axis=-2),
                 axes={**template.axes, axis: msg_in.axes[axis]}
             )
-        elif mode == "fft":
+        elif mode == FilterbankMode.FFT:
             # Make sure target axis is in -1th position.
             targ_ax_ix = msg_in.get_axis_idx(axis)
             if targ_ax_ix != (msg_in.data.ndim - 1):
