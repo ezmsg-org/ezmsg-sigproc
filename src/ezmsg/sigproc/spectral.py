@@ -4,6 +4,5 @@ from .spectrum import (
     SpectralTransform,
     SpectralOutput,
     SpectrumSettings,
-    SpectrumState,
     Spectrum
 )
