@@ -92,7 +92,7 @@ def test_spectrum_gen_multiwin(
     assert result.axes["freq"].gain == 1 / win_dur
     assert "freq" in result.dims
     fax_ix = result.get_axis_idx("freq")
-    f_len = win_len if output == SpectralOutput.FULL else win_len // 2
+    f_len = win_len if output == SpectralOutput.FULL else (win_len // 2 + 1 - (win_len % 2))
     assert result.data.shape[fax_ix] == f_len
     f_vec = result.axes["freq"].gain * np.arange(f_len) + result.axes["freq"].offset
     if output == SpectralOutput.NEGATIVE:
@@ -138,7 +138,8 @@ def test_spectrum_gen(
     # _debug_plot_welch(messages[0], results[0], welch_db=True)
 
 
-def test_spectrum_cmplx_vs_sps_fft():
+@pytest.mark.parametrize("complex", [False, True])
+def test_spectrum_vs_sps_fft(complex: bool):
     # spectrum uses np.fft. Here we compare the output of spectrum against scipy.fft.fftn
     win_dur = 1.0
     win_step_dur = 0.5
@@ -155,18 +156,22 @@ def test_spectrum_cmplx_vs_sps_fft():
         win_step_dur=win_step_dur
     )
     nfft = 1 << (messages[0].data.shape[0] - 1).bit_length()  # nextpow2
+
     gen = spectrum(
         axis="time",
         window=WindowFunction.NONE,
-        transform=SpectralTransform.RAW_COMPLEX,
-        output=SpectralOutput.FULL,
+        transform=SpectralTransform.RAW_COMPLEX if complex else SpectralTransform.REAL,
+        output=SpectralOutput.FULL if complex else SpectralOutput.POSITIVE,
         norm="backward",
         do_fftshift=False,
         nfft=nfft
     )
     results = [gen.send(msg) for msg in messages]
     test_spec = results[0].data
-    sp_res = sp_fft.fft(messages[0].data, n=nfft, axis=0)
+    if complex:
+        sp_res = sp_fft.fft(messages[0].data, n=nfft, axis=0)
+    else:
+        sp_res = sp_fft.rfft(messages[0].data, n=nfft, axis=0).real
     assert np.allclose(test_spec, sp_res)
 
 
@@ -248,4 +253,5 @@ def test_spectrum_system(
     os.remove(test_filename)
     agg = AxisArray.concatenate(*messages, dim="time")
     # Spectral length is half window length because we output only POSITIVE frequencies.
-    assert agg.data.shape == (target_messages, int(window_dur * fs / 2), n_ch)
+    win_len = window_dur * fs
+    assert agg.data.shape == (target_messages, win_len // 2 + 1 - (win_len % 2), n_ch)
