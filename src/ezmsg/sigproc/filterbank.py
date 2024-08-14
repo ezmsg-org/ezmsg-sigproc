@@ -114,12 +114,6 @@ def filterbank(
                 mode = FilterbankMode.CONV if mode == "direct" else FilterbankMode.FFT
 
             if mode == FilterbankMode.CONV:
-                # Prepare kernels
-                prep_kerns = []
-                for k in kernels:
-                    prep_k = np.array(k[..., ::-1]).conj()
-                    prep_k = prep_k.reshape([1] * (msg_in.data.ndim - 1) + [-1])  # expand dims
-                    prep_kerns.append(prep_k)
                 # Preallocate memory for convolution result and overlap-add
                 dest_shape = msg_in.data.shape[:ax_ix] + msg_in.data.shape[ax_ix + 1:]
                 dest_shape += (len(kernels), overlap + msg_in.data.shape[ax_ix])
@@ -180,9 +174,9 @@ def filterbank(
                 dest_arr = np.concatenate(dest_arr, pad, axis=-1)
             dest_arr.fill(0)
             # TODO: Parallelize this loop.
-            for k_ix, k in enumerate(prep_kerns):
+            for k_ix, k in enumerate(kernels):
                 n_out = in_dat.shape[-1] + k.shape[-1] - 1
-                dest_arr[..., k_ix, :n_out] = sps.correlate(in_dat, k, "full", "direct")
+                dest_arr[..., k_ix, :n_out] = np.apply_along_axis(np.convolve, -1, in_dat, k, mode="full")
             dest_arr[..., :overlap] += tail  # Add previous overlap
             new_tail = dest_arr[..., in_dat.shape[-1]:n_dest]
             if new_tail.size > 0:
