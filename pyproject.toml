@@ -12,10 +12,11 @@ readme = "README.md"
 packages = [{ include = "ezmsg", from = "src" }]
 
 [tool.poetry.dependencies]
-python = "^3.8"
+python = "^3.9"
 ezmsg = { git = "https://github.com/ezmsg-org/ezmsg.git", rev = "dev" }
 numpy = "^1.19.5"
 scipy = "^1.6.3"
+pywavelets = "^1.6.0"
 
 [tool.poetry.group.test.dependencies]
 pytest = "^7.0.0"
