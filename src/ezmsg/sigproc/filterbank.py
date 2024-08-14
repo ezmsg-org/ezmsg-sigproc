@@ -93,8 +93,16 @@ def filterbank(
 
             if mode == FilterbankMode.CONV:
                 # Prepare kernels
-                prep_kerns = np.array([k[..., ::-1].conj() for k in kernels])
-                prep_kerns = np.expand_dims(prep_kerns, -2)
+                prep_kerns = []
+                for k in kernels:
+                    prep_k = np.array(k[..., ::-1]).conj()
+                    prep_k = prep_k.reshape([1] * (msg_in.data.ndim - 1) + [-1])  # expand dims
+                    prep_kerns.append(prep_k)
+                # Preallocate memory for convolution result and overlap-add
+                dest_shape = msg_in.data.shape[:ax_ix] + msg_in.data.shape[ax_ix + 1:]
+                dest_shape += (len(kernels), overlap + msg_in.data.shape[ax_ix])
+                dest_arr = np.zeros(dest_shape, dtype="complex" if b_complex else "float")
+
             elif mode == FilterbankMode.FFT:
                 # Calculate optimal nfft and windowing size.
                 opt_size = -overlap * lambertw(-1 / (2 * math.e * overlap), k=-1).real
@@ -144,15 +152,21 @@ def filterbank(
             in_dat = msg_in.data
 
         if mode == FilterbankMode.CONV:
-            # TODO: Next line can be parallelized.
-            overlapped = [sps.correlate(in_dat, k, "full", "direct") for k in prep_kerns]
-            # overlapped = np.apply_along_axis(lambda y: np.convolve(k, y), -1, in_dat)
-            overlapped = np.stack(overlapped, axis=-2)
-            overlapped[..., :overlap] += tail  # Previous iteration's tail
-            new_tail = overlapped[..., -overlap:]
+            n_dest = in_dat.shape[-1] + overlap
+            if dest_arr.shape[-1] < n_dest:
+                pad = np.zeros(dest_arr.shape[:-1] + (n_dest - dest_arr.shape[-1],))
+                dest_arr = np.concatenate(dest_arr, pad, axis=-1)
+            dest_arr.fill(0)
+            # TODO: Parallelize this loop.
+            for k_ix, k in enumerate(prep_kerns):
+                n_out = in_dat.shape[-1] + k.shape[-1] - 1
+                dest_arr[..., k_ix, :n_out] = sps.correlate(in_dat, k, "full", "direct")
+            dest_arr[..., :overlap] += tail  # Add previous overlap
+            new_tail = dest_arr[..., in_dat.shape[-1]:n_dest]
             if new_tail.size > 0:
-                tail = new_tail
-            res = overlapped[..., :-overlap]
+                # COPY overlap for next iteration
+                tail = new_tail.copy()
+            res = dest_arr[..., :in_dat.shape[-1]].copy()
         elif mode == FilterbankMode.FFT:
             # Slice into non-overlapping windows
             win_msg = wingen.send(msg_in)
