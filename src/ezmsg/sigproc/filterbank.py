@@ -11,7 +11,6 @@ import numpy.typing as npt
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.generator import consumer
-from ezmsg.sigproc.filter import filtergen
 from ezmsg.sigproc.window import windowing
 
 from .base import GenAxisArray
@@ -25,10 +24,19 @@ class FilterbankMode(OptionsEnum):
     AUTO = "Automatic"
 
 
+class MinPhaseMode(OptionsEnum):
+    """The mode of operation for the filterbank."""
+    NONE = "No kernel modification"
+    HILBERT = "Hilbert Method; designed to be used with equiripple filters (e.g., from remez) with unity or zero gain regions"
+    HOMOMORPHIC = "Works best with filters with an odd number of taps, and the resulting minimum phase filter will have a magnitude response that approximates the square root of the original filter’s magnitude response using half the number of taps"
+    # HOMOMORPHICFULL = "Like HOMOMORPHIC, but uses the full number of taps and same magnitude"
+
+
 @consumer
 def filterbank(
     kernels: typing.Union[list[npt.NDArray], tuple[npt.NDArray, ...]],
     mode: FilterbankMode = FilterbankMode.CONV,
+    min_phase: MinPhaseMode = MinPhaseMode.NONE,
     axis: str = "time",
     new_axis: str = "kernel",
 ) -> typing.Generator[AxisArray, AxisArray, None]:
@@ -43,6 +51,9 @@ def filterbank(
           incur a delay equal to the window length, which is larger than the largest kernel.
           conv mode is less efficient but will return data for every incoming chunk regardless of how small it is
           and thus can provide shorter latency updates.
+        min_phase: If not None, convert the kernels to minimum-phase equivalents. Valid options are
+          'hilbert', 'homomorphic', and 'homomorphic-full'. Complex filters not supported.
+          See `scipy.signal.minimum_phase` for details.
         axis: The name of the axis to operate on. This should usually be "time".
         new_axis: The name of the new axis corresponding to the kernel index.
 
@@ -59,6 +70,17 @@ def filterbank(
         if template is None or mode == FilterbankMode.AUTO:
             fs = 1 / msg_in.axes["time"].gain if "time" in msg_in.axes else 1.0
             ax_ix = msg_in.get_axis_idx(axis)
+
+            if min_phase != MinPhaseMode.NONE:
+                method, half = {
+                    MinPhaseMode.HILBERT: ("hilbert", False),
+                    MinPhaseMode.HOMOMORPHIC: ("homomorphic", False),
+                    # MinPhaseMode.HOMOMORPHICFULL: ("homomorphic", True),
+                }[min_phase]
+                kernels = [
+                    sps.minimum_phase(k, method=method)  # , half=half)  -- half requires later scipy >= 1.14
+                    for k in kernels
+                ]
 
             # Determine if this will be operating with complex data.
             b_complex = msg_in.data.dtype.kind == "c" or any([_.dtype.kind == "c" for _ in kernels])
@@ -200,6 +222,7 @@ def filterbank(
 class FilterbankSettings(ez.Settings):
     kernels: typing.Union[list[npt.NDArray], tuple[npt.NDArray, ...]]
     mode: FilterbankMode = FilterbankMode.CONV
+    min_phase: MinPhaseMode = MinPhaseMode.NONE
     axis: str = "time"
 
 
@@ -211,5 +234,8 @@ class Filterbank(GenAxisArray):
 
     def construct_generator(self):
         self.STATE.gen = filterbank(
-            kernels=self.SETTINGS.kernels, mode=self.SETTINGS.mode, axis=self.SETTINGS.axis
+            kernels=self.SETTINGS.kernels,
+            mode=self.SETTINGS.mode,
+            min_phase=self.SETTINGS.min_phase,
+            axis=self.SETTINGS.axis
         )
