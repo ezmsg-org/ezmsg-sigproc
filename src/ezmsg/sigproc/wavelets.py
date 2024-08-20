@@ -4,9 +4,11 @@ import typing
 import numpy as np
 import numpy.typing as npt
 import pywt
+import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.generator import consumer
 
+from ezmsg.sigproc.base import GenAxisArray
 from ezmsg.sigproc.filterbank import filterbank, FilterbankMode, MinPhaseMode
 
 
@@ -101,4 +103,30 @@ def cwt(
             template,
             data=coef,
             axes={**template.axes, axis: msg_in.axes[axis]}
+        )
+
+
+class CWTSettings(ez.Settings):
+    """
+    Settings for :obj:`CWT`
+    See :obj:`cwt` for argument details.
+    """
+    scales: typing.Union[list, tuple, npt.NDArray]
+    wavelet: typing.Union[str, pywt.ContinuousWavelet, pywt.Wavelet]
+    min_phase: MinPhaseMode = MinPhaseMode.NONE
+    axis: str = "time"
+
+
+class CWT(GenAxisArray):
+    """
+    :obj:`Unit` for :obj:`common_rereference`.
+    """
+    SETTINGS: CWTSettings
+
+    def construct_generator(self):
+        self.STATE.gen = cwt(
+            scales=self.SETTINGS.scales,
+            wavelet=self.SETTINGS.wavelet,
+            min_phase=self.SETTINGS.min_phase,
+            axis=self.SETTINGS.axis
         )
