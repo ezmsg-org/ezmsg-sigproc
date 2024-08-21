@@ -34,18 +34,26 @@ def affine_transform(
     axis_arr_out = AxisArray(np.array([]), dims=[""])
 
     if isinstance(weights, str):
-        weights = Path(os.path.abspath(os.path.expanduser(weights)))
+        if weights == "passthrough":
+            weights = None
+        else:
+            weights = Path(os.path.abspath(os.path.expanduser(weights)))
     if isinstance(weights, Path):
         weights = np.loadtxt(weights, delimiter=",")
     if not right_multiply:
         weights = weights.T
-    weights = np.ascontiguousarray(weights)
+    if weights is not None:
+        weights = np.ascontiguousarray(weights)
 
     b_first = True
     new_xform_ax: typing.Optional[AxisArray.Axis] = None
 
     while True:
         axis_arr_in = yield axis_arr_out
+
+        if weights is None:
+            axis_arr_out = axis_arr_in
+            continue
 
         if axis is None:
             axis = axis_arr_in.dims[-1]
