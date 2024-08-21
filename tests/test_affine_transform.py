@@ -51,6 +51,20 @@ def test_affine_generator():
     assert np.array_equal(ax_arr_out.data, expected_out)
 
 
+def test_affine_passthrough():
+    n_times = 13
+    n_chans = 64
+    in_dat = np.arange(n_times * n_chans).reshape(n_times, n_chans)
+    axis_arr_in = AxisArray(in_dat, dims=["time", "ch"])
+
+    backup = [copy.deepcopy(axis_arr_in)]
+
+    gen = affine_transform(weights="passthrough", axis="does not matter")
+    ax_arr_out = gen.send(axis_arr_in)
+    assert ax_arr_out.data is in_dat  # This is not desirable in ezmsg pipeline but fine for the generator
+    assert_messages_equal([ax_arr_out], backup)
+
+
 def test_common_rereference():
     n_times = 300
     n_chans = 64
