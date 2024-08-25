@@ -33,8 +33,8 @@ def cwt(
     Returns:
         A Generator object that expects `.send(axis_array)` of continuous data
     """
-    assert np.all(scales > 0), "Scales must be positive."
     scales = np.array(scales)
+    assert np.all(scales > 0), "Scales must be positive."
     assert scales.ndim == 1, "Scales must be a 1D list, tuple, or array."
     neg_rt_scales = -np.sqrt(scales)[:, None]
 
