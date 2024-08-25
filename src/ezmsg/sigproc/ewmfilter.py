@@ -38,7 +38,7 @@ class EWM(ez.Unit):
     INPUT_BUFFER = ez.InputStream(AxisArray)
     OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
 
-    def initialize(self) -> None:
+    async def initialize(self) -> None:
         self.STATE.signal_queue = asyncio.Queue()
         self.STATE.buffer_queue = asyncio.Queue()
 

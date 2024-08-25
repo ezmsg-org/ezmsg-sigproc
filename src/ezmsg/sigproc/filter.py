@@ -130,7 +130,7 @@ class Filter(ez.Unit):
         raise NotImplementedError("Must implement 'design_filter' in Unit subclass!")
 
     # Set up filter with static initialization if specified
-    def initialize(self) -> None:
+    async def initialize(self) -> None:
         if self.SETTINGS.axis is not None:
             self.STATE.axis = self.SETTINGS.axis
 
