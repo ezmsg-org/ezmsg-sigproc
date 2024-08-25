@@ -222,7 +222,7 @@ class FilterbankSettings(ez.Settings):
 
 class Filterbank(GenAxisArray):
     """Unit for :obj:`spectrum`"""
-    SETTINGS: FilterbankSettings
+    SETTINGS = FilterbankSettings
 
     INPUT_SETTINGS = ez.InputStream(FilterbankSettings)
 
