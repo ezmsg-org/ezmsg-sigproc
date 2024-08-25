@@ -60,7 +60,7 @@ class BandPowerSettings(ez.Settings):
 
 class BandPower(GenAxisArray):
     """:obj:`Unit` for :obj:`bandpower`."""
-    SETTINGS: BandPowerSettings
+    SETTINGS = BandPowerSettings
 
     def construct_generator(self):
         self.STATE.gen = bandpower(

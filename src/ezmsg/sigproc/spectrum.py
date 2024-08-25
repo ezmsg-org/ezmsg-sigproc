@@ -161,7 +161,7 @@ class SpectrumSettings(ez.Settings):
 
 class Spectrum(GenAxisArray):
     """Unit for :obj:`spectrum`"""
-    SETTINGS: SpectrumSettings
+    SETTINGS = SpectrumSettings
 
     INPUT_SETTINGS = ez.InputStream(SpectrumSettings)
 

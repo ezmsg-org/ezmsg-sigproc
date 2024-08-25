@@ -28,13 +28,13 @@ class ButterworthSystemSettings(ez.Settings):
 
 
 class ButterworthSystem(ez.Collection):
+    SETTINGS = ButterworthSystemSettings
+
     NOISE = WhiteNoise()
     GATE = MessageGate()
     BUTTER = ButterworthFilter()
     LOG = MessageLogger()
     TERM = TerminateTest()
-
-    SETTINGS: ButterworthSystemSettings
 
     def configure(self) -> None:
         self.NOISE.apply_settings(self.SETTINGS.noise_settings)

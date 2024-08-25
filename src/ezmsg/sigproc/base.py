@@ -7,7 +7,7 @@ from ezmsg.util.generator import GenState
 
 
 class GenAxisArray(ez.Unit):
-    STATE: GenState
+    STATE = GenState
 
     INPUT_SIGNAL = ez.InputStream(AxisArray)
     OUTPUT_SIGNAL = ez.OutputStream(AxisArray)

@@ -67,8 +67,8 @@ class ClockState(ez.State):
 
 class Clock(ez.Unit):
     """Unit for :obj:`clock`."""
-    SETTINGS: ClockSettings
-    STATE: ClockState
+    SETTINGS = ClockSettings
+    STATE = ClockState
 
     INPUT_SETTINGS = ez.InputStream(ClockSettings)
     OUTPUT_CLOCK = ez.OutputStream(ez.Flag)
@@ -210,8 +210,8 @@ class CounterState(ez.State):
 class Counter(ez.Unit):
     """Generates monotonically increasing counter. Unit for :obj:`acounter`."""
 
-    SETTINGS: CounterSettings
-    STATE: CounterState
+    SETTINGS = CounterSettings
+    STATE = CounterState
 
     INPUT_CLOCK = ez.InputStream(ez.Flag)
     INPUT_SETTINGS = ez.InputStream(CounterSettings)
@@ -318,7 +318,7 @@ class SinGenerator(GenAxisArray):
     """
     Unit for :obj:`sin`.
     """
-    SETTINGS: SinGeneratorSettings
+    SETTINGS = SinGeneratorSettings
 
     def construct_generator(self):
         self.STATE.gen = sin(
@@ -360,7 +360,7 @@ class Oscillator(ez.Collection):
     """
     :obj:`Collection that chains :obj:`Counter` and :obj:`SinGenerator`.
     """
-    SETTINGS: OscillatorSettings
+    SETTINGS = OscillatorSettings
 
     INPUT_CLOCK = ez.InputStream(ez.Flag)
     OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
@@ -413,7 +413,7 @@ class RandomGenerator(ez.Unit):
     """
     Replaces input data with random data and yields the result.
     """
-    SETTINGS: RandomGeneratorSettings
+    SETTINGS = RandomGeneratorSettings
 
     INPUT_SIGNAL = ez.InputStream(AxisArray)
     OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
@@ -449,7 +449,7 @@ class WhiteNoise(ez.Collection):
     """
     A :obj:`Collection` that chains a :obj:`Counter` and :obj:`RandomGenerator`.
     """
-    SETTINGS: NoiseSettings
+    SETTINGS = NoiseSettings
 
     INPUT_CLOCK = ez.InputStream(ez.Flag)
     OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
@@ -487,7 +487,7 @@ class PinkNoise(ez.Collection):
     """
     A :obj:`Collection` that chains :obj:`WhiteNoise` and :obj:`ButterworthFilter`.
     """
-    SETTINGS: PinkNoiseSettings
+    SETTINGS = PinkNoiseSettings
 
     INPUT_CLOCK = ez.InputStream(ez.Flag)
     OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
@@ -519,7 +519,7 @@ class AddState(ez.State):
 class Add(ez.Unit):
     """Add two signals together.  Assumes compatible/similar axes/dimensions."""
 
-    STATE: AddState
+    STATE = AddState
 
     INPUT_SIGNAL_A = ez.InputStream(AxisArray)
     INPUT_SIGNAL_B = ez.InputStream(AxisArray)
@@ -555,7 +555,7 @@ class EEGSynth(ez.Collection):
     A :obj:`Collection` that chains a :obj:`Clock` to both :obj:`PinkNoise`
     and :obj:`Oscillator`, then :obj:`Add` s the result.
     """
-    SETTINGS: EEGSynthSettings
+    SETTINGS = EEGSynthSettings
 
     OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
 

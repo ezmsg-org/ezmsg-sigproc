@@ -106,8 +106,8 @@ class ButterworthFilterState(FilterState):
 class ButterworthFilter(Filter):
     """:obj:`Unit` for :obj:`butterworth`"""
 
-    SETTINGS: ButterworthFilterSettings
-    STATE: ButterworthFilterState
+    SETTINGS = ButterworthFilterSettings
+    STATE = ButterworthFilterState
 
     INPUT_FILTER = ez.InputStream(ButterworthFilterSettings)
 
