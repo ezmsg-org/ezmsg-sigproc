@@ -132,7 +132,7 @@ class AffineTransformSettings(ez.Settings):
 
 class AffineTransform(GenAxisArray):
     """:obj:`Unit` for :obj:`affine_transform`"""
-    SETTINGS: AffineTransformSettings
+    SETTINGS = AffineTransformSettings
 
     def construct_generator(self):
         self.STATE.gen = affine_transform(
@@ -213,7 +213,7 @@ class CommonRereference(GenAxisArray):
     """
     :obj:`Unit` for :obj:`common_rereference`.
     """
-    SETTINGS: CommonRereferenceSettings
+    SETTINGS = CommonRereferenceSettings
 
     def construct_generator(self):
         self.STATE.gen = common_rereference(

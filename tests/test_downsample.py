@@ -85,7 +85,7 @@ class DownsampleSystem(ez.Collection):
 
     DEBUG = DebugLog()
 
-    SETTINGS: DownsampleSystemSettings
+    SETTINGS = DownsampleSystemSettings
 
     def configure(self) -> None:
         self.COUNT.apply_settings(self.SETTINGS.counter_settings)

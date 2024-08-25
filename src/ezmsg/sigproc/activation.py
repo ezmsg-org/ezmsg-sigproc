@@ -65,7 +65,7 @@ class ActivationSettings(ez.Settings):
 
 
 class Activation(GenAxisArray):
-    SETTINGS: ActivationSettings
+    SETTINGS = ActivationSettings
 
     def construct_generator(self):
         self.STATE.gen = activation(

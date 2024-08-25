@@ -51,7 +51,7 @@ class ScalerTestSystemSettings(ez.Settings):
 
 
 class ScalerTestSystem(ez.Collection):
-    SETTINGS: ScalerTestSystemSettings
+    SETTINGS = ScalerTestSystemSettings
 
     COUNTER = Counter()
     SCALER = AdaptiveStandardScaler()

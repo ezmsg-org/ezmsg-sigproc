@@ -74,7 +74,7 @@ class Spectrogram(GenAxisArray):
     """
     Unit for :obj:`spectrogram`.
     """
-    SETTINGS: SpectrogramSettings
+    SETTINGS = SpectrogramSettings
 
     def construct_generator(self):
         self.STATE.gen = spectrogram(

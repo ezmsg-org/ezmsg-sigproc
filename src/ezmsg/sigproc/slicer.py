@@ -102,7 +102,7 @@ class SlicerSettings(ez.Settings):
 
 
 class Slicer(GenAxisArray):
-    SETTINGS: SlicerSettings
+    SETTINGS = SlicerSettings
 
     def construct_generator(self):
         self.STATE.gen = slicer(

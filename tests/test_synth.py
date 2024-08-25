@@ -65,7 +65,7 @@ class ClockTestSystemSettings(ez.Settings):
 
 
 class ClockTestSystem(ez.Collection):
-    SETTINGS: ClockTestSystemSettings
+    SETTINGS = ClockTestSystemSettings
 
     CLOCK = Clock()
     LOG = MessageLogger()
@@ -174,7 +174,7 @@ class CounterTestSystemSettings(ez.Settings):
 
 
 class CounterTestSystem(ez.Collection):
-    SETTINGS: CounterTestSystemSettings
+    SETTINGS = CounterTestSystemSettings
 
     COUNTER = Counter()
     LOG = MessageLogger()
@@ -310,7 +310,7 @@ class TestEEGSynthSettings(ez.Settings):
 
 
 class TestEEGSynthIntegration(ez.Collection):
-    SETTINGS: TestEEGSynthSettings
+    SETTINGS = TestEEGSynthSettings
 
     SOURCE = EEGSynth()
     SINK = MessageLogger()

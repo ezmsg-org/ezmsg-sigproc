@@ -96,7 +96,7 @@ class SamplerSystemSettings(ez.Settings):
 
 
 class SamplerSystem(ez.Collection):
-    SETTINGS: SamplerSystemSettings
+    SETTINGS = SamplerSystemSettings
 
     OSC = Oscillator()
     TRIGGER = TriggerGenerator()
