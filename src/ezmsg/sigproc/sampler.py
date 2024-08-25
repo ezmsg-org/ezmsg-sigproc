@@ -210,8 +210,8 @@ class SamplerState(ez.State):
 
 class Sampler(ez.Unit):
     """An :obj:`Unit` for :obj:`sampler`."""
-    SETTINGS: SamplerSettings
-    STATE: SamplerState
+    SETTINGS = SamplerSettings
+    STATE = SamplerState
 
     INPUT_TRIGGER = ez.InputStream(SampleTriggerMessage)
     INPUT_SETTINGS = ez.InputStream(SamplerSettings)
@@ -264,7 +264,7 @@ class TriggerGenerator(ez.Unit):
     A unit to generate triggers every `publish_period` interval.
     """
 
-    SETTINGS: TriggerGeneratorSettings
+    SETTINGS = TriggerGeneratorSettings
 
     OUTPUT_TRIGGER = ez.OutputStream(SampleTriggerMessage)
 

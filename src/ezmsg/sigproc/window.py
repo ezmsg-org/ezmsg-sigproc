@@ -203,7 +203,7 @@ class WindowState(ez.State):
 
 class Window(GenAxisArray):
     """:obj:`Unit` for :obj:`bandpower`."""
-    SETTINGS: WindowSettings
+    SETTINGS = WindowSettings
 
     INPUT_SIGNAL = ez.InputStream(AxisArray)
     OUTPUT_SIGNAL = ez.OutputStream(AxisArray)

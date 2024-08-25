@@ -119,8 +119,8 @@ class FilterState(ez.State):
 
 
 class Filter(ez.Unit):
-    SETTINGS: FilterSettingsBase
-    STATE: FilterState
+    SETTINGS = FilterSettingsBase
+    STATE = FilterState
 
     INPUT_FILTER = ez.InputStream(FilterCoefficients)
     INPUT_SIGNAL = ez.InputStream(AxisArray)

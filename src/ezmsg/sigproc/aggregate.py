@@ -132,7 +132,7 @@ class RangedAggregate(GenAxisArray):
     """
     Unit for :obj:`ranged_aggregate`
     """
-    SETTINGS: RangedAggregateSettings
+    SETTINGS = RangedAggregateSettings
 
     def construct_generator(self):
         self.STATE.gen = ranged_aggregate(

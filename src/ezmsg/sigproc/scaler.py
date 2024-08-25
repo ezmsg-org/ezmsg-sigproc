@@ -150,7 +150,7 @@ class AdaptiveStandardScalerSettings(ez.Settings):
 
 class AdaptiveStandardScaler(GenAxisArray):
     """Unit for :obj:`scaler_np`"""
-    SETTINGS: AdaptiveStandardScalerSettings
+    SETTINGS = AdaptiveStandardScalerSettings
 
     def construct_generator(self):
         self.STATE.gen = scaler_np(

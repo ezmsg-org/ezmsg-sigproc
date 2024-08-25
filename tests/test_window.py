@@ -178,7 +178,7 @@ class WindowSystem(ez.Collection):
 
     DEBUG = DebugLog()
 
-    SETTINGS: WindowSystemSettings
+    SETTINGS = WindowSystemSettings
 
     def configure(self) -> None:
         self.COUNTER.apply_settings(self.SETTINGS.counter_settings)

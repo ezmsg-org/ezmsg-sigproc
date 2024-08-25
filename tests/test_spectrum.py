@@ -146,7 +146,7 @@ class TestSpectrumSettings(ez.Settings):
 
 
 class TestSpectrumIntegration(ez.Collection):
-    SETTINGS: TestSpectrumSettings
+    SETTINGS = TestSpectrumSettings
 
     SOURCE = EEGSynth()
     WIN = Window()

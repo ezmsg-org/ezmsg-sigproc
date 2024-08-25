@@ -98,7 +98,7 @@ class DownsampleSettings(ez.Settings):
 
 class Downsample(GenAxisArray):
     """:obj:`Unit` for :obj:`bandpower`."""
-    SETTINGS: DownsampleSettings
+    SETTINGS = DownsampleSettings
 
     def construct_generator(self):
         self.STATE.gen = downsample(

@@ -31,8 +31,8 @@ class EWM(ez.Unit):
     References https://stackoverflow.com/a/42926270
     """
 
-    SETTINGS: EWMSettings
-    STATE: EWMState
+    SETTINGS = EWMSettings
+    STATE = EWMState
 
     INPUT_SIGNAL = ez.InputStream(AxisArray)
     INPUT_BUFFER = ez.InputStream(AxisArray)
@@ -117,7 +117,7 @@ class EWMFilter(ez.Collection):
 
     Consider :obj:`scaler` for a more efficient alternative.
     """
-    SETTINGS: EWMFilterSettings
+    SETTINGS = EWMFilterSettings
 
     INPUT_SIGNAL = ez.InputStream(AxisArray)
     OUTPUT_SIGNAL = ez.OutputStream(AxisArray)

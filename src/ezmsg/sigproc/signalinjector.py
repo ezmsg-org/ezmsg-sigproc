@@ -24,8 +24,8 @@ class SignalInjectorState(ez.State):
 
 
 class SignalInjector(ez.Unit):
-    SETTINGS: SignalInjectorSettings
-    STATE: SignalInjectorState
+    SETTINGS = SignalInjectorSettings
+    STATE = SignalInjectorState
 
     INPUT_FREQUENCY = ez.InputStream(typing.Optional[float])
     INPUT_AMPLITUDE = ez.InputStream(float)
