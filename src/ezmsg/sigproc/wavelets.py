@@ -121,7 +121,7 @@ class CWT(GenAxisArray):
     """
     :obj:`Unit` for :obj:`common_rereference`.
     """
-    SETTINGS: CWTSettings
+    SETTINGS = CWTSettings
 
     def construct_generator(self):
         self.STATE.gen = cwt(
