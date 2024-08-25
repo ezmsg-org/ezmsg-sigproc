@@ -13,7 +13,7 @@ class GenAxisArray(ez.Unit):
     OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
     INPUT_SETTINGS = ez.InputStream(ez.Settings)
 
-    def initialize(self) -> None:
+    async def initialize(self) -> None:
         self.construct_generator()
 
     # Method to be implemented by subclasses to construct the specific generator

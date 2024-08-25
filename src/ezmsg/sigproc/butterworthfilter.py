@@ -111,7 +111,7 @@ class ButterworthFilter(Filter):
 
     INPUT_FILTER = ez.InputStream(ButterworthFilterSettings)
 
-    def initialize(self) -> None:
+    async def initialize(self) -> None:
         self.STATE.design = self.SETTINGS
         self.STATE.filt_designed = True
         super().initialize()
