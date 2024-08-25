@@ -73,7 +73,7 @@ class Clock(ez.Unit):
     INPUT_SETTINGS = ez.InputStream(ClockSettings)
     OUTPUT_CLOCK = ez.OutputStream(ez.Flag)
 
-    def initialize(self) -> None:
+    async def initialize(self) -> None:
         self.STATE.cur_settings = self.SETTINGS
         self.construct_generator()
 

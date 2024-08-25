@@ -227,7 +227,7 @@ class Sampler(ez.Unit):
             estimate_alignment=self.STATE.cur_settings.estimate_alignment
         )
 
-    def initialize(self) -> None:
+    async def initialize(self) -> None:
         self.STATE.cur_settings = self.SETTINGS
         self.construct_generator()
 
