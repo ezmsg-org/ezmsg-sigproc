@@ -1,10 +1,11 @@
 [tool.poetry]
 name = "ezmsg-sigproc"
-version = "1.2.3"
+version = "1.2.4"
 description = "Timeseries signal processing implementations in ezmsg"
 authors = [
   "Milsap, Griffin <griffin.milsap@gmail.com>",
   "Peranich, Preston <pperanich@gmail.com>",
+  "Boulay, Chadwick <chadwick.boulay@gmail.com>"
 ]
 license = "MIT"
 readme = "README.md"
@@ -12,7 +13,7 @@ packages = [{ include = "ezmsg", from = "src" }]
 
 [tool.poetry.dependencies]
 python = "^3.8"
-ezmsg = "^3.4.0"
+ezmsg = { git = "https://github.com/ezmsg-org/ezmsg.git", rev = "dev" }
 numpy = "^1.19.5"
 scipy = "^1.6.3"
 
