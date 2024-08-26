@@ -82,8 +82,8 @@ def test_window_gen_nodur():
 
 @pytest.mark.parametrize("msg_block_size", [1, 5, 10, 20, 60])
 @pytest.mark.parametrize("newaxis", [None, "win"])
-@pytest.mark.parametrize("win_dur", [0.2, 1.0])
-@pytest.mark.parametrize("win_shift", [None, 0.1, 1.0])
+@pytest.mark.parametrize("win_dur", [0.3, 1.0])
+@pytest.mark.parametrize("win_shift", [None, 0.2, 1.0])
 @pytest.mark.parametrize("zero_pad", ["input", "shift", "none"])
 @pytest.mark.parametrize("fs", [10.0, 500.0])
 @pytest.mark.parametrize("time_ax", [0, 1])
@@ -141,7 +141,7 @@ def test_window_generator(
         assert msg.axes["time"].gain == 1/fs
         assert msg.dims == expected_dims
         assert (newaxis or "win") in msg.axes
-        assert msg.axes[(newaxis or "win")].gain == 0.0 if win_shift is None else shift_len / fs
+        assert msg.axes[(newaxis or "win")].gain == (0.0 if win_shift is None else shift_len / fs)
 
     # Post-process the results to yield a single data array and a single vector of offsets.
     win_ax = time_ax
