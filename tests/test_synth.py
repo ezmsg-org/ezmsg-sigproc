@@ -6,6 +6,7 @@ import typing
 
 import numpy as np
 import pytest
+from frozendict import frozendict
 
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
@@ -285,7 +286,11 @@ def test_sin_gen(
     for split_dat in np.array_split(np.arange(n_samples)[:, None], n_msgs, axis=axis_idx):
         _time_axis = AxisArray.Axis.TimeAxis(fs=srate, offset=float(split_dat[0, 0]))
         messages.append(
-            AxisArray(split_dat, dims=["time", "ch"], axes={"time": _time_axis})
+            AxisArray(
+                split_dat,
+                dims=["time", "ch"],
+                axes=frozendict({"time": _time_axis})
+            )
         )
 
     def f_test(t): return amp * np.sin(2 * np.pi * freq * t + phase)

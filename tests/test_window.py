@@ -6,6 +6,7 @@ from typing import Optional, Dict, Any, List, Tuple
 import pytest
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
+from frozendict import frozendict
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messagegate import MessageGate, MessageGateSettings
@@ -70,7 +71,7 @@ def test_window_gen_nodur():
     test_msg = AxisArray(
         data=data,
         dims=["ch", "time"],
-        axes={"time": AxisArray.Axis.TimeAxis(fs=500., offset=0.)}
+        axes=frozendict({"time": AxisArray.Axis.TimeAxis(fs=500., offset=0.)})
     )
     backup = [copy.deepcopy(test_msg)]
     gen = windowing(window_dur=None)
@@ -116,7 +117,7 @@ def test_window_generator(
     test_msg = AxisArray(
         data[..., ()],
         dims=["ch", "time"] if time_ax == 1 else ["time", "ch"],
-        axes={"time": AxisArray.Axis.TimeAxis(fs=fs, offset=0.)}
+        axes=frozendict({"time": AxisArray.Axis.TimeAxis(fs=fs, offset=0.)})
     )
     messages = []
     backup = []
