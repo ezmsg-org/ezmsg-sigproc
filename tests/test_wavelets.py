@@ -15,7 +15,7 @@ def make_chirp(t, t0, a):
     return chirp, frequency
 
 
-def test_scratch():
+def scratch():
     scales = np.geomspace(4, 256, num=35)
     wavelets = [f"cmor{x:.1f}-{y:.1f}" for x in [0.5, 1.5, 2.5] for y in [0.5, 1.0, 1.5]]
     wavelet = wavelets[1]
@@ -102,7 +102,6 @@ def test_cwt():
     out_messages = [gen.send(in_messages[0])]
     out_messages += [gen.send(msg_in) for msg_in in in_messages[1:]]
     result = AxisArray.concatenate(*out_messages, dim="time")
-    print("Done")
 
     # TODO: Compare result to expected
 
