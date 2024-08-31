@@ -4,6 +4,7 @@ from typing import Optional, List
 
 import pytest
 import numpy as np
+from frozendict import frozendict
 
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
@@ -34,12 +35,12 @@ def test_downsample_core(block_size: int, factor: int):
     def msg_generator():
         for msg_ix in range(num_msgs):
             msg_sig = sig[msg_ix*block_size:(msg_ix+1)*block_size]
-            msg_idx = msg_sig[0, 0, 0] / (n_channels * n_features)
+            msg_idx: float = msg_sig[0, 0, 0] / (n_channels * n_features)
             msg_offs = msg_idx / in_fs
             msg = AxisArray(
                 data=msg_sig,
                 dims=["time", "ch", "feat"],
-                axes={"time": AxisArray.Axis.TimeAxis(fs=in_fs, offset=msg_offs)}
+                axes=frozendict({"time": AxisArray.Axis.TimeAxis(fs=in_fs, offset=msg_offs)})
             )
             yield msg
 

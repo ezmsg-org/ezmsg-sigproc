@@ -5,6 +5,7 @@ import typing
 
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
+from frozendict import frozendict
 from ezmsg.util.messages.axisarray import AxisArray
 
 
@@ -72,7 +73,11 @@ def create_messages_with_periodic_signal(
     for split_dat in data_splits:
         _time_axis = AxisArray.Axis.TimeAxis(fs=fs, offset=offset)
         messages.append(
-            AxisArray(split_dat[..., None], dims=["time", "ch"], axes={"time": _time_axis})
+            AxisArray(
+                split_dat[..., None],
+                dims=["time", "ch"],
+                axes=frozendict({"time": _time_axis})
+            )
         )
         offset += split_dat.shape[0] / fs
     return messages

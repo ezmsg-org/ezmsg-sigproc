@@ -2,7 +2,9 @@ import copy
 import os
 from typing import Optional, List
 from dataclasses import field
+
 import numpy as np
+from frozendict import frozendict
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.terminate import TerminateOnTotalSettings, TerminateOnTotal
@@ -23,7 +25,11 @@ def test_adaptive_standard_scaler_river():
         data = np.array([5.278, 5.050, 6.550, 7.446, 9.472, 10.353, 11.784, 11.173])
         expected_result = np.array([0.0, -0.816, 0.812, 0.695, 0.754, 0.598, 0.651, 0.124])
 
-        test_input = AxisArray(np.tile(data, (2, 1)), dims=["ch", "time"], axes={"time": AxisArray.Axis()})
+        test_input = AxisArray(
+            np.tile(data, (2, 1)),
+            dims=["ch", "time"],
+            axes=frozendict({"time": AxisArray.Axis()})
+        )
 
         backup = [copy.deepcopy(test_input)]
 
@@ -115,8 +121,11 @@ def test_scaler_system(
 
     data = np.concatenate([_.data for _ in messages]).squeeze()
 
-    expected_input = AxisArray(np.arange(len(data))[None, :],
-                               dims=["ch", "time"], axes={"time": AxisArray.Axis(gain=1/fs, offset=0.0)})
+    expected_input = AxisArray(
+        np.arange(len(data))[None, :],
+        dims=["ch", "time"],
+        axes=frozendict({"time": AxisArray.Axis(gain=1/fs, offset=0.0)})
+    )
     _scaler = scaler_np(time_constant=tau, axis="time")
     expected_output = _scaler.send(expected_input)
     assert np.allclose(expected_output.data.squeeze(), data)

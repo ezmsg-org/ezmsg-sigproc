@@ -1,5 +1,6 @@
 import copy
 
+from frozendict import frozendict
 import numpy as np
 from ezmsg.util.messages.axisarray import AxisArray
 
@@ -65,9 +66,9 @@ def test_slicer_gen_drop_dim():
     axis_arr_in = AxisArray(
         in_dat,
         dims=["time", "ch"],
-        axes={
+        axes=frozendict({
             "time": AxisArray.Axis.TimeAxis(fs=100.0, offset=0.1),
-        }
+        })
     )
     backup = [copy.deepcopy(axis_arr_in)]
 

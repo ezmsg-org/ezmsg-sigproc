@@ -2,6 +2,7 @@ from functools import partial
 
 import numpy as np
 import pytest
+from frozendict import frozendict
 from ezmsg.util.messages.axisarray import AxisArray
 
 from ezmsg.sigproc.aggregate import ranged_aggregate, AggregationFunction
@@ -25,10 +26,10 @@ def get_msg_gen():
             msg = AxisArray(
                 data=arr,
                 dims=["time", "ch", "freq"],
-                axes={
+                axes=frozendict({
                     "time": AxisArray.Axis.TimeAxis(fs=fs, offset=offset),
                     "freq": AxisArray.Axis(gain=1.0, offset=0.0, unit="Hz")
-                }
+                })
             )
             offset += arr.shape[0] / fs
             yield msg
