@@ -3,6 +3,7 @@ import os
 from typing import Optional, List
 
 import numpy as np
+from frozendict import frozendict
 
 import ezmsg.core as ez
 from ezmsg.util.messagecodec import message_log
@@ -38,7 +39,7 @@ def test_sampler_gen():
         AxisArray(
             data=data[:, ix * n_per_chunk:(ix + 1) * n_per_chunk],
             dims=["ch", "time"],
-            axes={"time": AxisArray.Axis.TimeAxis(fs=fs, offset=offsets[ix * n_per_chunk])}
+            axes=frozendict({"time": AxisArray.Axis.TimeAxis(fs=fs, offset=offsets[ix * n_per_chunk])})
         )
         for ix in range(n_chunks)
     ]

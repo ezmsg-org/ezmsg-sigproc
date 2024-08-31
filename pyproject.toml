@@ -23,6 +23,7 @@ pytest = "^7.0.0"
 pytest-cov = "*"
 pytest-asyncio = "*"
 flake8 = "*"
+frozendict = "^2.4.4"
 
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib"]

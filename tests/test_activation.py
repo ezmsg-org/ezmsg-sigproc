@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 import scipy.special
+from frozendict import frozendict
 
 from ezmsg.util.messages.axisarray import AxisArray
 
@@ -21,7 +22,7 @@ def test_activation(function: str):
             msg = AxisArray(
                 data=msg_sig,
                 dims=["time", "ch", "feat"],
-                axes={"time": AxisArray.Axis.TimeAxis(fs=in_fs, offset=msg_ix / in_fs)}
+                axes=frozendict({"time": AxisArray.Axis.TimeAxis(fs=in_fs, offset=msg_ix / in_fs)})
             )
             yield msg
 
