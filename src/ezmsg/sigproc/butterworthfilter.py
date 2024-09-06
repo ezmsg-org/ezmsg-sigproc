@@ -114,7 +114,7 @@ class ButterworthFilter(Filter):
     async def initialize(self) -> None:
         self.STATE.design = self.SETTINGS
         self.STATE.filt_designed = True
-        super().initialize()
+        await super().initialize()
 
     def design_filter(self) -> typing.Optional[typing.Tuple[np.ndarray, np.ndarray]]:
         specs = self.STATE.design.filter_specs()
