@@ -94,8 +94,7 @@ def spectrum(
     """
 
     # State variables
-    axis_arr_in = AxisArray(np.array([]), dims=[""])
-    axis_arr_out = AxisArray(np.array([]), dims=[""])
+    msg_out = AxisArray(np.array([]), dims=[""])
 
     axis_name = axis
     axis_idx = None
@@ -105,27 +104,27 @@ def spectrum(
     f_sl = slice(None)
 
     while True:
-        axis_arr_in = yield axis_arr_out
+        msg_in: AxisArray = yield msg_out
 
         if axis_name is None:
-            axis_name = axis_arr_in.dims[0]
+            axis_name = msg_in.dims[0]
 
         # Initial setup
-        if n_time is None or axis_idx is None or axis_arr_in.data.shape[axis_idx] != n_time:
-            axis_idx = axis_arr_in.get_axis_idx(axis_name)
-            _axis = axis_arr_in.get_axis(axis_name)
-            n_time = axis_arr_in.data.shape[axis_idx]
+        if n_time is None or axis_idx is None or msg_in.data.shape[axis_idx] != n_time:
+            axis_idx = msg_in.get_axis_idx(axis_name)
+            _axis = msg_in.get_axis(axis_name)
+            n_time = msg_in.data.shape[axis_idx]
             nfft = nfft or n_time
 
             # Pre-calculate windowing
             window = WINDOWS[window](n_time)
-            window = window.reshape([1] * axis_idx + [len(window),] + [1] * (axis_arr_in.data.ndim - 1 - axis_idx))
+            window = window.reshape([1] * axis_idx + [len(window),] + [1] * (msg_in.data.ndim - 1 - axis_idx))
             if (transform != SpectralTransform.RAW_COMPLEX and
                     not (transform == SpectralTransform.REAL or transform == SpectralTransform.IMAG)):
                 scale = np.sum(window ** 2.0) * _axis.gain
 
             # Pre-calculate frequencies and select our fft function.
-            b_complex = axis_arr_in.data.dtype.kind == "c"
+            b_complex = msg_in.data.dtype.kind == "c"
             if (not b_complex) and output == SpectralOutput.POSITIVE:
                 # If input is not complex and desired output is SpectralOutput.POSITIVE, we can save some computation
                 #  by using rfft and rfftfreq.
@@ -147,7 +146,7 @@ def spectrum(
             )
             if out_axis is None:
                 out_axis = axis_name
-            new_dims = axis_arr_in.dims[:axis_idx] + [out_axis, ] + axis_arr_in.dims[axis_idx + 1:]
+            new_dims = msg_in.dims[:axis_idx] + [out_axis, ] + msg_in.dims[axis_idx + 1:]
 
             f_transform = lambda x: x
             if transform != SpectralTransform.RAW_COMPLEX:
@@ -162,20 +161,20 @@ def spectrum(
                     else:
                         f_transform = f1
 
-        new_axes = {k: v for k, v in axis_arr_in.axes.items() if k not in [out_axis, axis_name]}
+        new_axes = {k: v for k, v in msg_in.axes.items() if k not in [out_axis, axis_name]}
         new_axes[out_axis] = freq_axis
 
         if apply_window:
-            win_dat = axis_arr_in.data * window
+            win_dat = msg_in.data * window
         else:
-            win_dat = axis_arr_in.data
+            win_dat = msg_in.data
         spec = fftfun(win_dat, n=nfft, axis=axis_idx, norm=norm)  # norm="forward" equivalent to `/ nfft`
         if do_fftshift or output == SpectralOutput.NEGATIVE:
             spec = np.fft.fftshift(spec, axes=axis_idx)
         spec = f_transform(spec)
         spec = slice_along_axis(spec, f_sl, axis_idx)
 
-        axis_arr_out = replace(axis_arr_in, data=spec, dims=new_dims, axes=new_axes)
+        msg_out = replace(msg_in, data=spec, dims=new_dims, axes=new_axes)
 
 
 class SpectrumSettings(ez.Settings):

@@ -62,8 +62,7 @@ def ranged_aggregate(
     Returns:
         A primed generator object ready to yield an AxisArray for each .send(axis_array)
     """
-    axis_arr_in = AxisArray(np.array([]), dims=[""])
-    axis_arr_out = AxisArray(np.array([]), dims=[""])
+    msg_out = AxisArray(np.array([]), dims=[""])
 
     target_axis: typing.Optional[AxisArray.Axis] = None
     out_axis = AxisArray.Axis()
@@ -71,18 +70,18 @@ def ranged_aggregate(
     axis_name = ""
 
     while True:
-        axis_arr_in = yield axis_arr_out
+        msg_in: AxisArray = yield msg_out
         if bands is None:
-            axis_arr_out = axis_arr_in
+            msg_out = msg_in
         else:
-            if slices is None or target_axis != axis_arr_in.get_axis(axis_name):
+            if slices is None or target_axis != msg_in.get_axis(axis_name):
                 # If we have yet to calculate slices, or if the axis we are operating on
                 #  has changed (e.g., "time" or "win" axis always changes), then recalculate slices.
-                axis_name = axis or axis_arr_in.dims[0]
-                ax_idx = axis_arr_in.get_axis_idx(axis_name)
-                target_axis = axis_arr_in.axes[axis_name]
+                axis_name = axis or msg_in.dims[0]
+                ax_idx = msg_in.get_axis_idx(axis_name)
+                target_axis = msg_in.axes[axis_name]
 
-                ax_vec = target_axis.offset + np.arange(axis_arr_in.data.shape[ax_idx]) * target_axis.gain
+                ax_vec = target_axis.offset + np.arange(msg_in.data.shape[ax_idx]) * target_axis.gain
                 slices = []
                 mids = []
                 for (start, stop) in bands:
@@ -100,12 +99,12 @@ def ranged_aggregate(
 
             agg_func = AGGREGATORS[operation]
             out_data = [
-                agg_func(slice_along_axis(axis_arr_in.data, sl, axis=ax_idx), axis=ax_idx)
+                agg_func(slice_along_axis(msg_in.data, sl, axis=ax_idx), axis=ax_idx)
                 for sl in slices
             ]
-            new_axes = {**axis_arr_in.axes, axis_name: out_axis}
-            axis_arr_out = replace(
-                axis_arr_in,
+            new_axes = {**msg_in.axes, axis_name: out_axis}
+            msg_out = replace(
+                msg_in,
                 data=np.stack(out_data, axis=ax_idx),
                 axes=new_axes
             )
@@ -113,9 +112,9 @@ def ranged_aggregate(
                 # Convert indices returned by argmin/argmax into the value along the axis.
                 out_data = []
                 for sl_ix, sl in enumerate(slices):
-                    offsets = np.take(axis_arr_out.data, [sl_ix], axis=ax_idx)
+                    offsets = np.take(msg_out.data, [sl_ix], axis=ax_idx)
                     out_data.append(ax_vec[sl][offsets])
-                axis_arr_out.data = np.concatenate(out_data, axis=ax_idx)
+                msg_out.data = np.concatenate(out_data, axis=ax_idx)
 
 
 class RangedAggregateSettings(ez.Settings):

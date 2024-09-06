@@ -6,7 +6,6 @@ import typing
 
 import numpy as np
 import pytest
-from frozendict import frozendict
 
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
@@ -143,11 +142,11 @@ async def test_acounter(
     messages = [await agen.__anext__() for _ in range(target_messages)]
 
     # Test contents of individual messages
-    for ax_arr in messages:
-        assert type(ax_arr) is AxisArray
-        assert ax_arr.data.shape == (block_size, n_ch)
-        assert "time" in ax_arr.axes
-        assert ax_arr.axes["time"].gain == 1 / fs
+    for msg in messages:
+        assert type(msg) is AxisArray
+        assert msg.data.shape == (block_size, n_ch)
+        assert "time" in msg.axes
+        assert msg.axes["time"].gain == 1 / fs
 
     agg = AxisArray.concatenate(*messages, dim="time")
 
@@ -286,11 +285,7 @@ def test_sin_gen(
     for split_dat in np.array_split(np.arange(n_samples)[:, None], n_msgs, axis=axis_idx):
         _time_axis = AxisArray.Axis.TimeAxis(fs=srate, offset=float(split_dat[0, 0]))
         messages.append(
-            AxisArray(
-                split_dat,
-                dims=["time", "ch"],
-                axes=frozendict({"time": _time_axis})
-            )
+            AxisArray(split_dat, dims=["time", "ch"], axes={"time": _time_axis})
         )
 
     def f_test(t): return amp * np.sin(2 * np.pi * freq * t + phase)

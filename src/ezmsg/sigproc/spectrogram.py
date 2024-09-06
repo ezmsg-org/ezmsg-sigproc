@@ -49,12 +49,11 @@ def spectrogram(
     )
 
     # State variables
-    axis_arr_in = AxisArray(np.array([]), dims=[""])
-    axis_arr_out: typing.Optional[AxisArray] = None
+    msg_out: typing.Optional[AxisArray] = None
 
     while True:
-        axis_arr_in = yield axis_arr_out
-        axis_arr_out = pipeline(axis_arr_in)
+        msg_in: AxisArray = yield msg_out
+        msg_out = pipeline(msg_in)
 
 
 class SpectrogramSettings(ez.Settings):

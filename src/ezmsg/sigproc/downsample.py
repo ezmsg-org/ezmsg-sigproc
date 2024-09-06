@@ -34,8 +34,7 @@ def downsample(
         next downsample interval then `None` is yielded.
 
     """
-    axis_arr_in = AxisArray(np.array([]), dims=[""])
-    axis_arr_out = AxisArray(np.array([]), dims=[""])
+    msg_out = AxisArray(np.array([]), dims=[""])
 
     if factor < 1:
         raise ValueError("Downsample factor must be at least 1 (no downsampling)")
@@ -45,22 +44,22 @@ def downsample(
     template: typing.Optional[AxisArray] = None
 
     while True:
-        axis_arr_in = yield axis_arr_out
+        msg_in: AxisArray = yield msg_out
 
         if axis is None:
-            axis = axis_arr_in.dims[0]
-        axis_info = axis_arr_in.get_axis(axis)
-        axis_idx = axis_arr_in.get_axis_idx(axis)
+            axis = msg_in.dims[0]
+        axis_info = msg_in.get_axis(axis)
+        axis_idx = msg_in.get_axis_idx(axis)
 
         if template is None:
             # Reset state variables
             s_idx = 0
             # Template used as a convenient struct for holding metadata and size-zero data.
-            template = copy.deepcopy(axis_arr_in)
+            template = copy.deepcopy(msg_in)
             template.axes[axis].gain *= factor
             template.data = slice_along_axis(template.data, slice(None, 0, None), axis=axis_idx)
 
-        n_samples = axis_arr_in.data.shape[axis_idx]
+        n_samples = msg_in.data.shape[axis_idx]
         samples = np.arange(s_idx, s_idx + n_samples) % factor
         if n_samples > 0:
             # Update state for next iteration.
@@ -73,11 +72,11 @@ def downsample(
         else:
             n_step = 0
             data_slice = slice(None, 0, None)
-        axis_arr_out = replace(
-            axis_arr_in,
-            data=slice_along_axis(axis_arr_in.data, data_slice, axis=axis_idx),
+        msg_out = replace(
+            msg_in,
+            data=slice_along_axis(msg_in.data, data_slice, axis=axis_idx),
             axes={
-                **axis_arr_in.axes,
+                **msg_in.axes,
                 axis: replace(
                     axis_info,
                     gain=axis_info.gain * factor,
