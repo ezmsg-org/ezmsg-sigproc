@@ -30,8 +30,7 @@ def affine_transform(
         A primed generator object that yields an :obj:`AxisArray` object for every
         :obj:`AxisArray` it receives via `send`.
     """
-    axis_arr_in = AxisArray(np.array([]), dims=[""])
-    axis_arr_out = AxisArray(np.array([]), dims=[""])
+    msg_out = AxisArray(np.array([]), dims=[""])
 
     if isinstance(weights, str):
         if weights == "passthrough":
@@ -49,27 +48,27 @@ def affine_transform(
     new_xform_ax: typing.Optional[AxisArray.Axis] = None
 
     while True:
-        axis_arr_in = yield axis_arr_out
+        msg_in: AxisArray = yield msg_out
 
         if weights is None:
-            axis_arr_out = axis_arr_in
+            msg_out = msg_in
             continue
 
         if axis is None:
-            axis = axis_arr_in.dims[-1]
+            axis = msg_in.dims[-1]
             axis_idx = -1
         else:
-            axis_idx = axis_arr_in.get_axis_idx(axis)
+            axis_idx = msg_in.get_axis_idx(axis)
 
         if b_first:
             # First data sample. Determine if we need to modify the transformed axis.
             b_first = False
             if (
-                    axis in axis_arr_in.axes
-                    and hasattr(axis_arr_in.axes[axis], "labels")
+                    axis in msg_in.axes
+                    and hasattr(msg_in.axes[axis], "labels")
                     and weights.shape[0] != weights.shape[1]
             ):
-                in_labels = axis_arr_in.axes[axis].labels
+                in_labels = msg_in.axes[axis].labels
                 new_labels = []
                 n_in = weights.shape[1 if right_multiply else 0]
                 n_out = weights.shape[0 if right_multiply else 1]
@@ -96,9 +95,9 @@ def affine_transform(
                     elif np.all(b_filled_outputs):
                         # Transform is dropping some of the inputs.
                         new_labels = np.array(in_labels)[b_used_inputs].tolist()
-                new_xform_ax = replace(axis_arr_in.axes[axis], labels=new_labels)
+                new_xform_ax = replace(msg_in.axes[axis], labels=new_labels)
 
-        data = axis_arr_in.data
+        data = msg_in.data
 
         if data.shape[axis_idx] == (weights.shape[0] - 1):
             # The weights are stacked A|B where A is the transform and B is a single row
@@ -106,7 +105,7 @@ def affine_transform(
             sample_shape = data.shape[:axis_idx] + (1,) + data.shape[axis_idx+1:]
             data = np.concatenate((data, np.ones(sample_shape).astype(data.dtype)), axis=axis_idx)
 
-        if axis_idx in [-1, len(axis_arr_in.dims) - 1]:
+        if axis_idx in [-1, len(msg_in.dims) - 1]:
             data = np.matmul(data, weights)
         else:
             data = np.moveaxis(data, axis_idx, -1)
@@ -115,9 +114,9 @@ def affine_transform(
 
         replace_kwargs = {"data": data}
         if new_xform_ax is not None:
-            replace_kwargs["axes"] = {**axis_arr_in.axes, axis: new_xform_ax}
+            replace_kwargs["axes"] = {**msg_in.axes, axis: new_xform_ax}
 
-        axis_arr_out = replace(axis_arr_in, **replace_kwargs)
+        msg_out = replace(msg_in, **replace_kwargs)
 
 
 class AffineTransformSettings(ez.Settings):
@@ -162,8 +161,7 @@ def common_rereference(
         A primed generator object that yields an :obj:`AxisArray` object
         for every :obj:`AxisArray` it receives via `send`.
     """
-    axis_arr_in = AxisArray(np.array([]), dims=[""])
-    axis_arr_out = AxisArray(np.array([]), dims=[""])
+    msg_out = AxisArray(np.array([]), dims=[""])
 
     if mode == "passthrough":
         include_current = True
@@ -171,15 +169,15 @@ def common_rereference(
     func = {"mean": np.mean, "median": np.median, "passthrough": zeros_for_noop}[mode]
 
     while True:
-        axis_arr_in = yield axis_arr_out
+        msg_in: AxisArray = yield msg_out
 
         if axis is None:
-            axis = axis_arr_in.dims[-1]
+            axis = msg_in.dims[-1]
             axis_idx = -1
         else:
-            axis_idx = axis_arr_in.get_axis_idx(axis)
+            axis_idx = msg_in.get_axis_idx(axis)
 
-        ref_data = func(axis_arr_in.data, axis=axis_idx, keepdims=True)
+        ref_data = func(msg_in.data, axis=axis_idx, keepdims=True)
 
         if not include_current:
             # Typical `CAR = x[0]/N + x[1]/N + ... x[i-1]/N + x[i]/N + x[i+1]/N + ... + x[N-1]/N`
@@ -192,11 +190,11 @@ def common_rereference(
             # from the current channel (i.e., `x[i] / (N-1)`)
             #  i.e., `CAR[i] = (N / (N-1)) * common_CAR - x[i]/(N-1)`
             # We can use broadcasting subtraction instead of looping over channels.
-            N = axis_arr_in.data.shape[axis_idx]
-            ref_data = (N / (N - 1)) * ref_data - axis_arr_in.data / (N - 1)
+            N = msg_in.data.shape[axis_idx]
+            ref_data = (N / (N - 1)) * ref_data - msg_in.data / (N - 1)
             # Side note: I profiled using affine_transform and it's about 30x slower than this implementation.
 
-        axis_arr_out = replace(axis_arr_in, data=axis_arr_in.data - ref_data)
+        msg_out = replace(msg_in, data=msg_in.data - ref_data)
 
 
 class CommonRereferenceSettings(ez.Settings):

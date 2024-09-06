@@ -47,18 +47,17 @@ def parse_slice(s: str) -> typing.Tuple[typing.Union[slice, int], ...]:
 def slicer(
     selection: str = "", axis: typing.Optional[str] = None
 ) -> typing.Generator[AxisArray, AxisArray, None]:
-    axis_arr_in = AxisArray(np.array([]), dims=[""])
-    axis_arr_out = AxisArray(np.array([]), dims=[""])
+    msg_out = AxisArray(np.array([]), dims=[""])
     _slice = None
     b_change_dims = False
     new_axis = None  # Will hold updated metadata
 
     while True:
-        axis_arr_in = yield axis_arr_out
+        msg_in: AxisArray = yield msg_out
 
         if axis is None:
-            axis = axis_arr_in.dims[-1]
-        axis_idx = axis_arr_in.get_axis_idx(axis)
+            axis = msg_in.dims[-1]
+        axis_idx = msg_in.get_axis_idx(axis)
 
         if _slice is None:
             # Calculate the slice
@@ -69,29 +68,29 @@ def slicer(
             else:
                 # Multiple slices, but this cannot be done in a single step, so we convert the slices
                 #  to a discontinuous set of integer indexes.
-                indices = np.arange(axis_arr_in.data.shape[axis_idx])
+                indices = np.arange(msg_in.data.shape[axis_idx])
                 indices = np.hstack([indices[_] for _ in _slices])
                 _slice = np.s_[indices]
             # Create the output axis.
-            if (axis in axis_arr_in.axes
-                    and hasattr(axis_arr_in.axes[axis], "labels")
-                    and len(axis_arr_in.axes[axis].labels) > 0):
-                new_labels = axis_arr_in.axes[axis].labels[_slice]
+            if (axis in msg_in.axes
+                    and hasattr(msg_in.axes[axis], "labels")
+                    and len(msg_in.axes[axis].labels) > 0):
+                new_labels = msg_in.axes[axis].labels[_slice]
                 new_axis = replace(
-                    axis_arr_in.axes[axis],
+                    msg_in.axes[axis],
                     labels=new_labels
                 )
 
         replace_kwargs = {}
         if b_change_dims:
             # Dropping the target axis
-            replace_kwargs["dims"] = [_ for dim_ix, _ in enumerate(axis_arr_in.dims) if dim_ix != axis_idx]
-            replace_kwargs["axes"] = {k: v for k, v in axis_arr_in.axes.items() if k != axis}
+            replace_kwargs["dims"] = [_ for dim_ix, _ in enumerate(msg_in.dims) if dim_ix != axis_idx]
+            replace_kwargs["axes"] = {k: v for k, v in msg_in.axes.items() if k != axis}
         elif new_axis is not None:
-            replace_kwargs["axes"] = {k: (v if k != axis else new_axis) for k, v in axis_arr_in.axes.items()}
-        axis_arr_out = replace(
-            axis_arr_in,
-            data=slice_along_axis(axis_arr_in.data, _slice, axis_idx),
+            replace_kwargs["axes"] = {k: (v if k != axis else new_axis) for k, v in msg_in.axes.items()}
+        msg_out = replace(
+            msg_in,
+            data=slice_along_axis(msg_in.data, _slice, axis_idx),
             **replace_kwargs
         )
 
