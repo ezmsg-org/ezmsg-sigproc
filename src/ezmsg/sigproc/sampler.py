@@ -66,7 +66,6 @@ def sampler(
         A generator that expects `.send` either an :obj:`AxisArray` containing streaming data messages,
         or a :obj:`SampleTriggerMessage` containing a trigger, and yields the list of :obj:`SampleMessage` s.
     """
-    msg_in = None
     msg_out: Optional[list[SampleMessage]] = None
 
     # State variables (most shared between trigger- and data-processing.

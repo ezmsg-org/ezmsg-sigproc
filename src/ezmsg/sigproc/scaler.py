@@ -44,22 +44,21 @@ def scaler(time_constant: float = 1.0, axis: Optional[str] = None) -> Generator[
         standardized, or "Z-scored" version of the input.
     """
     from river import preprocessing
-    axis_arr_in = AxisArray(np.array([]), dims=[""])
-    axis_arr_out = AxisArray(np.array([]), dims=[""])
+    msg_out = AxisArray(np.array([]), dims=[""])
     _scaler = None
     while True:
-        axis_arr_in = yield axis_arr_out
-        data = axis_arr_in.data
+        msg_in: AxisArray = yield msg_out
+        data = msg_in.data
         if axis is None:
-            axis = axis_arr_in.dims[0]
+            axis = msg_in.dims[0]
             axis_idx = 0
         else:
-            axis_idx = axis_arr_in.get_axis_idx(axis)
+            axis_idx = msg_in.get_axis_idx(axis)
             if axis_idx != 0:
                 data = np.moveaxis(data, axis_idx, 0)
 
         if _scaler is None:
-            alpha = _alpha_from_tau(time_constant, axis_arr_in.axes[axis].gain)
+            alpha = _alpha_from_tau(time_constant, msg_in.axes[axis].gain)
             _scaler = preprocessing.AdaptiveStandardScaler(fading_factor=alpha)
 
         result = []
@@ -72,7 +71,7 @@ def scaler(time_constant: float = 1.0, axis: Optional[str] = None) -> Generator[
 
         result = np.stack(result)
         result = np.moveaxis(result, 0, axis_idx)
-        axis_arr_out = replace(axis_arr_in, data=result)
+        msg_out = replace(msg_in, data=result)
 
 
 @consumer
@@ -92,8 +91,7 @@ def scaler_np(
         A primed generator object that expects `.send(axis_array)` and yields a
         standardized, or "Z-scored" version of the input.
     """
-    axis_arr_in = AxisArray(np.array([]), dims=[""])
-    axis_arr_out = AxisArray(np.array([]), dims=[""])
+    msg_out = AxisArray(np.array([]), dims=[""])
     means = vars_means = vars_sq_means = None
     alpha = None
 
@@ -105,18 +103,17 @@ def scaler_np(
         return prev + _alpha * (arr - prev)
 
     while True:
-        axis_arr_in = yield axis_arr_out
+        msg_in: AxisArray = yield msg_out
 
-        data = axis_arr_in.data
+        data = msg_in.data
         if axis is None:
-            axis = axis_arr_in.dims[0]
-            axis_idx = 0
-        else:
-            axis_idx = axis_arr_in.get_axis_idx(axis)
+            axis = msg_in.dims[0]
+
+        axis_idx = msg_in.get_axis_idx(axis)
         data = np.moveaxis(data, axis_idx, 0)
 
         if alpha is None:
-            alpha = _alpha_from_tau(time_constant, axis_arr_in.axes[axis].gain)
+            alpha = _alpha_from_tau(time_constant, msg_in.axes[axis].gain)
 
         if means is None or means.shape != data.shape[1:]:
             vars_sq_means = np.zeros_like(data[0], dtype=float)
@@ -136,7 +133,7 @@ def scaler_np(
 
         result[np.isnan(result)] = 0.0
         result = np.moveaxis(result, 0, axis_idx)
-        axis_arr_out = replace(axis_arr_in, data=result)
+        msg_out = replace(msg_in, data=result)
 
 
 class AdaptiveStandardScalerSettings(ez.Settings):

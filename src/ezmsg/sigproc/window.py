@@ -58,8 +58,7 @@ def windowing(
     elif window_shift is not None and zero_pad_until == "input":
         ez.logger.warning("windowing is non-deterministic with `zero_pad_until='input'` as it depends on the size "
                           "of the first input. We recommend using 'shift' when `window_shift` is float-valued.")
-    axis_arr_in = AxisArray(np.array([]), dims=[""])
-    axis_arr_out = AxisArray(np.array([]), dims=[""])
+    msg_out = AxisArray(np.array([]), dims=[""])
 
     # State variables
     prev_samp_shape: Optional[Tuple[int, ...]] = None
@@ -73,24 +72,24 @@ def windowing(
     out_newaxis: Optional[AxisArray.Axis] = None
 
     while True:
-        axis_arr_in = yield axis_arr_out
+        msg_in: AxisArray = yield msg_out
 
         if window_dur is None:
-            axis_arr_out = axis_arr_in
+            msg_out = msg_in
             continue
 
         if axis is None:
-            axis = axis_arr_in.dims[0]
-        axis_idx = axis_arr_in.get_axis_idx(axis)
-        axis_info = axis_arr_in.get_axis(axis)
+            axis = msg_in.dims[0]
+        axis_idx = msg_in.get_axis_idx(axis)
+        axis_info = msg_in.get_axis(axis)
         fs = 1.0 / axis_info.gain
 
-        if not newaxis_warned and newaxis in axis_arr_in.dims:
+        if not newaxis_warned and newaxis in msg_in.dims:
             ez.logger.warning(f"newaxis {newaxis} present in input dims. Using {newaxis}_win instead")
             newaxis_warned = True
             newaxis = f"{newaxis}_win"
 
-        samp_shape = axis_arr_in.data.shape[:axis_idx] + axis_arr_in.data.shape[axis_idx + 1:]
+        samp_shape = msg_in.data.shape[:axis_idx] + msg_in.data.shape[axis_idx + 1:]
 
         # If buffer unset or input stats changed, create a new buffer
         if buffer is None or samp_shape != prev_samp_shape or fs != prev_fs:
@@ -102,9 +101,9 @@ def windowing(
             elif zero_pad_until == "shift" and not b_1to1:
                 req_samples = window_shift_samples
             else:  # i.e. zero_pad_until == "input"
-                req_samples = axis_arr_in.data.shape[axis_idx]
+                req_samples = msg_in.data.shape[axis_idx]
             n_zero = max(0, window_samples - req_samples)
-            buffer = np.zeros(axis_arr_in.data.shape[:axis_idx] + (n_zero,) + axis_arr_in.data.shape[axis_idx + 1:])
+            buffer = np.zeros(msg_in.data.shape[:axis_idx] + (n_zero,) + msg_in.data.shape[axis_idx + 1:])
             prev_samp_shape = samp_shape
             prev_fs = fs
 
@@ -115,12 +114,12 @@ def windowing(
         # is generally faster than np.roll and slicing anyway, but this could still
         # be a performance bottleneck for large memory arrays.
         # A circular buffer might be faster.
-        buffer = np.concatenate((buffer, axis_arr_in.data), axis=axis_idx)
+        buffer = np.concatenate((buffer, msg_in.data), axis=axis_idx)
 
         # Create a vector of buffer timestamps to track axis `offset` in output(s)
         buffer_offset = np.arange(buffer.shape[axis_idx]).astype(float)
         # Adjust so first _new_ sample at index 0
-        buffer_offset -= buffer_offset[-axis_arr_in.data.shape[axis_idx]]
+        buffer_offset -= buffer_offset[-msg_in.data.shape[axis_idx]]
         # Convert form indices to 'units' (probably seconds).
         buffer_offset *= axis_info.gain
         buffer_offset += axis_info.offset
@@ -134,7 +133,7 @@ def windowing(
 
         # Prepare reusable parts of output
         if out_newaxis is None:
-            out_dims = axis_arr_in.dims[:axis_idx] + [newaxis] + axis_arr_in.dims[axis_idx:]
+            out_dims = msg_in.dims[:axis_idx] + [newaxis] + msg_in.dims[axis_idx:]
             out_newaxis = replace(
                 axis_info,
                 gain=0.0 if b_1to1 else axis_info.gain * window_shift_samples,
@@ -143,7 +142,7 @@ def windowing(
 
         # Generate outputs.
         # Preliminary copy of axes without the axes that we are modifying.
-        out_axes = {k: v for k, v in axis_arr_in.axes.items() if k not in [newaxis, axis]}
+        out_axes = {k: v for k, v in msg_in.axes.items() if k not in [newaxis, axis]}
 
         # Update targeted (windowed) axis so that its offset is relative to the new axis
         # TODO: If we have `anchor_newest=True` then offset should be -win_dur
@@ -169,16 +168,16 @@ def windowing(
         else:
             # Not enough data to make a new window. Return empty data.
             empty_data_shape = (
-                    axis_arr_in.data.shape[:axis_idx]
+                    msg_in.data.shape[:axis_idx]
                     + (0, window_samples)
-                    + axis_arr_in.data.shape[axis_idx + 1:]
+                    + msg_in.data.shape[axis_idx + 1:]
             )
-            out_dat = np.zeros(empty_data_shape, dtype=axis_arr_in.data.dtype)
+            out_dat = np.zeros(empty_data_shape, dtype=msg_in.data.dtype)
             # out_newaxis will have first timestamp in input... but mostly meaningless because output is size-zero.
             out_newaxis = replace(out_newaxis, offset=axis_info.offset)
 
-        axis_arr_out = replace(
-            axis_arr_in,
+        msg_out = replace(
+            msg_in,
             data=out_dat,
             dims=out_dims,
             axes={

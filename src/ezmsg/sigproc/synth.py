@@ -285,22 +285,21 @@ def sin(
         A primed generator that expects .send(axis_array) of sample counts
         and yields an AxisArray of sinusoids.
     """
-    axis_arr_in = AxisArray(np.array([]), dims=[""])
-    axis_arr_out = AxisArray(np.array([]), dims=[""])
+    msg_out = AxisArray(np.array([]), dims=[""])
 
     ang_freq = 2.0 * np.pi * freq
 
     while True:
-        axis_arr_in = yield axis_arr_out
-        # axis_arr_in is expected to be sample counts
+        msg_in: AxisArray = yield msg_out
+        # msg_in is expected to be sample counts
 
         axis_name = axis
         if axis_name is None:
-            axis_name = axis_arr_in.dims[0]
+            axis_name = msg_in.dims[0]
 
-        w = (ang_freq * axis_arr_in.get_axis(axis_name).gain) * axis_arr_in.data
+        w = (ang_freq * msg_in.get_axis(axis_name).gain) * msg_in.data
         out_data = amp * np.sin(w + phase)
-        axis_arr_out = replace(axis_arr_in, data=out_data)
+        msg_out = replace(msg_in, data=out_data)
 
 
 class SinGeneratorSettings(ez.Settings):

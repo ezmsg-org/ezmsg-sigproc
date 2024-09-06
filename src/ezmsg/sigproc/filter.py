@@ -55,8 +55,7 @@ def filtergen(
         coefs = (coefs,)
 
     # Init IO
-    axis_arr_in = AxisArray(np.array([]), dims=[""])
-    axis_arr_out = AxisArray(np.array([]), dims=[""])
+    msg_out = AxisArray(np.array([]), dims=[""])
 
     filt_func = {"ba": scipy.signal.lfilter, "sos": scipy.signal.sosfilt}[coef_type]
     zi_func = {"ba": scipy.signal.lfilter_zi, "sos": scipy.signal.sosfilt_zi}[coef_type]
@@ -67,18 +66,18 @@ def filtergen(
     expected_shape = None
 
     while True:
-        axis_arr_in = yield axis_arr_out
+        msg_in: AxisArray = yield msg_out
 
         if coefs is None:
             # passthrough if we do not have a filter design.
-            axis_arr_out = axis_arr_in
+            msg_out = msg_in
             continue
 
         if axis_idx is None:
-            axis_name = axis_arr_in.dims[0] if axis is None else axis
-            axis_idx = axis_arr_in.get_axis_idx(axis_name)
+            axis_name = msg_in.dims[0] if axis is None else axis
+            axis_idx = msg_in.get_axis_idx(axis_name)
 
-        dat_in = axis_arr_in.data
+        dat_in = msg_in.data
 
         # Re-calculate/reset zi if necessary
         samp_shape = dat_in.shape[:axis_idx] + dat_in.shape[axis_idx + 1 :]
@@ -95,7 +94,7 @@ def filtergen(
             zi = np.tile(zi[zi_expand], n_tile)
 
         dat_out, zi = filt_func(*coefs, dat_in, axis=axis_idx, zi=zi)
-        axis_arr_out = replace(axis_arr_in, data=dat_out)
+        msg_out = replace(msg_in, data=dat_out)
 
 
 class FilterSettingsBase(ez.Settings):
