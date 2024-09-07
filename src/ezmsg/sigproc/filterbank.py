@@ -60,16 +60,37 @@ def filterbank(
     Returns:
 
     """
-
-    template: typing.Optional[AxisArray] = None
     msg_out: typing.Optional[AxisArray] = None
+
+    # State variables
+    template: typing.Optional[AxisArray] = None
+
+    # Reset if these change
+    check_input = {
+        "key": None,
+        "template": None,
+        "gain": None,
+        "kind": None,
+        "shape": None,
+    }
 
     while True:
         msg_in: AxisArray = yield msg_out
 
-        if template is None or mode == FilterbankMode.AUTO:
-            fs = 1 / msg_in.axes["time"].gain if "time" in msg_in.axes else 1.0
-            ax_ix = msg_in.get_axis_idx(axis)
+        axis = axis or msg_in.dims[0]
+        gain = msg_in.axes[axis].gain if axis in msg_in.axes else 1.0
+        targ_ax_ix = msg_in.get_axis_idx(axis)
+        in_shape = msg_in.data.shape[:targ_ax_ix] + msg_in.data.shape[targ_ax_ix + 1:]
+
+        b_reset = msg_in.key != check_input["key"]
+        b_reset = b_reset or (gain != check_input["gain"] and mode in [FilterbankMode.FFT, FilterbankMode.AUTO])
+        b_reset = b_reset or msg_in.data.dtype.kind != check_input["kind"]
+        b_reset = b_reset or in_shape != check_input["shape"]
+        if b_reset:
+            check_input["key"] = msg_in.key
+            check_input["gain"] = gain
+            check_input["kind"] = msg_in.data.dtype.kind
+            check_input["shape"] = in_shape
 
             if min_phase != MinPhaseMode.NONE:
                 method, half = {
@@ -92,15 +113,15 @@ def filterbank(
             overlap = max_kernel_len - 1
 
             # Prepare previous iteration's overlap tail to add to input -- all zeros.
-            tail_shape = msg_in.data.shape[:ax_ix] + msg_in.data.shape[ax_ix + 1:] + (len(kernels), overlap)
+            tail_shape = in_shape + (len(kernels), overlap)
             tail = np.zeros(tail_shape, dtype="complex" if b_complex else "float")
 
-            # Prepare output template
-            dummy_shape = msg_in.data.shape[:ax_ix] + msg_in.data.shape[ax_ix + 1:] + (len(kernels), 0)
+            # Prepare output template -- kernels axis immediately before the target axis
+            dummy_shape = in_shape + (len(kernels), 0)
             template = AxisArray(
                 data=np.zeros(dummy_shape, dtype="complex" if b_complex else "float"),
-                dims=msg_in.dims[:ax_ix] + msg_in.dims[ax_ix + 1:] + [new_axis, axis],
-                axes=msg_in.axes.copy()  # No idea what to use to fill 'filter' axis.
+                dims=msg_in.dims[:targ_ax_ix] + msg_in.dims[targ_ax_ix + 1:] + [new_axis, axis],
+                axes=msg_in.axes.copy()  # We do not have info for kernel/filter axis :(.
             )
 
             # Determine optimal mode. Assumes 100 msec chunks.
@@ -108,15 +129,14 @@ def filterbank(
                 # concatenate kernels into 1 mega kernel then check what's faster.
                 # Will typically return fft when combined kernel length is > 1500.
                 concat_kernel = np.concatenate(kernels)
-                n_dummy = max(2 * len(concat_kernel), int(0.1 * fs))
+                n_dummy = max(2 * len(concat_kernel), int(0.1 / gain))
                 dummy_arr = np.zeros(n_dummy)
                 mode = sps.choose_conv_method(dummy_arr, concat_kernel, mode="full")
                 mode = FilterbankMode.CONV if mode == "direct" else FilterbankMode.FFT
 
             if mode == FilterbankMode.CONV:
                 # Preallocate memory for convolution result and overlap-add
-                dest_shape = msg_in.data.shape[:ax_ix] + msg_in.data.shape[ax_ix + 1:]
-                dest_shape += (len(kernels), overlap + msg_in.data.shape[ax_ix])
+                dest_shape = in_shape + (len(kernels), overlap + msg_in.data.shape[targ_ax_ix])
                 dest_arr = np.zeros(dest_shape, dtype="complex" if b_complex else "float")
 
             elif mode == FilterbankMode.FFT:
@@ -129,11 +149,12 @@ def filterbank(
                 # Create windowing node.
                 # Note: We could do windowing manually to avoid the overhead of the message structure,
                 #  but windowing is difficult to do correctly, so we lean on the heavily-tested `windowing` generator.
+                win_dur = win_len * gain
                 wingen = windowing(
                     axis=axis,
                     newaxis="win",  # Big data chunks might yield more than 1 window.
-                    window_dur=win_len / fs,
-                    window_shift=win_len / fs,  # Tumbling (not sliding) windows expected!
+                    window_dur=win_dur,
+                    window_shift=win_dur,  # Tumbling (not sliding) windows expected!
                     zero_pad_until="none",
                 )
 
@@ -157,11 +178,10 @@ def filterbank(
                 # TODO: If fft_kernels have significant stretches of zeros, convert to sparse array.
 
         # Make sure target axis is in -1th position.
-        targ_ax_ix = msg_in.get_axis_idx(axis)
         if targ_ax_ix != (msg_in.data.ndim - 1):
             in_dat = np.moveaxis(msg_in.data, targ_ax_ix, -1)
             if mode == FilterbankMode.FFT:
-                # Need to rebuild msg for wingen
+                # Fix msg_in .dims because we will pass it to wingen
                 move_dims = msg_in.dims[:targ_ax_ix] + msg_in.dims[targ_ax_ix + 1:] + [axis]
                 msg_in = replace(msg_in, data=in_dat, dims=move_dims)
         else:

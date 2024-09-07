@@ -40,7 +40,8 @@ def test_downsample_core(block_size: int, factor: int):
             msg = AxisArray(
                 data=msg_sig,
                 dims=["time", "ch", "feat"],
-                axes=frozendict({"time": AxisArray.Axis.TimeAxis(fs=in_fs, offset=msg_offs)})
+                axes=frozendict({"time": AxisArray.Axis.TimeAxis(fs=in_fs, offset=msg_offs)}),
+                key="test_downsample_core"
             )
             yield msg
 

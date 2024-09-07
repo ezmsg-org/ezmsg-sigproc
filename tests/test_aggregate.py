@@ -10,11 +10,7 @@ from ezmsg.sigproc.aggregate import ranged_aggregate, AggregationFunction
 from util import assert_messages_equal
 
 
-def get_msg_gen():
-    n_chans = 20
-    n_freqs = 100
-    data_dur = 30.0
-    fs = 1024.0
+def get_msg_gen(n_chans=20, n_freqs=100, data_dur=30.0, fs=1024.0, key=""):
 
     n_samples = int(data_dur * fs)
     data = np.arange(n_samples * n_chans * n_freqs).reshape(n_samples, n_chans, n_freqs)
@@ -29,7 +25,8 @@ def get_msg_gen():
                 axes=frozendict({
                     "time": AxisArray.Axis.TimeAxis(fs=fs, offset=offset),
                     "freq": AxisArray.Axis(gain=1.0, offset=0.0, unit="Hz")
-                })
+                }),
+                key=key
             )
             offset += arr.shape[0] / fs
             yield msg
@@ -98,3 +95,19 @@ def test_arg_aggregate(agg_func: AggregationFunction):
     out_dat = AxisArray.concatenate(*out_msgs, dim="time").data
     expected_dat = np.zeros(out_dat.shape[:-1] + (1,)) + expected_vals[None, None, :]
     assert np.array_equal(out_dat, expected_dat)
+
+
+@pytest.mark.parametrize("change_ax", ["ch", "freq"])
+def test_aggregate_handle_change(change_ax: str):
+    """
+    If ranged_aggregate couldn't handle incoming changes, then
+    change_ax being 'ch' should work while 'freq' should fail.
+    """
+    in_msgs1 = [_ for _ in get_msg_gen(n_chans=20, n_freqs=100)]
+    in_msgs2 = [_ for _ in get_msg_gen(n_chans=17 if change_ax == "ch" else 20,
+                                       n_freqs=70 if change_ax == "freq" else 100)]
+
+    gen = ranged_aggregate(axis="freq", bands=[(5.0, 20.0), (30.0, 50.0)], operation=AggregationFunction.MEAN)
+
+    out_msgs1 = [gen.send(_) for _ in in_msgs1]
+    out_msgs2 = [gen.send(_) for _ in in_msgs2]
