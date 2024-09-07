@@ -1,6 +1,6 @@
 from dataclasses import replace
 import traceback
-from typing import AsyncGenerator, Optional, Tuple, List, Generator
+import typing
 
 import ezmsg.core as ez
 import numpy as np
@@ -14,12 +14,12 @@ from .base import GenAxisArray
 
 @consumer
 def windowing(
-    axis: Optional[str] = None,
+    axis: typing.Optional[str] = None,
     newaxis: str = "win",
-    window_dur: Optional[float] = None,
-    window_shift: Optional[float] = None,
+    window_dur: typing.Optional[float] = None,
+    window_shift: typing.Optional[float] = None,
     zero_pad_until: str = "input"
-) -> Generator[AxisArray, AxisArray, None]:
+) -> typing.Generator[AxisArray, AxisArray, None]:
     """
     Construct a generator that yields windows of data from an input :obj:`AxisArray`.
 
@@ -48,6 +48,7 @@ def windowing(
         A (primed) generator that accepts .send(an AxisArray object) and yields a list of windowed
         AxisArray objects. The list will always be length-1 if `newaxis` is not None or `window_shift` is None.
     """
+    # Check arguments
     if newaxis is None:
         ez.logger.warning("`newaxis` must not be None. Setting to 'win'.")
         newaxis = "win"
@@ -61,15 +62,16 @@ def windowing(
     msg_out = AxisArray(np.array([]), dims=[""])
 
     # State variables
-    prev_samp_shape: Optional[Tuple[int, ...]] = None
-    prev_fs: Optional[float] = None
-    buffer: Optional[npt.NDArray] = None
-    window_samples: Optional[int] = None
-    window_shift_samples: Optional[int] = None
+    buffer: typing.Optional[npt.NDArray] = None
+    window_samples: typing.Optional[int] = None
+    window_shift_samples: typing.Optional[int] = None
     shift_deficit: int = 0  # Number of incoming samples to ignore. Only relevant when shift > window.
     b_1to1 = window_shift is None
     newaxis_warned: bool = b_1to1
-    out_newaxis: Optional[AxisArray.Axis] = None
+    out_newaxis: typing.Optional[AxisArray.Axis] = None
+    out_dims: typing.typing.Optional[typing.List[str]] = None
+
+    check_inputs = {"samp_shape": None, "fs": None, "key": None}
 
     while True:
         msg_in: AxisArray = yield msg_out
@@ -78,8 +80,7 @@ def windowing(
             msg_out = msg_in
             continue
 
-        if axis is None:
-            axis = msg_in.dims[0]
+        axis = axis or msg_in.dims[0]
         axis_idx = msg_in.get_axis_idx(axis)
         axis_info = msg_in.get_axis(axis)
         fs = 1.0 / axis_info.gain
@@ -92,7 +93,16 @@ def windowing(
         samp_shape = msg_in.data.shape[:axis_idx] + msg_in.data.shape[axis_idx + 1:]
 
         # If buffer unset or input stats changed, create a new buffer
-        if buffer is None or samp_shape != prev_samp_shape or fs != prev_fs:
+        b_reset = buffer is None
+        b_reset = b_reset or samp_shape != check_inputs["samp_shape"]
+        b_reset = b_reset or fs != check_inputs["fs"]
+        b_reset = b_reset or msg_in.key != check_inputs["key"]
+        if b_reset:
+            # Update check variables
+            check_inputs["samp_shape"] = samp_shape
+            check_inputs["fs"] = fs
+            check_inputs["key"] = msg_in.key
+
             window_samples = int(window_dur * fs)
             if not b_1to1:
                 window_shift_samples = int(window_shift * fs)
@@ -104,8 +114,6 @@ def windowing(
                 req_samples = msg_in.data.shape[axis_idx]
             n_zero = max(0, window_samples - req_samples)
             buffer = np.zeros(msg_in.data.shape[:axis_idx] + (n_zero,) + msg_in.data.shape[axis_idx + 1:])
-            prev_samp_shape = samp_shape
-            prev_fs = fs
 
         # Add new data to buffer.
         # Currently, we concatenate the new time samples and clip the output.
@@ -127,7 +135,7 @@ def windowing(
         if not b_1to1 and shift_deficit > 0:
             n_skip = min(buffer.shape[axis_idx], shift_deficit)
             if n_skip > 0:
-                buffer = slice_along_axis(buffer, np.s_[n_skip:], axis_idx)
+                buffer = slice_along_axis(buffer, slice(n_skip, None), axis_idx)
                 buffer_offset = buffer_offset[n_skip:]
                 shift_deficit -= n_skip
 
@@ -151,20 +159,20 @@ def windowing(
         # How we update .data and .axes[newaxis] depends on the windowing mode.
         if b_1to1:
             # one-to-one mode -- Each send yields exactly one window containing only the most recent samples.
-            buffer = slice_along_axis(buffer, np.s_[-window_samples:], axis_idx)
+            buffer = slice_along_axis(buffer, slice(-window_samples, None), axis_idx)
             out_dat = np.expand_dims(buffer, axis=axis_idx)
             out_newaxis = replace(out_newaxis, offset=buffer_offset[-window_samples])
         elif buffer.shape[axis_idx] >= window_samples:
             # Deterministic window shifts.
             out_dat = sliding_win_oneaxis(buffer, window_samples, axis_idx)
-            out_dat = slice_along_axis(out_dat, np.s_[::window_shift_samples], axis_idx)
+            out_dat = slice_along_axis(out_dat, slice(None, None, window_shift_samples), axis_idx)
             offset_view = sliding_win_oneaxis(buffer_offset, window_samples, 0)[::window_shift_samples]
             out_newaxis = replace(out_newaxis, offset=offset_view[0, 0])
 
             # Drop expired beginning of buffer and update shift_deficit
             multi_shift = window_shift_samples * out_dat.shape[axis_idx]
             shift_deficit = max(0, multi_shift - buffer.shape[axis_idx])
-            buffer = slice_along_axis(buffer, np.s_[multi_shift:], axis_idx)
+            buffer = slice_along_axis(buffer, slice(multi_shift, None), axis_idx)
         else:
             # Not enough data to make a new window. Return empty data.
             empty_data_shape = (
@@ -188,16 +196,16 @@ def windowing(
 
 
 class WindowSettings(ez.Settings):
-    axis: Optional[str] = None
-    newaxis: Optional[str] = None  # new axis for output. No new axes if None
-    window_dur: Optional[float] = None  # Sec. passthrough if None
-    window_shift: Optional[float] = None  # Sec. Use "1:1 mode" if None
+    axis: typing.Optional[str] = None
+    newaxis: typing.Optional[str] = None  # new axis for output. No new axes if None
+    window_dur: typing.Optional[float] = None  # Sec. passthrough if None
+    window_shift: typing.Optional[float] = None  # Sec. Use "1:1 mode" if None
     zero_pad_until: str = "full"  # "full", "shift", "input", "none"
 
 
 class WindowState(ez.State):
     cur_settings: WindowSettings
-    gen: Generator
+    gen: typing.Generator
 
 
 class Window(GenAxisArray):
@@ -218,7 +226,7 @@ class Window(GenAxisArray):
 
     @ez.subscriber(INPUT_SIGNAL, zero_copy=True)
     @ez.publisher(OUTPUT_SIGNAL)
-    async def on_signal(self, msg: AxisArray) -> AsyncGenerator:
+    async def on_signal(self, msg: AxisArray) -> typing.AsyncGenerator:
         try:
             out_msg = self.STATE.gen.send(msg)
             if out_msg.data.size > 0:

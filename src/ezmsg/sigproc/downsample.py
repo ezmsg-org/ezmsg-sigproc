@@ -41,7 +41,8 @@ def downsample(
 
     # state variables
     s_idx: int = 0  # Index of the next msg's first sample into the virtual rotating ds_factor counter.
-    template: typing.Optional[AxisArray] = None
+
+    check_input = {"gain": None, "key": None}
 
     while True:
         msg_in: AxisArray = yield msg_out
@@ -51,13 +52,12 @@ def downsample(
         axis_info = msg_in.get_axis(axis)
         axis_idx = msg_in.get_axis_idx(axis)
 
-        if template is None:
+        b_reset = msg_in.axes[axis].gain != check_input["gain"] or msg_in.key != check_input["key"]
+        if b_reset:
+            check_input["gain"] = axis_info.gain
+            check_input["key"] = msg_in.key
             # Reset state variables
             s_idx = 0
-            # Template used as a convenient struct for holding metadata and size-zero data.
-            template = copy.deepcopy(msg_in)
-            template.axes[axis].gain *= factor
-            template.data = slice_along_axis(template.data, slice(None, 0, None), axis=axis_idx)
 
         n_samples = msg_in.data.shape[axis_idx]
         samples = np.arange(s_idx, s_idx + n_samples) % factor

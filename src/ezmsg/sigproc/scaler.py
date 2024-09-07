@@ -1,7 +1,8 @@
 from dataclasses import replace
-from typing import Generator, Optional
+import typing
 
 import numpy as np
+import numpy.typing as npt
 
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
@@ -29,7 +30,9 @@ def _alpha_from_tau(tau: float, dt: float) -> float:
 
 
 @consumer
-def scaler(time_constant: float = 1.0, axis: Optional[str] = None) -> Generator[AxisArray, AxisArray, None]:
+def scaler(
+    time_constant: float = 1.0, axis: typing.Optional[str] = None
+) -> typing.Generator[AxisArray, AxisArray, None]:
     """
     Create a generator function that applies the
     adaptive standard scaler from https://riverml.xyz/latest/api/preprocessing/AdaptiveStandardScaler/
@@ -77,8 +80,8 @@ def scaler(time_constant: float = 1.0, axis: Optional[str] = None) -> Generator[
 @consumer
 def scaler_np(
         time_constant: float = 1.0,
-        axis: Optional[str] = None
-) -> Generator[AxisArray, AxisArray, None]:
+        axis: typing.Optional[str] = None
+) -> typing.Generator[AxisArray, AxisArray, None]:
     """
     Create a generator function that applies an adaptive standard scaler.
     This is faster than :obj:`scaler` for multichannel data.
@@ -92,8 +95,19 @@ def scaler_np(
         standardized, or "Z-scored" version of the input.
     """
     msg_out = AxisArray(np.array([]), dims=[""])
-    means = vars_means = vars_sq_means = None
-    alpha = None
+
+    # State variables
+    alpha: float = 0.0
+    means: typing.Optional[npt.NDArray] = None
+    vars_means: typing.Optional[npt.NDArray] = None
+    vars_sq_means: typing.Optional[npt.NDArray] = None
+
+    # Reset if input changes
+    check_input = {
+        "gain": None,  # Resets alpha
+        "shape": None,
+        "key": None,  # Key change implies buffered means/vars are invalid.
+    }
 
     def _ew_update(arr, prev, _alpha):
         if np.all(prev == 0):
@@ -105,23 +119,26 @@ def scaler_np(
     while True:
         msg_in: AxisArray = yield msg_out
 
-        data = msg_in.data
-        if axis is None:
-            axis = msg_in.dims[0]
-
+        axis = axis or msg_in.dims[0]
         axis_idx = msg_in.get_axis_idx(axis)
-        data = np.moveaxis(data, axis_idx, 0)
 
-        if alpha is None:
+        if msg_in.axes[axis].gain != check_input["gain"]:
             alpha = _alpha_from_tau(time_constant, msg_in.axes[axis].gain)
+            check_input["gain"] = msg_in.axes[axis].gain
 
-        if means is None or means.shape != data.shape[1:]:
+        data: npt.NDArray = np.moveaxis(msg_in.data, axis_idx, 0)
+        b_reset = data.shape[1:] != check_input["shape"]
+        b_reset |= msg_in.key != check_input["key"]
+        if b_reset:
+            check_input["shape"] = data.shape[1:]
+            check_input["key"] = msg_in.key
             vars_sq_means = np.zeros_like(data[0], dtype=float)
             vars_means = np.zeros_like(data[0], dtype=float)
             means = np.zeros_like(data[0], dtype=float)
 
         result = np.zeros_like(data)
-        for sample_ix, sample in enumerate(data):
+        for sample_ix in range(data.shape[0]):
+            sample = data[sample_ix]
             # Update step
             vars_means = _ew_update(sample, vars_means, alpha)
             vars_sq_means = _ew_update(sample**2, vars_sq_means, alpha)
@@ -142,7 +159,7 @@ class AdaptiveStandardScalerSettings(ez.Settings):
     See :obj:`scaler_np` for a description of the parameters.
     """
     time_constant: float = 1.0
-    axis: Optional[str] = None
+    axis: typing.Optional[str] = None
 
 
 class AdaptiveStandardScaler(GenAxisArray):

@@ -1,10 +1,11 @@
 from collections import deque
 from dataclasses import dataclass, replace, field
 import time
-from typing import Optional, Any, Tuple, List, Union, AsyncGenerator, Generator
+import typing
 
 import ezmsg.core as ez
 import numpy as np
+import numpy.typing as npt
 
 from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
 from ezmsg.util.generator import consumer
@@ -18,10 +19,10 @@ class SampleTriggerMessage:
     timestamp: float = field(default_factory=time.time)
     """Time of the trigger, in seconds. The Clock depends on the input but defaults to time.time"""
 
-    period: Optional[Tuple[float, float]] = None
+    period: typing.Optional[typing.Tuple[float, float]] = None
     """The period around the timestamp, in seconds"""
 
-    value: Any = None
+    value: typing.Any = None
     """A value or 'label' associated with the trigger."""
 
 
@@ -38,11 +39,11 @@ class SampleMessage:
 @consumer
 def sampler(
         buffer_dur: float,
-        axis: Optional[str] = None,
-        period: Optional[Tuple[float, float]] = None,
-        value: Any = None,
+        axis: typing.Optional[str] = None,
+        period: typing.Optional[typing.Tuple[float, float]] = None,
+        value: typing.Any = None,
         estimate_alignment: bool = True
-) -> Generator[Union[AxisArray, SampleTriggerMessage], List[SampleMessage], None]:
+) -> typing.Generator[typing.List[SampleMessage], typing.Union[AxisArray, SampleTriggerMessage], None]:
     """
     A generator function that samples data into a buffer, accepts triggers, and returns slices of sampled
     data around the trigger time.
@@ -66,22 +67,30 @@ def sampler(
         A generator that expects `.send` either an :obj:`AxisArray` containing streaming data messages,
         or a :obj:`SampleTriggerMessage` containing a trigger, and yields the list of :obj:`SampleMessage` s.
     """
-    msg_out: Optional[list[SampleMessage]] = None
+    msg_out: list[SampleMessage] = []
 
     # State variables (most shared between trigger- and data-processing.
     triggers: deque[SampleTriggerMessage] = deque()
-    last_msg_stats = None
-    buffer = None
+    buffer: typing.Optional[npt.NDArray] = None
+    n_samples: int = 0
+    offset: float = 0.0
+
+    check_inputs = {
+        "fs": None,  # Also a state variable
+        "key": None,
+        "shape": None,
+    }
 
     while True:
         msg_in = yield msg_out
         msg_out = []
+
         if isinstance(msg_in, SampleTriggerMessage):
-            if last_msg_stats is None or buffer is None:
+            # Input is a trigger message that we will use to sample the buffer.
+
+            if buffer is None or check_inputs["fs"] is None:
                 # We've yet to see any data; drop the trigger.
                 continue
-            fs = last_msg_stats["fs"]
-            axis_idx = last_msg_stats["axis_idx"]
 
             _period = msg_in.period if msg_in.period is not None else period
             _value = msg_in.value if msg_in.value is not None else value
@@ -96,8 +105,8 @@ def sampler(
                 continue
 
             # Check that period is compatible with buffer duration.
-            max_buf_len = int(np.round(buffer_dur * fs))
-            req_buf_len = int(np.round((_period[1] - _period[0]) * fs))
+            max_buf_len = int(np.round(buffer_dur * check_inputs["fs"]))
+            req_buf_len = int(np.round((_period[1] - _period[0]) * check_inputs["fs"]))
             if req_buf_len >= max_buf_len:
                 ez.logger.warning(
                     f"Sampling failed: {period=} >= {buffer_dur=}"
@@ -107,32 +116,46 @@ def sampler(
             trigger_ts: float = msg_in.timestamp
             if not estimate_alignment:
                 # Override the trigger timestamp with the next sample's likely timestamp.
-                trigger_ts = last_msg_stats["offset"] + (last_msg_stats["n_samples"] + 1) / fs
+                trigger_ts = offset + (n_samples + 1) / check_inputs["fs"]
 
             new_trig_msg = replace(msg_in, timestamp=trigger_ts, period=_period, value=_value)
             triggers.append(new_trig_msg)
 
         elif isinstance(msg_in, AxisArray):
-            if axis is None:
-                axis = msg_in.dims[0]
+            # Get properties from message
+            axis = axis or msg_in.dims[0]
             axis_idx = msg_in.get_axis_idx(axis)
             axis_info = msg_in.get_axis(axis)
             fs = 1.0 / axis_info.gain
             sample_shape = msg_in.data.shape[:axis_idx] + msg_in.data.shape[axis_idx + 1:]
 
-            # If the signal properties have changed in a breaking way then reset buffer and triggers.
-            if last_msg_stats is None or fs != last_msg_stats["fs"] or sample_shape != last_msg_stats["sample_shape"]:
-                last_msg_stats = {
-                    "fs": fs,
-                    "sample_shape": sample_shape,
-                    "axis_idx": axis_idx,
-                    "n_samples": msg_in.data.shape[axis_idx]
-                }
+            # TODO: We could accommodate change in dim order.
+            # if axis_idx != check_inputs["axis_idx"]:
+            #     msg_in = replace(
+            #         msg_in,
+            #         data=np.moveaxis(msg_in.data, axis_idx, check_inputs["axis_idx"]),
+            #         dims=TODO...
+            #     )
+            #    axis_idx = check_inputs["axis_idx"]
+
+            # If the properties have changed in a breaking way then reset buffer and triggers.
+            b_reset = fs != check_inputs["fs"]
+            b_reset = b_reset or sample_shape != check_inputs["shape"]
+            b_reset = b_reset or axis_idx != check_inputs["axis_idx"]  # TODO: Skip this if we do np.moveaxis above
+            b_reset = b_reset or msg_in.key != check_inputs["key"]
+            if b_reset:
+                check_inputs["fs"] = fs
+                check_inputs["shape"] = sample_shape
+                check_inputs["axis_idx"] = axis_idx
+                check_inputs["key"] = msg_in.key
+                n_samples = msg_in.data.shape[axis_idx]
                 buffer = None
                 if len(triggers) > 0:
                     ez.logger.warning("Data stream changed: Discarding all triggers")
                 triggers.clear()
-            last_msg_stats["offset"] = axis_info.offset  # Should be updated on every message.
+
+            # Save some info for trigger processing
+            offset = axis_info.offset
 
             # Update buffer
             buffer = msg_in.data if buffer is None else np.concatenate((buffer, msg_in.data), axis=axis_idx)
@@ -159,7 +182,6 @@ def sampler(
                     )
                     triggers.remove(trig)
 
-                # TODO: Speed up with searchsorted?
                 t_start = trig.timestamp + trig.period[0]
                 if t_start >= buffer_offset[0]:
                     start = np.searchsorted(buffer_offset, t_start)
@@ -188,11 +210,11 @@ class SamplerSettings(ez.Settings):
     See :obj:`sampler` for a description of the fields.
     """
     buffer_dur: float
-    axis: Optional[str] = None
-    period: Optional[
-        Tuple[float, float]
+    axis: typing.Optional[str] = None
+    period: typing.Optional[
+        typing.Tuple[float, float]
     ] = None  # Optional default period if unspecified in SampleTriggerMessage
-    value: Any = None  # Optional default value if unspecified in SampleTriggerMessage
+    value: typing.Any = None  # Optional default value if unspecified in SampleTriggerMessage
 
     estimate_alignment: bool = True
     # If true, use message timestamp fields and reported sampling rate to estimate
@@ -204,7 +226,7 @@ class SamplerSettings(ez.Settings):
 
 class SamplerState(ez.State):
     cur_settings: SamplerSettings
-    gen: Generator[Union[AxisArray, SampleTriggerMessage], List[SampleMessage], None]
+    gen: typing.Generator[typing.Union[AxisArray, SampleTriggerMessage], typing.List[SampleMessage], None]
 
 
 class Sampler(ez.Unit):
@@ -241,14 +263,14 @@ class Sampler(ez.Unit):
 
     @ez.subscriber(INPUT_SIGNAL, zero_copy=True)
     @ez.publisher(OUTPUT_SAMPLE)
-    async def on_signal(self, msg: AxisArray) -> AsyncGenerator:
+    async def on_signal(self, msg: AxisArray) -> typing.AsyncGenerator:
         pub_samples = self.STATE.gen.send(msg)
         for sample in pub_samples:
             yield self.OUTPUT_SAMPLE, sample
 
 
 class TriggerGeneratorSettings(ez.Settings):
-    period: Tuple[float, float]
+    period: typing.Tuple[float, float]
     """The period around the trigger event."""
 
     prewait: float = 0.5
@@ -268,7 +290,7 @@ class TriggerGenerator(ez.Unit):
     OUTPUT_TRIGGER = ez.OutputStream(SampleTriggerMessage)
 
     @ez.publisher(OUTPUT_TRIGGER)
-    async def generate(self) -> AsyncGenerator:
+    async def generate(self) -> typing.AsyncGenerator:
         await asyncio.sleep(self.SETTINGS.prewait)
 
         output = 0

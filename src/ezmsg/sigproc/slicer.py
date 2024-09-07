@@ -2,6 +2,7 @@ from dataclasses import replace
 import typing
 
 import numpy as np
+import numpy.typing as npt
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
 from ezmsg.util.generator import consumer
@@ -48,18 +49,35 @@ def slicer(
     selection: str = "", axis: typing.Optional[str] = None
 ) -> typing.Generator[AxisArray, AxisArray, None]:
     msg_out = AxisArray(np.array([]), dims=[""])
-    _slice = None
-    b_change_dims = False
-    new_axis = None  # Will hold updated metadata
+
+    # State variables
+    _slice: typing.Optional[typing.Union[slice, npt.NDArray]] = None
+    new_axis: typing.Optional[AxisArray.Axis] = None
+    b_change_dims: bool = False  # If number of dimensions changes when slicing
+    
+    # Reset if input changes
+    check_input = {
+        "key": None,  # key change used as proxy for label change, which we don't check explicitly
+        "len": None
+    }
 
     while True:
         msg_in: AxisArray = yield msg_out
 
-        if axis is None:
-            axis = msg_in.dims[-1]
+        axis = axis or msg_in.dims[-1]
         axis_idx = msg_in.get_axis_idx(axis)
 
-        if _slice is None:
+        b_reset = _slice is None  # or new_axis is None
+        b_reset = b_reset or msg_in.key != check_input["key"]
+        b_reset = b_reset or (
+                (msg_in.data.shape[axis_idx] != check_input["len"]) and (type(_slice) is np.ndarray)
+        )
+        if b_reset:
+            check_input["key"] = msg_in.key
+            check_input["len"] = msg_in.data.shape[axis_idx]
+            new_axis = None  # Will hold updated metadata
+            b_change_dims = False
+
             # Calculate the slice
             _slices = parse_slice(selection)
             if len(_slices) == 1:
@@ -70,7 +88,8 @@ def slicer(
                 #  to a discontinuous set of integer indexes.
                 indices = np.arange(msg_in.data.shape[axis_idx])
                 indices = np.hstack([indices[_] for _ in _slices])
-                _slice = np.s_[indices]
+                _slice = np.s_[indices]  # Integer scalar array
+
             # Create the output axis.
             if (axis in msg_in.axes
                     and hasattr(msg_in.axes[axis], "labels")

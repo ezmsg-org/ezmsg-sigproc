@@ -2,6 +2,7 @@ from dataclasses import replace
 import typing
 
 import numpy as np
+import numpy.typing as npt
 import ezmsg.core as ez
 from ezmsg.util.generator import consumer
 from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
@@ -64,22 +65,32 @@ def ranged_aggregate(
     """
     msg_out = AxisArray(np.array([]), dims=[""])
 
-    target_axis: typing.Optional[AxisArray.Axis] = None
-    out_axis = AxisArray.Axis()
+    # State variables
     slices: typing.Optional[typing.List[typing.Tuple[typing.Any, ...]]] = None
-    axis_name = ""
+    out_axis: typing.Optional[AxisArray.Axis] = None
+    ax_vec: typing.Optional[npt.NDArray] = None
+
+    # Reset if any of these changes. Key not checked because continuity between chunks not required.
+    check_inputs = {"gain": None, "offset": None}
 
     while True:
         msg_in: AxisArray = yield msg_out
         if bands is None:
             msg_out = msg_in
         else:
-            if slices is None or target_axis != msg_in.get_axis(axis_name):
-                # If we have yet to calculate slices, or if the axis we are operating on
-                #  has changed (e.g., "time" or "win" axis always changes), then recalculate slices.
-                axis_name = axis or msg_in.dims[0]
-                ax_idx = msg_in.get_axis_idx(axis_name)
-                target_axis = msg_in.axes[axis_name]
+            axis = axis or msg_in.dims[0]
+            target_axis = msg_in.get_axis(axis)
+
+            b_reset = target_axis.gain != check_inputs["gain"]
+            b_reset = b_reset or target_axis.offset != check_inputs["offset"]
+            if b_reset:
+                check_inputs["gain"] = target_axis.gain
+                check_inputs["offset"] = target_axis.offset
+
+                # If the axis we are operating on has changed (e.g., "time" or "win" axis always changes),
+                #  or the key has changed, then recalculate slices.
+
+                ax_idx = msg_in.get_axis_idx(axis)
 
                 ax_vec = target_axis.offset + np.arange(msg_in.data.shape[ax_idx]) * target_axis.gain
                 slices = []
@@ -102,11 +113,11 @@ def ranged_aggregate(
                 agg_func(slice_along_axis(msg_in.data, sl, axis=ax_idx), axis=ax_idx)
                 for sl in slices
             ]
-            new_axes = {**msg_in.axes, axis_name: out_axis}
+
             msg_out = replace(
                 msg_in,
                 data=np.stack(out_data, axis=ax_idx),
-                axes=new_axes
+                axes={**msg_in.axes, axis: out_axis}
             )
             if operation in [AggregationFunction.ARGMIN, AggregationFunction.ARGMAX]:
                 # Convert indices returned by argmin/argmax into the value along the axis.

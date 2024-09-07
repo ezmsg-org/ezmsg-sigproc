@@ -78,20 +78,28 @@ def butter(
     # IO
     msg_out = AxisArray(np.array([]), dims=[""])
 
+    # Check parameters
     btype, cutoffs = ButterworthFilterSettings(
         order=order, cuton=cuton, cutoff=cutoff
     ).filter_specs()
 
-    # We cannot calculate coefs yet because we do not know input sample rate
-    coefs = None
-    filter_gen = filtergen(axis, coefs, coef_type)  # Passthrough.
+    # State variables
+    filter_gen = filtergen(axis, None, coef_type)  # Initialize filtergen as passthrough until we can calculate coefs.
+
+    # Reset if these change.
+    check_input = {"gain": None}
+    # Key not checked because filter_gen will handle resetting if .key changes.
 
     while True:
         msg_in: AxisArray = yield msg_out
-        if coefs is None and order > 0:
-            fs = 1 / msg_in.axes[axis or msg_in.dims[0]].gain
+        axis = axis or msg_in.dims[0]
+
+        b_reset = msg_in.axes[axis].gain != check_input["gain"]
+        b_reset = b_reset and order > 0  # Not passthrough
+        if b_reset:
+            check_input["gain"] = msg_in.axes[axis].gain
             coefs = scipy.signal.butter(
-                order, Wn=cutoffs, btype=btype, fs=fs, output=coef_type
+                order, Wn=cutoffs, btype=btype, fs=1 / msg_in.axes[axis].gain, output=coef_type
             )
             filter_gen = filtergen(axis, coefs, coef_type)
 
