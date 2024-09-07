@@ -31,6 +31,9 @@ def test_affine_generator():
     expected_out = in_dat @ weights.T
     # Same result: expected_out = np.vstack([(step[None, :] * weights).sum(axis=1) for step in in_dat])
 
+    # Send again just to make sure the generator doesn't crash
+    _ = gen.send(msg_in)
+
     gen = affine_transform(weights=csv_path, axis="ch", right_multiply=False)
     msg_out = gen.send(msg_in)
     assert np.allclose(msg_out.data, expected_out)

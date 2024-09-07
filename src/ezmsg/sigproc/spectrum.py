@@ -92,47 +92,68 @@ def spectrum(
         A primed generator object that expects `.send(axis_array)` of continuous data
         and yields an AxisArray of spectral magnitudes or powers.
     """
-
-    # State variables
     msg_out = AxisArray(np.array([]), dims=[""])
 
-    axis_name = axis
-    axis_idx = None
-    n_time = None
+    # State variables
     apply_window = window != WindowFunction.NONE
     do_fftshift &= output == SpectralOutput.FULL
     f_sl = slice(None)
+    freq_axis: typing.Optional[AxisArray.Axis] = None
+    fftfun: typing.Optional[typing.Callable] = None
+    f_transform: typing.Optional[typing.Callable] = None
+    new_dims: typing.Optional[typing.List[str]] = None
+
+    # Reset if input changes substantially
+    check_input = {
+        "n_time": None,  # Need to recalc windows
+        "ndim": None,  # Input ndim changed: Need to recalc windows
+        "kind": None,  # Input dtype changed: Need to re-init fft funcs
+        "ax_idx": None,  # Axis index changed: Need to re-init fft funcs
+        "gain": None  # Gain changed: Need to re-calc freqs
+        # "key": None  # There's no temporal continuity; we can ignore key changes
+    }
 
     while True:
         msg_in: AxisArray = yield msg_out
 
-        if axis_name is None:
-            axis_name = msg_in.dims[0]
+        # Get signal properties
+        axis = axis or msg_in.dims[0]
+        ax_idx = msg_in.get_axis_idx(axis)
+        ax_info = msg_in.axes[axis]
+        targ_len = msg_in.data.shape[ax_idx]
 
-        # Initial setup
-        if n_time is None or axis_idx is None or msg_in.data.shape[axis_idx] != n_time:
-            axis_idx = msg_in.get_axis_idx(axis_name)
-            _axis = msg_in.get_axis(axis_name)
-            n_time = msg_in.data.shape[axis_idx]
-            nfft = nfft or n_time
+        # Check signal properties for change
+        b_reset = targ_len != check_input["n_time"]
+        b_reset = b_reset or msg_in.data.ndim != check_input["ndim"]
+        b_reset = b_reset or msg_in.data.dtype.kind != check_input["kind"]
+        b_reset = b_reset or ax_idx != check_input["ax_idx"]
+        b_reset = b_reset or ax_info.gain != check_input["gain"]
+        if b_reset:
+            check_input["n_time"] = targ_len
+            check_input["ndim"] = msg_in.data.ndim
+            check_input["kind"] = msg_in.data.dtype.kind
+            check_input["ax_idx"] = ax_idx
+            check_input["gain"] = ax_info.gain
+
+            nfft = nfft or targ_len
 
             # Pre-calculate windowing
-            window = WINDOWS[window](n_time)
-            window = window.reshape([1] * axis_idx + [len(window),] + [1] * (msg_in.data.ndim - 1 - axis_idx))
+            window = WINDOWS[window](targ_len)
+            window = window.reshape([1] * ax_idx + [len(window),] + [1] * (msg_in.data.ndim - 1 - ax_idx))
             if (transform != SpectralTransform.RAW_COMPLEX and
                     not (transform == SpectralTransform.REAL or transform == SpectralTransform.IMAG)):
-                scale = np.sum(window ** 2.0) * _axis.gain
+                scale = np.sum(window ** 2.0) * ax_info.gain
 
             # Pre-calculate frequencies and select our fft function.
             b_complex = msg_in.data.dtype.kind == "c"
             if (not b_complex) and output == SpectralOutput.POSITIVE:
                 # If input is not complex and desired output is SpectralOutput.POSITIVE, we can save some computation
                 #  by using rfft and rfftfreq.
-                fftfun = partial(np.fft.rfft, n=nfft, axis=axis_idx, norm=norm)
-                freqs = np.fft.rfftfreq(nfft, d=_axis.gain * n_time / nfft)
+                fftfun = partial(np.fft.rfft, n=nfft, axis=ax_idx, norm=norm)
+                freqs = np.fft.rfftfreq(nfft, d=ax_info.gain * targ_len / nfft)
             else:
-                fftfun = partial(np.fft.fft, n=nfft, axis=axis_idx, norm=norm)
-                freqs = np.fft.fftfreq(nfft, d=_axis.gain * n_time / nfft)
+                fftfun = partial(np.fft.fft, n=nfft, axis=ax_idx, norm=norm)
+                freqs = np.fft.fftfreq(nfft, d=ax_info.gain * targ_len / nfft)
                 if output == SpectralOutput.POSITIVE:
                     f_sl = slice(None, nfft // 2 + 1 - (nfft % 2))
                 elif output == SpectralOutput.NEGATIVE:
@@ -141,12 +162,13 @@ def spectrum(
                 elif do_fftshift:  # and FULL
                     freqs = np.fft.fftshift(freqs, axes=-1)
                 freqs = freqs[f_sl]
+            freqs = freqs.tolist()  # To please type checking
             freq_axis = AxisArray.Axis(
                 unit="Hz", gain=freqs[1] - freqs[0], offset=freqs[0]
             )
             if out_axis is None:
-                out_axis = axis_name
-            new_dims = msg_in.dims[:axis_idx] + [out_axis, ] + msg_in.dims[axis_idx + 1:]
+                out_axis = axis
+            new_dims = msg_in.dims[:ax_idx] + [out_axis, ] + msg_in.dims[ax_idx + 1:]
 
             f_transform = lambda x: x
             if transform != SpectralTransform.RAW_COMPLEX:
@@ -161,18 +183,18 @@ def spectrum(
                     else:
                         f_transform = f1
 
-        new_axes = {k: v for k, v in msg_in.axes.items() if k not in [out_axis, axis_name]}
+        new_axes = {k: v for k, v in msg_in.axes.items() if k not in [out_axis, axis]}
         new_axes[out_axis] = freq_axis
 
         if apply_window:
             win_dat = msg_in.data * window
         else:
             win_dat = msg_in.data
-        spec = fftfun(win_dat, n=nfft, axis=axis_idx, norm=norm)  # norm="forward" equivalent to `/ nfft`
+        spec = fftfun(win_dat, n=nfft, axis=ax_idx, norm=norm)  # norm="forward" equivalent to `/ nfft`
         if do_fftshift or output == SpectralOutput.NEGATIVE:
-            spec = np.fft.fftshift(spec, axes=axis_idx)
+            spec = np.fft.fftshift(spec, axes=ax_idx)
         spec = f_transform(spec)
-        spec = slice_along_axis(spec, f_sl, axis_idx)
+        spec = slice_along_axis(spec, f_sl, ax_idx)
 
         msg_out = replace(msg_in, data=spec, dims=new_dims, axes=new_axes)
 

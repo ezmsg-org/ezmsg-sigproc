@@ -33,33 +33,59 @@ def cwt(
     Returns:
         A Generator object that expects `.send(axis_array)` of continuous data
     """
+    msg_out: typing.Optional[AxisArray] = None
+
+    # Check parameters
     scales = np.array(scales)
     assert np.all(scales > 0), "Scales must be positive."
     assert scales.ndim == 1, "Scales must be a 1D list, tuple, or array."
-    neg_rt_scales = -np.sqrt(scales)[:, None]
-
     if not isinstance(wavelet, (pywt.ContinuousWavelet, pywt.Wavelet)):
         wavelet = pywt.DiscreteContinuousWavelet(wavelet)
     precision = 10
-    int_psi, x = pywt.integrate_wavelet(wavelet, precision=precision)
-    int_psi = np.conj(int_psi) if wavelet.complex_cwt else int_psi
 
-    msg_out: typing.Optional[AxisArray] = None
+    # State variables
+    neg_rt_scales = -np.sqrt(scales)[:, None]
+    int_psi, wave_xvec = pywt.integrate_wavelet(wavelet, precision=precision)
+    int_psi = np.conj(int_psi) if wavelet.complex_cwt else int_psi
     template: typing.Optional[AxisArray] = None
+    fbgen: typing.Optional[typing.Generator[AxisArray, AxisArray, None]] = None
+    last_conv_samp: typing.Optional[npt.NDArray] = None
+
+    # Reset if input changed
+    check_input = {
+        "kind": None,  # Need to recalc kernels at same complexity as input
+        "gain": None,  # Need to recalc freqs
+        "shape": None,  # Need to recalc template and buffer
+        "key": None  # Buffer obsolete
+    }
 
     while True:
         msg_in: AxisArray = yield msg_out
         ax_idx = msg_in.get_axis_idx(axis)
+        in_shape = msg_in.data.shape[:ax_idx] + msg_in.data.shape[ax_idx + 1:]
 
-        if msg_in.data.size and template is None:
-            # convert int_psi, x to the same precision as the data
+        b_reset = msg_in.data.dtype.kind != check_input["kind"]
+        b_reset = b_reset or msg_in.axes[axis].gain != check_input["gain"]
+        b_reset = b_reset or in_shape != check_input["shape"]
+        b_reset = b_reset or msg_in.key != check_input["key"]
+        b_reset = b_reset and msg_in.data.size > 0
+        if b_reset:
+            check_input["kind"] = msg_in.data.dtype.kind
+            check_input["gain"] = msg_in.axes[axis].gain
+            check_input["shape"] = in_shape
+            check_input["key"] = msg_in.key
+
+            # convert int_psi, wave_xvec to the same precision as the data
             dt_data = msg_in.data.dtype  # _check_dtype(msg_in.data)
             dt_cplx = np.result_type(dt_data, np.complex64)
             dt_psi = dt_cplx if int_psi.dtype.kind == 'c' else dt_data
             int_psi = np.asarray(int_psi, dtype=dt_psi)
-            x = np.asarray(x, dtype=msg_in.data.real.dtype)
-            wave_range = x[-1] - x[0]
-            step = x[1] - x[0]
+            # TODO: Currently int_psi cannot be made non-complex once it is complex.
+
+            # Calculate waves for each scale
+            wave_xvec = np.asarray(wave_xvec, dtype=msg_in.data.real.dtype)
+            wave_range = wave_xvec[-1] - wave_xvec[0]
+            step = wave_xvec[1] - wave_xvec[0]
             int_psi_scales = []
             for scale in scales:
                 reix = (np.arange(scale * wave_range + 1) / (scale * step)).astype(int)
@@ -73,7 +99,7 @@ def cwt(
             freqs = pywt.scale2frequency(wavelet, scales, precision) / msg_in.axes[axis].gain
             fstep = (freqs[1] - freqs[0]) if len(freqs) > 1 else 1.0
             # Create output template
-            dummy_shape = msg_in.data.shape[:ax_idx] + msg_in.data.shape[ax_idx + 1:] + (len(scales), 0)
+            dummy_shape = in_shape + (len(scales), 0)
             template = AxisArray(
                 np.zeros(dummy_shape, dtype=dt_cplx if wavelet.complex_cwt else dt_data),
                 dims=msg_in.dims[:ax_idx] + msg_in.dims[ax_idx + 1:] + ["freq", axis],

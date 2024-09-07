@@ -32,6 +32,7 @@ def affine_transform(
     """
     msg_out = AxisArray(np.array([]), dims=[""])
 
+    # Check parameters
     if isinstance(weights, str):
         if weights == "passthrough":
             weights = None
@@ -44,8 +45,13 @@ def affine_transform(
     if weights is not None:
         weights = np.ascontiguousarray(weights)
 
-    b_first = True
-    new_xform_ax: typing.Optional[AxisArray.Axis] = None
+    # State variables
+    new_axis: typing.Optional[AxisArray.Axis] = None  # New axis with transformed labels, if required
+
+    # Reset if any of these change.
+    check_input = {"key": None}
+    # We assume key change catches labels change; we don't want to check labels every message
+    # We don't need to check if input size has changed because weights multiplication will fail if so.
 
     while True:
         msg_in: AxisArray = yield msg_out
@@ -54,15 +60,14 @@ def affine_transform(
             msg_out = msg_in
             continue
 
-        if axis is None:
-            axis = msg_in.dims[-1]
-            axis_idx = -1
-        else:
-            axis_idx = msg_in.get_axis_idx(axis)
+        axis = axis or msg_in.dims[-1]  # Note: Most nodes default do dim[0]
+        axis_idx = msg_in.get_axis_idx(axis)
 
-        if b_first:
-            # First data sample. Determine if we need to modify the transformed axis.
-            b_first = False
+        b_reset = msg_in.key != check_input["key"]
+        if b_reset:
+            # First sample or key has changed. Reset the state.
+            check_input["key"] = msg_in.key
+            # Determine if we need to modify the transformed axis.
             if (
                     axis in msg_in.axes
                     and hasattr(msg_in.axes[axis], "labels")
@@ -95,7 +100,7 @@ def affine_transform(
                     elif np.all(b_filled_outputs):
                         # Transform is dropping some of the inputs.
                         new_labels = np.array(in_labels)[b_used_inputs].tolist()
-                new_xform_ax = replace(msg_in.axes[axis], labels=new_labels)
+                new_axis = replace(msg_in.axes[axis], labels=new_labels)
 
         data = msg_in.data
 
@@ -113,9 +118,8 @@ def affine_transform(
             data = np.moveaxis(data, -1, axis_idx)
 
         replace_kwargs = {"data": data}
-        if new_xform_ax is not None:
-            replace_kwargs["axes"] = {**msg_in.axes, axis: new_xform_ax}
-
+        if new_axis is not None:
+            replace_kwargs["axes"] = {**msg_in.axes, axis: new_axis}
         msg_out = replace(msg_in, **replace_kwargs)
 
 

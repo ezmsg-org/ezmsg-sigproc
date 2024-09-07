@@ -61,9 +61,11 @@ def filtergen(
     zi_func = {"ba": scipy.signal.lfilter_zi, "sos": scipy.signal.sosfilt_zi}[coef_type]
 
     # State variables
-    axis_idx = None
-    zi = None
-    expected_shape = None
+    zi: typing.Optional[npt.NDArray] = None
+
+    # Reset if these change.
+    check_input = {"key": None, "shape": None}
+    # fs changing will be handled by caller that creates coefficients.
 
     while True:
         msg_in: AxisArray = yield msg_out
@@ -73,27 +75,28 @@ def filtergen(
             msg_out = msg_in
             continue
 
-        if axis_idx is None:
-            axis_name = msg_in.dims[0] if axis is None else axis
-            axis_idx = msg_in.get_axis_idx(axis_name)
-
-        dat_in = msg_in.data
+        axis = msg_in.dims[0] if axis is None else axis
+        axis_idx = msg_in.get_axis_idx(axis)
 
         # Re-calculate/reset zi if necessary
-        samp_shape = dat_in.shape[:axis_idx] + dat_in.shape[axis_idx + 1 :]
-        if zi is None or samp_shape != expected_shape:
-            expected_shape = samp_shape
-            n_tail = dat_in.ndim - axis_idx - 1
+        samp_shape = msg_in.data.shape[:axis_idx] + msg_in.data.shape[axis_idx + 1 :]
+        b_reset = samp_shape != check_input["shape"]
+        b_reset = b_reset or msg_in.key != check_input["key"]
+        if b_reset:
+            check_input["shape"] = samp_shape
+            check_input["key"] = msg_in.key
+
+            n_tail = msg_in.data.ndim - axis_idx - 1
             zi = zi_func(*coefs)
             zi_expand = (None,) * axis_idx + (slice(None),) + (None,) * n_tail
-            n_tile = dat_in.shape[:axis_idx] + (1,) + dat_in.shape[axis_idx + 1 :]
+            n_tile = msg_in.data.shape[:axis_idx] + (1,) + msg_in.data.shape[axis_idx + 1 :]
             if coef_type == "sos":
                 # sos zi must keep its leading dimension (`order / 2` for low|high; `order` for bpass|bstop)
                 zi_expand = (slice(None),) + zi_expand
                 n_tile = (1,) + n_tile
             zi = np.tile(zi[zi_expand], n_tile)
 
-        dat_out, zi = filt_func(*coefs, dat_in, axis=axis_idx, zi=zi)
+        dat_out, zi = filt_func(*coefs, msg_in.data, axis=axis_idx, zi=zi)
         msg_out = replace(msg_in, data=dat_out)
 
 
