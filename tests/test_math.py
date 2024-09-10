@@ -3,11 +3,22 @@ import pytest
 
 from ezmsg.util.messages.axisarray import AxisArray
 
+from ezmsg.sigproc.math.abs import abs
 from ezmsg.sigproc.math.clip import clip
 from ezmsg.sigproc.math.difference import const_difference
 from ezmsg.sigproc.math.invert import invert
 from ezmsg.sigproc.math.log import log
 from ezmsg.sigproc.math.scale import scale
+
+
+def test_abs():
+    n_times = 130
+    n_chans = 255
+    in_dat = np.arange(n_times * n_chans).reshape(n_times, n_chans)
+    msg_in = AxisArray(in_dat, dims=["time", "ch"])
+    proc = abs()
+    msg_out = proc.send(msg_in)
+    assert np.array_equal(msg_out.data, np.abs(in_dat))
 
 
 @pytest.mark.parametrize("a_min", [1, 2])
