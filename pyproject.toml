@@ -43,3 +43,7 @@ packages = ["src/ezmsg"]
 dev-dependencies = [
     "ruff>=0.6.7",
 ]
+
+[tool.pytest.ini_options]
+norecursedirs = "tests/helpers"
+addopts = "-p no:warnings"

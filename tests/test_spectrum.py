@@ -175,7 +175,7 @@ def test_spectrum_vs_sps_fft(complex: bool):
     assert np.allclose(test_spec, sp_res)
 
 
-class TestSpectrumSettings(ez.Settings):
+class SpectrumSettingsTest(ez.Settings):
     synth_settings: EEGSynthSettings
     window_settings: WindowSettings
     spectrum_settings: SpectrumSettings
@@ -183,8 +183,8 @@ class TestSpectrumSettings(ez.Settings):
     term_settings: TerminateOnTotalSettings = field(default_factory=TerminateOnTotalSettings)
 
 
-class TestSpectrumIntegration(ez.Collection):
-    SETTINGS = TestSpectrumSettings
+class SpectrumIntegrationTest(ez.Collection):
+    SETTINGS = SpectrumSettingsTest
 
     SOURCE = EEGSynth()
     WIN = Window()
@@ -221,7 +221,7 @@ def test_spectrum_system(
     test_filename = get_test_fn(test_name)
     ez.logger.info(test_filename)
 
-    settings = TestSpectrumSettings(
+    settings = SpectrumSettingsTest(
         synth_settings=EEGSynthSettings(
             fs=fs,
             n_time=n_time,
@@ -246,7 +246,7 @@ def test_spectrum_system(
             total=target_messages,
         )
     )
-    system = TestSpectrumIntegration(settings)
+    system = SpectrumIntegrationTest(settings)
     ez.run(SYSTEM=system)
 
     messages: typing.List[AxisArray] = [_ for _ in message_log(test_filename)]
