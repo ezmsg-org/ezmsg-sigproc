@@ -141,3 +141,5 @@ cython_debug/
 
 # JetBrains
 .idea/
+
+src/ezmsg/sigproc/__version__.py
