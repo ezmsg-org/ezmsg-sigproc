@@ -308,14 +308,14 @@ def test_sin_gen(
 # TODO: test SinGenerator in a system.
 
 
-class TestEEGSynthSettings(ez.Settings):
+class EEGSynthSettingsTest(ez.Settings):
     synth_settings: EEGSynthSettings
     log_settings: MessageLoggerSettings
     term_settings: TerminateOnTotalSettings = field(default_factory=TerminateOnTotalSettings)
 
 
-class TestEEGSynthIntegration(ez.Collection):
-    SETTINGS = TestEEGSynthSettings
+class EEGSynthIntegrationTest(ez.Collection):
+    SETTINGS = EEGSynthSettingsTest
 
     SOURCE = EEGSynth()
     SINK = MessageLogger()
@@ -345,7 +345,7 @@ def test_eegsynth_system(
     test_filename = get_test_fn(test_name)
     ez.logger.info(test_filename)
 
-    settings = TestEEGSynthSettings(
+    settings = EEGSynthSettingsTest(
         synth_settings=EEGSynthSettings(
             fs=fs,
             n_time=n_time,
@@ -360,7 +360,7 @@ def test_eegsynth_system(
         )
     )
 
-    system = TestEEGSynthIntegration(settings)
+    system = EEGSynthIntegrationTest(settings)
     ez.run(SYSTEM=system)
 
     messages: typing.List[AxisArray] = [_ for _ in message_log(test_filename)]
