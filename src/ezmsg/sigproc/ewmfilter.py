@@ -1,18 +1,18 @@
 import asyncio
 from dataclasses import replace
+import typing
 
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
-
 import numpy as np
 
 from .window import Window, WindowSettings
 
-from typing import AsyncGenerator, Optional
+
 
 
 class EWMSettings(ez.Settings):
-    axis: Optional[str] = None
+    axis: typing.Optional[str] = None
     """Name of the axis to accumulate."""
 
     zero_offset: bool = True
@@ -51,7 +51,7 @@ class EWM(ez.Unit):
         self.STATE.buffer_queue.put_nowait(message)
 
     @ez.publisher(OUTPUT_SIGNAL)
-    async def sync_output(self) -> AsyncGenerator:
+    async def sync_output(self) -> typing.AsyncGenerator:
         while True:
             signal = await self.STATE.signal_queue.get()
             buffer = await self.STATE.buffer_queue.get()  # includes signal
@@ -102,7 +102,7 @@ class EWMFilterSettings(ez.Settings):
     history_dur: float
     """Previous data to accumulate for standardization."""
 
-    axis: Optional[str] = None
+    axis: typing.Optional[str] = None
     """Name of the axis to accumulate."""
 
     zero_offset: bool = True

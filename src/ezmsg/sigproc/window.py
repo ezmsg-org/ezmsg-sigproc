@@ -5,7 +5,6 @@ import typing
 import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
-
 from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis, sliding_win_oneaxis
 from ezmsg.util.generator import consumer
 

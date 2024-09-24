@@ -1,16 +1,13 @@
 import asyncio
+from dataclasses import dataclass, replace, field
 import typing
 
-from dataclasses import dataclass, replace, field
-
 import ezmsg.core as ez
-import scipy.signal
-
-import numpy as np
-import numpy.typing as npt
-
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.generator import consumer
+import numpy as np
+import numpy.typing as npt
+import scipy.signal
 
 
 @dataclass
