@@ -3,7 +3,6 @@ import typing
 
 import numpy as np
 import numpy.typing as npt
-
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.generator import consumer

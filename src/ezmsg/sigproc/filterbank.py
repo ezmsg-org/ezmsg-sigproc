@@ -11,10 +11,10 @@ import numpy.typing as npt
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.generator import consumer
-from ezmsg.sigproc.window import windowing
 
 from .base import GenAxisArray
 from .spectrum import OptionsEnum
+from .window import windowing
 
 
 class FilterbankMode(OptionsEnum):

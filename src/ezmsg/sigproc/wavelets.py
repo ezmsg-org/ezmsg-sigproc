@@ -8,8 +8,8 @@ import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.generator import consumer
 
-from ezmsg.sigproc.base import GenAxisArray
-from ezmsg.sigproc.filterbank import filterbank, FilterbankMode, MinPhaseMode
+from .base import GenAxisArray
+from .filterbank import filterbank, FilterbankMode, MinPhaseMode
 
 
 @consumer
