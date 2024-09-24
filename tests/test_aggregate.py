@@ -110,4 +110,6 @@ def test_aggregate_handle_change(change_ax: str):
     gen = ranged_aggregate(axis="freq", bands=[(5.0, 20.0), (30.0, 50.0)], operation=AggregationFunction.MEAN)
 
     out_msgs1 = [gen.send(_) for _ in in_msgs1]
+    print(len(out_msgs1))
     out_msgs2 = [gen.send(_) for _ in in_msgs2]
+    print(len(out_msgs2))
