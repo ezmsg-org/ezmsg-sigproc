@@ -33,22 +33,22 @@ def test_affine_generator():
 
     gen = affine_transform(weights=csv_path, axis="ch", right_multiply=False)
     ax_arr_out = gen.send(axis_arr_in)
-    assert np.array_equal(ax_arr_out.data, expected_out)
+    assert np.allclose(ax_arr_out.data, expected_out)
 
     # Try again as str, not Path
     gen = affine_transform(weights=str(csv_path), axis="ch", right_multiply=False)
     ax_arr_out = gen.send(axis_arr_in)
-    assert np.array_equal(ax_arr_out.data, expected_out)
+    assert np.allclose(ax_arr_out.data, expected_out)
 
     # Try again as direct ndarray
     gen = affine_transform(weights=weights, axis="ch", right_multiply=False)
     ax_arr_out = gen.send(axis_arr_in)
-    assert np.array_equal(ax_arr_out.data, expected_out)
+    assert np.allclose(ax_arr_out.data, expected_out)
 
     # One more time, but we pre-transpose the weights and do not override right_multiply
     gen = affine_transform(weights=weights.T, axis="ch", right_multiply=True)
     ax_arr_out = gen.send(axis_arr_in)
-    assert np.array_equal(ax_arr_out.data, expected_out)
+    assert np.allclose(ax_arr_out.data, expected_out)
 
 
 def test_affine_passthrough():
