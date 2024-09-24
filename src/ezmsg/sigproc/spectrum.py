@@ -170,16 +170,16 @@ def spectrum(
                 out_axis = axis
             new_dims = msg_in.dims[:ax_idx] + [out_axis, ] + msg_in.dims[ax_idx + 1:]
 
-            f_transform = lambda x: x
+            def f_transform(x): return x
             if transform != SpectralTransform.RAW_COMPLEX:
                 if transform == SpectralTransform.REAL:
-                    f_transform = lambda x: x.real
+                    def f_transform(x): return x.real
                 elif transform == SpectralTransform.IMAG:
-                    f_transform = lambda x: x.imag
+                    def f_transform(x): return x.imag
                 else:
-                    f1 = lambda x: (2.0 * (np.abs(x) ** 2.0)) / scale
+                    def f1(x): return (np.abs(x) ** 2.0) / scale
                     if transform == SpectralTransform.REL_DB:
-                        f_transform = lambda x: 10 * np.log10(f1(x))
+                        def f_transform(x): return 10 * np.log10(f1(x))
                     else:
                         f_transform = f1
 
