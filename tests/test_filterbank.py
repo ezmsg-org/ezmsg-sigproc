@@ -1,5 +1,3 @@
-import typing
-
 import pytest
 import numpy as np
 import scipy.signal as sps

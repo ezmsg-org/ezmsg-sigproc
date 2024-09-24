@@ -1,13 +1,9 @@
-# from typing import Optional
 import numpy as np
 import pytest
 import scipy.signal
 from frozendict import frozendict
 from ezmsg.util.messages.axisarray import AxisArray
 
-from ezmsg.sigproc.butterworthfilter import (
-    ButterworthFilterSettings as LegacyButterSettings,
-)
 from ezmsg.sigproc.butterworthfilter import butter
 from ezmsg.sigproc.butterworthfilter import ButterworthFilterSettings as LegacyButterSettings
 

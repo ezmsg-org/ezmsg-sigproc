@@ -1,7 +1,7 @@
 import copy
 from dataclasses import field, replace
 import os
-from typing import Optional, Dict, Any, List, Tuple
+import typing
 
 import pytest
 import numpy as np
@@ -90,9 +90,9 @@ def test_window_gen_nodur():
 @pytest.mark.parametrize("time_ax", [0, 1])
 def test_window_generator(
         msg_block_size: int,
-        newaxis: Optional[str],
+        newaxis: typing.Optional[str],
         win_dur: float,
-        win_shift: Optional[float],
+        win_shift: typing.Optional[float],
         zero_pad: str,
         fs: float,
         time_ax: int
@@ -220,12 +220,12 @@ class WindowSystem(ez.Collection):
 ])
 def test_window_system(
     msg_block_size: int,
-    newaxis: Optional[str],
+    newaxis: typing.Optional[str],
     win_dur: float,
-    win_shift: Optional[float],
+    win_shift: typing.Optional[float],
     zero_pad: str,
     fs: float,
-    test_name: Optional[str] = None,
+    test_name: typing.Optional[str] = None,
 ):
     # Calculate expected dimensions.
     win_len = int((win_dur or 1.0) * fs)
@@ -258,7 +258,7 @@ def test_window_system(
     system = WindowSystem(settings)
     ez.run(SYSTEM=system)
 
-    messages: List[AxisArray] = [_ for _ in message_log(test_filename)]
+    messages: typing.List[AxisArray] = [_ for _ in message_log(test_filename)]
     os.remove(test_filename)
     ez.logger.info(f"Analyzing recording of { len( messages ) } messages...")
 
@@ -275,7 +275,7 @@ def test_window_system(
     ez.logger.info("Consistent metadata!")
 
     # Collect the outputs we want to test
-    data: List[np.ndarray] = [msg.data for msg in messages]
+    data: typing.List[np.ndarray] = [msg.data for msg in messages]
     if newaxis is None:
         offsets = np.array([_.axes["time"].offset for _ in messages])
     else:
