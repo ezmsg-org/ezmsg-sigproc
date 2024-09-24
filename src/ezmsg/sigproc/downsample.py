@@ -1,6 +1,5 @@
 import copy
 from dataclasses import replace
-import traceback
 import typing
 
 import numpy as np

@@ -1,5 +1,4 @@
 from dataclasses import replace
-import enum
 import typing
 
 import numpy as np

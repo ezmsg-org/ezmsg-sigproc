@@ -1,6 +1,5 @@
 import asyncio
-from collections import deque
-from dataclasses import dataclass, replace, field
+from dataclasses import replace, field
 import time
 from typing import Optional, Generator, AsyncGenerator, Union
 
