@@ -1,4 +1,4 @@
-import asyncio
+import asyncio  # noqa: F401
 from dataclasses import field
 import os
 import time
@@ -16,7 +16,7 @@ from util import get_test_fn
 from ezmsg.sigproc.synth import (
     clock, aclock, Clock, ClockSettings,
     acounter, Counter, CounterSettings,
-    sin, SinGenerator, SinGeneratorSettings,
+    sin,
     EEGSynth, EEGSynthSettings
 )
 

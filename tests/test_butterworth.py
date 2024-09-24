@@ -1,22 +1,19 @@
 import os
-import json
-
 import pytest
-import numpy as np
+import typing
 
+import numpy as np
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messagegate import MessageGate, MessageGateSettings
 from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
 from ezmsg.util.messagecodec import message_log
-from ezmsg.sigproc.synth import WhiteNoise, WhiteNoiseSettings
-from ezmsg.sigproc.butterworthfilter import ButterworthFilter, ButterworthFilterSettings
-
-from util import get_test_fn
 from ezmsg.util.terminate import TerminateOnTimeout as TerminateTest
 from ezmsg.util.terminate import TerminateOnTimeoutSettings as TerminateTestSettings
 
-from typing import Optional, List
+from ezmsg.sigproc.synth import WhiteNoise, WhiteNoiseSettings
+from ezmsg.sigproc.butterworthfilter import ButterworthFilter, ButterworthFilterSettings
+from util import get_test_fn
 
 
 class ButterworthSystemSettings(ez.Settings):
@@ -62,7 +59,7 @@ class ButterworthSystem(ez.Collection):
     ],
 )
 def test_butterworth_system(
-    cutoff: float, cuton: float, test_name: Optional[str] = None
+    cutoff: float, cuton: float, test_name: typing.Optional[str] = None
 ):
     in_fs = 128.0
     block_size = 128
@@ -92,7 +89,7 @@ def test_butterworth_system(
 
     ez.run(SYSTEM = system)
 
-    messages: List[AxisArray] = []
+    messages: typing.List[AxisArray] = []
     for msg in message_log(test_filename):
         messages.append(msg)
 
