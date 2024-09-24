@@ -108,15 +108,17 @@ def test_cwt():
     if False:
         # Debug visualize result
         import matplotlib.pyplot as plt
-        tmp = result.data; title = "ezmsg minphase homomorphic"
-        # tmp = expected; title = "pywavelets"
+        tmp = result.data
+        title = "ezmsg minphase homomorphic"
+        # tmp = expected
+        # title = "pywavelets"
         nch = tmp.shape[0]
         fig, axes = plt.subplots(2, nch)
         fig.suptitle(title)
         for ch_ix in range(nch):
             axes[0, ch_ix].set_title(f"Channel {ch_ix}")
             axes[0, ch_ix].plot(tvec, chirp[ch_ix])
-            pcm = axes[1, ch_ix].pcolormesh(tvec[:tmp.shape[-1]], freqs, np.abs(tmp[ch_ix, :-1, :-1]))
+            _ = axes[1, ch_ix].pcolormesh(tvec[:tmp.shape[-1]], freqs, np.abs(tmp[ch_ix, :-1, :-1]))
             axes[1, ch_ix].set_yscale("log")
             axes[1, ch_ix].set_xlabel("Time (s)")
             axes[1, ch_ix].set_ylabel("Frequency (Hz)")

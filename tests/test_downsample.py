@@ -30,7 +30,7 @@ def test_downsample_core(block_size: int, factor: int):
     num_samps = int(np.ceil(test_dur * in_fs))
     num_msgs = int(np.ceil(num_samps / block_size))
     sig = np.arange(num_samps * n_channels * n_features).reshape(num_samps, n_channels, n_features)
-    tvec = np.arange(num_samps) / in_fs
+    # tvec = np.arange(num_samps) / in_fs
 
     def msg_generator():
         for msg_ix in range(num_msgs):

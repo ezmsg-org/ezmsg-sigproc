@@ -12,7 +12,7 @@ from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
 from ezmsg.sigproc.sampler import (
     Sampler, SamplerSettings,
     TriggerGenerator, TriggerGeneratorSettings,
-    SampleTriggerMessage, SampleMessage,
+    SampleTriggerMessage,
     sampler
 )
 from ezmsg.sigproc.synth import Oscillator, OscillatorSettings
