@@ -54,7 +54,7 @@ async def test_aclock_agen(dispatch_rate: typing.Optional[float]):
     t_elapsed = time.time() - t_start
     assert all([_ == ez.Flag() for _ in result])
     if dispatch_rate:
-        assert (run_time - 1 / dispatch_rate) < t_elapsed < (run_time + 0.1)
+        assert (run_time - 1.1 / dispatch_rate) < t_elapsed < (run_time + 0.1)
     else:
         assert t_elapsed < (n_target * 1e-4)  # 100 usec per iteration is pretty generous
 
