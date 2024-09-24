@@ -40,8 +40,8 @@ def parse_slice(s: str) -> typing.Tuple[typing.Union[slice, int], ...]:
         if len(parts) == 1:
             return (int(parts[0]),)
         return (slice(*(int(part.strip()) if part else None for part in parts)),)
-    l = [parse_slice(_) for _ in s.split(",")]
-    return tuple([item for sublist in l for item in sublist])
+    suplist = [parse_slice(_) for _ in s.split(",")]
+    return tuple([item for sublist in suplist for item in sublist])
 
 
 @consumer
