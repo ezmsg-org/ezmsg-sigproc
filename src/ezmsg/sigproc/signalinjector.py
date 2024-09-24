@@ -1,10 +1,8 @@
+from dataclasses import replace
 import typing
 
 import ezmsg.core as ez
-
-from dataclasses import replace
 from ezmsg.util.messages.axisarray import AxisArray
-
 import numpy as np
 import numpy.typing as npt
 

@@ -3,11 +3,10 @@ import typing
 import ezmsg.core as ez
 import scipy.signal
 import numpy as np
-
-from .filter import filtergen, Filter, FilterState, FilterSettingsBase
-
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.generator import consumer
+
+from .filter import filtergen, Filter, FilterState, FilterSettingsBase
 
 
 class ButterworthFilterSettings(FilterSettingsBase):

@@ -1,7 +1,5 @@
-import ezmsg.core as ez
-
 import scipy.signal
-
+import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 
 from .downsample import Downsample, DownsampleSettings

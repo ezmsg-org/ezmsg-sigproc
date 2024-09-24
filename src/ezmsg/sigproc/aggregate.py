@@ -6,8 +6,8 @@ import numpy.typing as npt
 import ezmsg.core as ez
 from ezmsg.util.generator import consumer
 from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
-from ezmsg.sigproc.spectral import OptionsEnum
 
+from .spectral import OptionsEnum
 from .base import GenAxisArray
 
 

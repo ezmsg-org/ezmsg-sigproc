@@ -1,17 +1,14 @@
+import asyncio  # Dev/test apparatus
 from collections import deque
 from dataclasses import dataclass, replace, field
 import time
 import typing
 
-import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
-
+import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
 from ezmsg.util.generator import consumer
-
-# Dev/test apparatus
-import asyncio
 
 
 @dataclass(unsafe_hash=True)

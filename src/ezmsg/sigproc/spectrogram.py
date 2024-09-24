@@ -1,17 +1,15 @@
 import typing
 
-import numpy as np
-
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.generator import consumer, compose
 from ezmsg.util.messages.modify import modify_axis
-from ezmsg.sigproc.window import windowing
-from ezmsg.sigproc.spectrum import (
+
+from .window import windowing
+from .spectrum import (
     spectrum,
     WindowFunction, SpectralTransform, SpectralOutput
 )
-
 from .base import GenAxisArray
 
 
