@@ -10,8 +10,7 @@ from ..base import GenAxisArray
 
 
 @consumer
-def abs(
-) -> typing.Generator[AxisArray, AxisArray, None]:
+def abs() -> typing.Generator[AxisArray, AxisArray, None]:
     msg_out = AxisArray(np.array([]), dims=[""])
     while True:
         msg_in = yield msg_out

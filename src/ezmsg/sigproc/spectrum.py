@@ -18,7 +18,8 @@ class OptionsEnum(enum.Enum):
 
 
 class WindowFunction(OptionsEnum):
-    """Windowing function prior to calculating spectrum. """
+    """Windowing function prior to calculating spectrum."""
+
     NONE = "None (Rectangular)"
     """None."""
 
@@ -46,6 +47,7 @@ WINDOWS = {
 
 class SpectralTransform(OptionsEnum):
     """Additional transformation functions to apply to the spectral result."""
+
     RAW_COMPLEX = "Complex FFT Output"
     REAL = "Real Component of FFT"
     IMAG = "Imaginary Component of FFT"
@@ -55,6 +57,7 @@ class SpectralTransform(OptionsEnum):
 
 class SpectralOutput(OptionsEnum):
     """The expected spectral contents."""
+
     FULL = "Full Spectrum"
     POSITIVE = "Positive Frequencies"
     NEGATIVE = "Negative Frequencies"
@@ -109,7 +112,7 @@ def spectrum(
         "ndim": None,  # Input ndim changed: Need to recalc windows
         "kind": None,  # Input dtype changed: Need to re-init fft funcs
         "ax_idx": None,  # Axis index changed: Need to re-init fft funcs
-        "gain": None  # Gain changed: Need to re-calc freqs
+        "gain": None,  # Gain changed: Need to re-calc freqs
         # "key": None  # There's no temporal continuity; we can ignore key changes
     }
 
@@ -139,10 +142,18 @@ def spectrum(
 
             # Pre-calculate windowing
             window = WINDOWS[window](targ_len)
-            window = window.reshape([1] * ax_idx + [len(window),] + [1] * (msg_in.data.ndim - 1 - ax_idx))
-            if (transform != SpectralTransform.RAW_COMPLEX and
-                    not (transform == SpectralTransform.REAL or transform == SpectralTransform.IMAG)):
-                scale = np.sum(window ** 2.0) * ax_info.gain
+            window = window.reshape(
+                [1] * ax_idx
+                + [
+                    len(window),
+                ]
+                + [1] * (msg_in.data.ndim - 1 - ax_idx)
+            )
+            if transform != SpectralTransform.RAW_COMPLEX and not (
+                transform == SpectralTransform.REAL
+                or transform == SpectralTransform.IMAG
+            ):
+                scale = np.sum(window**2.0) * ax_info.gain
 
             # Pre-calculate frequencies and select our fft function.
             b_complex = msg_in.data.dtype.kind == "c"
@@ -168,18 +179,35 @@ def spectrum(
             )
             if out_axis is None:
                 out_axis = axis
-            new_dims = msg_in.dims[:ax_idx] + [out_axis, ] + msg_in.dims[ax_idx + 1:]
+            new_dims = (
+                msg_in.dims[:ax_idx]
+                + [
+                    out_axis,
+                ]
+                + msg_in.dims[ax_idx + 1 :]
+            )
 
-            def f_transform(x): return x
+            def f_transform(x):
+                return x
+
             if transform != SpectralTransform.RAW_COMPLEX:
                 if transform == SpectralTransform.REAL:
-                    def f_transform(x): return x.real
+
+                    def f_transform(x):
+                        return x.real
                 elif transform == SpectralTransform.IMAG:
-                    def f_transform(x): return x.imag
+
+                    def f_transform(x):
+                        return x.imag
                 else:
-                    def f1(x): return (np.abs(x) ** 2.0) / scale
+
+                    def f1(x):
+                        return (np.abs(x) ** 2.0) / scale
+
                     if transform == SpectralTransform.REL_DB:
-                        def f_transform(x): return 10 * np.log10(f1(x))
+
+                        def f_transform(x):
+                            return 10 * np.log10(f1(x))
                     else:
                         f_transform = f1
 
@@ -190,7 +218,8 @@ def spectrum(
             win_dat = msg_in.data * window
         else:
             win_dat = msg_in.data
-        spec = fftfun(win_dat, n=nfft, axis=ax_idx, norm=norm)  # norm="forward" equivalent to `/ nfft`
+        spec = fftfun(win_dat, n=nfft, axis=ax_idx, norm=norm)
+        # Note: norm="forward" equivalent to `/ nfft`
         if do_fftshift or output == SpectralOutput.NEGATIVE:
             spec = np.fft.fftshift(spec, axes=ax_idx)
         spec = f_transform(spec)
@@ -204,6 +233,7 @@ class SpectrumSettings(ez.Settings):
     Settings for :obj:`Spectrum.
     See :obj:`spectrum` for a description of the parameters.
     """
+
     axis: typing.Optional[str] = None
     # n: typing.Optional[int] = None # n parameter for fft
     out_axis: typing.Optional[str] = "freq"  # If none; don't change dim name
@@ -214,6 +244,7 @@ class SpectrumSettings(ez.Settings):
 
 class Spectrum(GenAxisArray):
     """Unit for :obj:`spectrum`"""
+
     SETTINGS = SpectrumSettings
 
     INPUT_SETTINGS = ez.InputStream(SpectrumSettings)
@@ -224,5 +255,5 @@ class Spectrum(GenAxisArray):
             out_axis=self.SETTINGS.out_axis,
             window=self.SETTINGS.window,
             transform=self.SETTINGS.transform,
-            output=self.SETTINGS.output
+            output=self.SETTINGS.output,
         )

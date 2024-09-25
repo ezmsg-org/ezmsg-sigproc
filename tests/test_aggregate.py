@@ -11,7 +11,6 @@ from util import assert_messages_equal
 
 
 def get_msg_gen(n_chans=20, n_freqs=100, data_dur=30.0, fs=1024.0, key=""):
-
     n_samples = int(data_dur * fs)
     data = np.arange(n_samples * n_chans * n_freqs).reshape(n_samples, n_chans, n_freqs)
     n_msgs = int(data_dur / 2)
@@ -22,19 +21,23 @@ def get_msg_gen(n_chans=20, n_freqs=100, data_dur=30.0, fs=1024.0, key=""):
             msg = AxisArray(
                 data=arr,
                 dims=["time", "ch", "freq"],
-                axes=frozendict({
-                    "time": AxisArray.Axis.TimeAxis(fs=fs, offset=offset),
-                    "freq": AxisArray.Axis(gain=1.0, offset=0.0, unit="Hz")
-                }),
-                key=key
+                axes=frozendict(
+                    {
+                        "time": AxisArray.Axis.TimeAxis(fs=fs, offset=offset),
+                        "freq": AxisArray.Axis(gain=1.0, offset=0.0, unit="Hz"),
+                    }
+                ),
+                key=key,
             )
             offset += arr.shape[0] / fs
             yield msg
+
     return msg_generator()
 
 
 @pytest.mark.parametrize(
-    "agg_func", [AggregationFunction.MEAN, AggregationFunction.MEDIAN, AggregationFunction.STD]
+    "agg_func",
+    [AggregationFunction.MEAN, AggregationFunction.MEDIAN, AggregationFunction.STD],
 )
 def test_aggregate(agg_func: AggregationFunction):
     bands = [(5.0, 20.0), (30.0, 50.0)]
@@ -45,6 +48,7 @@ def test_aggregate(agg_func: AggregationFunction):
     # Grab a deepcopy backup of the inputs so we can check the inputs didn't change
     #  while being processed.
     import copy
+
     backup = [copy.deepcopy(_) for _ in in_msgs]
 
     gen = ranged_aggregate(axis=targ_ax, bands=bands, operation=agg_func)
@@ -69,12 +73,17 @@ def test_aggregate(agg_func: AggregationFunction):
     agg_func = {
         AggregationFunction.MEAN: partial(np.mean, axis=-1, keepdims=True),
         AggregationFunction.MEDIAN: partial(np.median, axis=-1, keepdims=True),
-        AggregationFunction.STD: partial(np.std, axis=-1, keepdims=True)
+        AggregationFunction.STD: partial(np.std, axis=-1, keepdims=True),
     }[agg_func]
-    expected_data = np.concatenate([
-        agg_func(data[..., np.logical_and(targ_ax_vec >= start, targ_ax_vec <= stop)])
-        for (start, stop) in bands
-    ], axis=-1)
+    expected_data = np.concatenate(
+        [
+            agg_func(
+                data[..., np.logical_and(targ_ax_vec >= start, targ_ax_vec <= stop)]
+            )
+            for (start, stop) in bands
+        ],
+        axis=-1,
+    )
     received_data = AxisArray.concatenate(*out_msgs, dim="time").data
     assert np.allclose(received_data, expected_data)
 
@@ -104,10 +113,19 @@ def test_aggregate_handle_change(change_ax: str):
     change_ax being 'ch' should work while 'freq' should fail.
     """
     in_msgs1 = [_ for _ in get_msg_gen(n_chans=20, n_freqs=100)]
-    in_msgs2 = [_ for _ in get_msg_gen(n_chans=17 if change_ax == "ch" else 20,
-                                       n_freqs=70 if change_ax == "freq" else 100)]
+    in_msgs2 = [
+        _
+        for _ in get_msg_gen(
+            n_chans=17 if change_ax == "ch" else 20,
+            n_freqs=70 if change_ax == "freq" else 100,
+        )
+    ]
 
-    gen = ranged_aggregate(axis="freq", bands=[(5.0, 20.0), (30.0, 50.0)], operation=AggregationFunction.MEAN)
+    gen = ranged_aggregate(
+        axis="freq",
+        bands=[(5.0, 20.0), (30.0, 50.0)],
+        operation=AggregationFunction.MEAN,
+    )
 
     out_msgs1 = [gen.send(_) for _ in in_msgs1]
     print(len(out_msgs1))

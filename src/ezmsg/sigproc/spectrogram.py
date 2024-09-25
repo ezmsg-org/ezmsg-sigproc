@@ -6,10 +6,7 @@ from ezmsg.util.generator import consumer, compose
 from ezmsg.util.messages.modify import modify_axis
 
 from .window import windowing
-from .spectrum import (
-    spectrum,
-    WindowFunction, SpectralTransform, SpectralOutput
-)
+from .spectrum import spectrum, WindowFunction, SpectralTransform, SpectralOutput
 from .base import GenAxisArray
 
 
@@ -19,7 +16,7 @@ def spectrogram(
     window_shift: typing.Optional[float] = None,
     window: WindowFunction = WindowFunction.HANNING,
     transform: SpectralTransform = SpectralTransform.REL_DB,
-    output: SpectralOutput = SpectralOutput.POSITIVE
+    output: SpectralOutput = SpectralOutput.POSITIVE,
 ) -> typing.Generator[typing.Optional[AxisArray], AxisArray, None]:
     """
     Calculate a spectrogram on streaming data.
@@ -41,9 +38,11 @@ def spectrogram(
     """
 
     pipeline = compose(
-        windowing(axis="time", newaxis="win", window_dur=window_dur, window_shift=window_shift),
+        windowing(
+            axis="time", newaxis="win", window_dur=window_dur, window_shift=window_shift
+        ),
         spectrum(axis="time", window=window, transform=transform, output=output),
-        modify_axis(name_map={"win": "time"})
+        modify_axis(name_map={"win": "time"}),
     )
 
     # State variables
@@ -59,8 +58,11 @@ class SpectrogramSettings(ez.Settings):
     Settings for :obj:`Spectrogram`.
     See :obj:`spectrogram` for a description of the parameters.
     """
+
     window_dur: typing.Optional[float] = None  # window duration in seconds
-    window_shift: typing.Optional[float] = None  # window step in seconds. If None, window_shift == window_dur
+    window_shift: typing.Optional[float] = None
+    """"window step in seconds. If None, window_shift == window_dur"""
+
     # See SpectrumSettings for details of following settings:
     window: WindowFunction = WindowFunction.HAMMING
     transform: SpectralTransform = SpectralTransform.REL_DB
@@ -71,6 +73,7 @@ class Spectrogram(GenAxisArray):
     """
     Unit for :obj:`spectrogram`.
     """
+
     SETTINGS = SpectrogramSettings
 
     def construct_generator(self):
@@ -79,5 +82,5 @@ class Spectrogram(GenAxisArray):
             window_shift=self.SETTINGS.window_shift,
             window=self.SETTINGS.window,
             transform=self.SETTINGS.transform,
-            output=self.SETTINGS.output
+            output=self.SETTINGS.output,
         )

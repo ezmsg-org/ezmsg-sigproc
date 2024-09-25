@@ -10,10 +10,7 @@ from ..base import GenAxisArray
 
 
 @consumer
-def clip(
-    a_min: float,
-    a_max: float
-) -> typing.Generator[AxisArray, AxisArray, None]:
+def clip(a_min: float, a_max: float) -> typing.Generator[AxisArray, AxisArray, None]:
     msg_in = AxisArray(np.array([]), dims=[""])
     msg_out = AxisArray(np.array([]), dims=[""])
     while True:
@@ -30,7 +27,4 @@ class Clip(GenAxisArray):
     SETTINGS = ClipSettings
 
     def construct_generator(self):
-        self.STATE.gen = clip(
-            a_min=self.SETTINGS.a_min,
-            a_max=self.SETTINGS.a_max
-        )
+        self.STATE.gen = clip(a_min=self.SETTINGS.a_min, a_max=self.SETTINGS.a_max)

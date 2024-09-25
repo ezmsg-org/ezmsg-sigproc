@@ -46,7 +46,8 @@ def affine_transform(
         weights = np.ascontiguousarray(weights)
 
     # State variables
-    new_axis: typing.Optional[AxisArray.Axis] = None  # New axis with transformed labels, if required
+    # New axis with transformed labels, if required
+    new_axis: typing.Optional[AxisArray.Axis] = None
 
     # Reset if any of these change.
     check_input = {"key": None}
@@ -69,9 +70,9 @@ def affine_transform(
             check_input["key"] = msg_in.key
             # Determine if we need to modify the transformed axis.
             if (
-                    axis in msg_in.axes
-                    and hasattr(msg_in.axes[axis], "labels")
-                    and weights.shape[0] != weights.shape[1]
+                axis in msg_in.axes
+                and hasattr(msg_in.axes[axis], "labels")
+                and weights.shape[0] != weights.shape[1]
             ):
                 in_labels = msg_in.axes[axis].labels
                 new_labels = []
@@ -79,7 +80,9 @@ def affine_transform(
                 n_out = weights.shape[0 if right_multiply else 1]
                 if len(in_labels) != n_in:
                     # Something upstream did something it wasn't supposed to. We will drop the labels.
-                    ez.logger.warning(f"Received {len(in_labels)} for {n_in} inputs. Check upstream labels.")
+                    ez.logger.warning(
+                        f"Received {len(in_labels)} for {n_in} inputs. Check upstream labels."
+                    )
                 else:
                     b_used_inputs = np.any(weights, axis=0 if right_multiply else 1)
                     b_filled_outputs = np.any(weights, axis=1 if right_multiply else 0)
@@ -107,8 +110,10 @@ def affine_transform(
         if data.shape[axis_idx] == (weights.shape[0] - 1):
             # The weights are stacked A|B where A is the transform and B is a single row
             #  in the equation y = Ax + B. This supports NeuroKey's weights matrices.
-            sample_shape = data.shape[:axis_idx] + (1,) + data.shape[axis_idx+1:]
-            data = np.concatenate((data, np.ones(sample_shape).astype(data.dtype)), axis=axis_idx)
+            sample_shape = data.shape[:axis_idx] + (1,) + data.shape[axis_idx + 1 :]
+            data = np.concatenate(
+                (data, np.ones(sample_shape).astype(data.dtype)), axis=axis_idx
+            )
 
         if axis_idx in [-1, len(msg_in.dims) - 1]:
             data = np.matmul(data, weights)
@@ -128,6 +133,7 @@ class AffineTransformSettings(ez.Settings):
     Settings for :obj:`AffineTransform`.
     See :obj:`affine_transform` for argument details.
     """
+
     weights: typing.Union[np.ndarray, str, Path]
     axis: typing.Optional[str] = None
     right_multiply: bool = True
@@ -135,6 +141,7 @@ class AffineTransformSettings(ez.Settings):
 
 class AffineTransform(GenAxisArray):
     """:obj:`Unit` for :obj:`affine_transform`"""
+
     SETTINGS = AffineTransformSettings
 
     def construct_generator(self):
@@ -206,6 +213,7 @@ class CommonRereferenceSettings(ez.Settings):
     Settings for :obj:`CommonRereference`
     See :obj:`common_rereference` for argument details.
     """
+
     mode: str = "mean"
     axis: typing.Optional[str] = None
     include_current: bool = True
@@ -215,6 +223,7 @@ class CommonRereference(GenAxisArray):
     """
     :obj:`Unit` for :obj:`common_rereference`.
     """
+
     SETTINGS = CommonRereferenceSettings
 
     def construct_generator(self):

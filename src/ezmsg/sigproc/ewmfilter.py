@@ -9,8 +9,6 @@ import numpy as np
 from .window import Window, WindowSettings
 
 
-
-
 class EWMSettings(ez.Settings):
     axis: typing.Optional[str] = None
     """Name of the axis to accumulate."""
@@ -117,6 +115,7 @@ class EWMFilter(ez.Collection):
 
     Consider :obj:`scaler` for a more efficient alternative.
     """
+
     SETTINGS = EWMFilterSettings
 
     INPUT_SIGNAL = ez.InputStream(AxisArray)
@@ -128,7 +127,7 @@ class EWMFilter(ez.Collection):
     def configure(self) -> None:
         self.EWM.apply_settings(
             EWMSettings(
-                axis=self.SETTINGS.axis, 
+                axis=self.SETTINGS.axis,
                 zero_offset=self.SETTINGS.zero_offset,
             )
         )

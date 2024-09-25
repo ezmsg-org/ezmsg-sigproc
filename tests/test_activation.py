@@ -8,21 +8,25 @@ from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.sigproc.activation import activation, ActivationFunction, ACTIVATIONS
 
 
-@pytest.mark.parametrize("function", [_ for _ in ActivationFunction] + ActivationFunction.options())
+@pytest.mark.parametrize(
+    "function", [_ for _ in ActivationFunction] + ActivationFunction.options()
+)
 def test_activation(function: str):
     in_fs = 19.0
     sig = np.arange(24, dtype=float).reshape(4, 3, 2)
     if function in [ActivationFunction.LOGIT, "logit"]:
         sig += 1e-9
-        sig /= (np.max(sig) + 1e-3)
+        sig /= np.max(sig) + 1e-3
 
     def msg_generator():
         for msg_ix in range(sig.shape[0]):
-            msg_sig = sig[msg_ix:msg_ix+1]
+            msg_sig = sig[msg_ix : msg_ix + 1]
             msg = AxisArray(
                 data=msg_sig,
                 dims=["time", "ch", "feat"],
-                axes=frozendict({"time": AxisArray.Axis.TimeAxis(fs=in_fs, offset=msg_ix / in_fs)})
+                axes=frozendict(
+                    {"time": AxisArray.Axis.TimeAxis(fs=in_fs, offset=msg_ix / in_fs)}
+                ),
             )
             yield msg
 

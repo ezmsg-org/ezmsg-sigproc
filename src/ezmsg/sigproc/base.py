@@ -36,4 +36,3 @@ class GenAxisArray(ez.Unit):
             ez.logger.debug(f"Generator closed in {self.address}")
         except Exception:
             ez.logger.info(traceback.format_exc())
-

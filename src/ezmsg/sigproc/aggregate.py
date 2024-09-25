@@ -13,6 +13,7 @@ from .base import GenAxisArray
 
 class AggregationFunction(OptionsEnum):
     """Enum for aggregation functions available to be used in :obj:`ranged_aggregate` operation."""
+
     NONE = "None (all)"
     MAX = "max"
     MIN = "min"
@@ -49,7 +50,7 @@ AGGREGATORS = {
 def ranged_aggregate(
     axis: typing.Optional[str] = None,
     bands: typing.Optional[typing.List[typing.Tuple[float, float]]] = None,
-    operation: AggregationFunction = AggregationFunction.MEAN
+    operation: AggregationFunction = AggregationFunction.MEAN,
 ):
     """
     Apply an aggregation operation over one or more bands.
@@ -92,17 +93,20 @@ def ranged_aggregate(
 
                 ax_idx = msg_in.get_axis_idx(axis)
 
-                ax_vec = target_axis.offset + np.arange(msg_in.data.shape[ax_idx]) * target_axis.gain
+                ax_vec = (
+                    target_axis.offset
+                    + np.arange(msg_in.data.shape[ax_idx]) * target_axis.gain
+                )
                 slices = []
                 mids = []
-                for (start, stop) in bands:
+                for start, stop in bands:
                     inds = np.where(np.logical_and(ax_vec >= start, ax_vec <= stop))[0]
                     mids.append(np.mean(inds) * target_axis.gain + target_axis.offset)
-                    slices.append(np.s_[inds[0]:inds[-1] + 1])
+                    slices.append(np.s_[inds[0] : inds[-1] + 1])
                 out_ax_kwargs = {
                     "unit": target_axis.unit,
                     "offset": mids[0],
-                    "gain": (mids[1] - mids[0]) if len(mids) > 1 else 1.0
+                    "gain": (mids[1] - mids[0]) if len(mids) > 1 else 1.0,
                 }
                 if hasattr(target_axis, "labels"):
                     out_ax_kwargs["labels"] = [f"{_[0]} - {_[1]}" for _ in bands]
@@ -117,7 +121,7 @@ def ranged_aggregate(
             msg_out = replace(
                 msg_in,
                 data=np.stack(out_data, axis=ax_idx),
-                axes={**msg_in.axes, axis: out_axis}
+                axes={**msg_in.axes, axis: out_axis},
             )
             if operation in [AggregationFunction.ARGMIN, AggregationFunction.ARGMAX]:
                 # Convert indices returned by argmin/argmax into the value along the axis.
@@ -133,6 +137,7 @@ class RangedAggregateSettings(ez.Settings):
     Settings for ``RangedAggregate``.
     See :obj:`ranged_aggregate` for details.
     """
+
     axis: typing.Optional[str] = None
     bands: typing.Optional[typing.List[typing.Tuple[float, float]]] = None
     operation: AggregationFunction = AggregationFunction.MEAN
@@ -142,11 +147,12 @@ class RangedAggregate(GenAxisArray):
     """
     Unit for :obj:`ranged_aggregate`
     """
+
     SETTINGS = RangedAggregateSettings
 
     def construct_generator(self):
         self.STATE.gen = ranged_aggregate(
             axis=self.SETTINGS.axis,
             bands=self.SETTINGS.bands,
-            operation=self.SETTINGS.operation
+            operation=self.SETTINGS.operation,
         )

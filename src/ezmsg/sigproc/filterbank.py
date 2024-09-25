@@ -19,6 +19,7 @@ from .window import windowing
 
 class FilterbankMode(OptionsEnum):
     """The mode of operation for the filterbank."""
+
     CONV = "Direct Convolution"
     FFT = "FFT Convolution"
     AUTO = "Automatic"
@@ -26,6 +27,7 @@ class FilterbankMode(OptionsEnum):
 
 class MinPhaseMode(OptionsEnum):
     """The mode of operation for the filterbank."""
+
     NONE = "No kernel modification"
     HILBERT = "Hilbert Method; designed to be used with equiripple filters (e.g., from remez) with unity or zero gain regions"
     HOMOMORPHIC = "Works best with filters with an odd number of taps, and the resulting minimum phase filter will have a magnitude response that approximates the square root of the original filter’s magnitude response using half the number of taps"
@@ -80,10 +82,13 @@ def filterbank(
         axis = axis or msg_in.dims[0]
         gain = msg_in.axes[axis].gain if axis in msg_in.axes else 1.0
         targ_ax_ix = msg_in.get_axis_idx(axis)
-        in_shape = msg_in.data.shape[:targ_ax_ix] + msg_in.data.shape[targ_ax_ix + 1:]
+        in_shape = msg_in.data.shape[:targ_ax_ix] + msg_in.data.shape[targ_ax_ix + 1 :]
 
         b_reset = msg_in.key != check_input["key"]
-        b_reset = b_reset or (gain != check_input["gain"] and mode in [FilterbankMode.FFT, FilterbankMode.AUTO])
+        b_reset = b_reset or (
+            gain != check_input["gain"]
+            and mode in [FilterbankMode.FFT, FilterbankMode.AUTO]
+        )
         b_reset = b_reset or msg_in.data.dtype.kind != check_input["kind"]
         b_reset = b_reset or in_shape != check_input["shape"]
         if b_reset:
@@ -99,12 +104,16 @@ def filterbank(
                     # MinPhaseMode.HOMOMORPHICFULL: ("homomorphic", True),
                 }[min_phase]
                 kernels = [
-                    sps.minimum_phase(k, method=method)  # , half=half)  -- half requires later scipy >= 1.14
+                    sps.minimum_phase(
+                        k, method=method
+                    )  # , half=half)  -- half requires later scipy >= 1.14
                     for k in kernels
                 ]
 
             # Determine if this will be operating with complex data.
-            b_complex = msg_in.data.dtype.kind == "c" or any([_.dtype.kind == "c" for _ in kernels])
+            b_complex = msg_in.data.dtype.kind == "c" or any(
+                [_.dtype.kind == "c" for _ in kernels]
+            )
 
             # Calculate window_dur, window_shift, nfft
             max_kernel_len = max([_.size for _ in kernels])
@@ -120,8 +129,10 @@ def filterbank(
             dummy_shape = in_shape + (len(kernels), 0)
             template = AxisArray(
                 data=np.zeros(dummy_shape, dtype="complex" if b_complex else "float"),
-                dims=msg_in.dims[:targ_ax_ix] + msg_in.dims[targ_ax_ix + 1:] + [new_axis, axis],
-                axes=msg_in.axes.copy()  # We do not have info for kernel/filter axis :(.
+                dims=msg_in.dims[:targ_ax_ix]
+                + msg_in.dims[targ_ax_ix + 1 :]
+                + [new_axis, axis],
+                axes=msg_in.axes.copy(),  # We do not have info for kernel/filter axis :(.
             )
 
             # Determine optimal mode. Assumes 100 msec chunks.
@@ -136,15 +147,21 @@ def filterbank(
 
             if mode == FilterbankMode.CONV:
                 # Preallocate memory for convolution result and overlap-add
-                dest_shape = in_shape + (len(kernels), overlap + msg_in.data.shape[targ_ax_ix])
-                dest_arr = np.zeros(dest_shape, dtype="complex" if b_complex else "float")
+                dest_shape = in_shape + (
+                    len(kernels),
+                    overlap + msg_in.data.shape[targ_ax_ix],
+                )
+                dest_arr = np.zeros(
+                    dest_shape, dtype="complex" if b_complex else "float"
+                )
 
             elif mode == FilterbankMode.FFT:
                 # Calculate optimal nfft and windowing size.
                 opt_size = -overlap * lambertw(-1 / (2 * math.e * overlap), k=-1).real
                 nfft = sp_fft.next_fast_len(math.ceil(opt_size))
                 win_len = nfft - overlap
-                infft = win_len + overlap  # Same as nfft. Keeping as separate variable because I might need it again.
+                # infft same as nfft. Keeping as separate variable because I might need it again.
+                infft = win_len + overlap
 
                 # Create windowing node.
                 # Note: We could do windowing manually to avoid the overhead of the message structure,
@@ -182,7 +199,9 @@ def filterbank(
             in_dat = np.moveaxis(msg_in.data, targ_ax_ix, -1)
             if mode == FilterbankMode.FFT:
                 # Fix msg_in .dims because we will pass it to wingen
-                move_dims = msg_in.dims[:targ_ax_ix] + msg_in.dims[targ_ax_ix + 1:] + [axis]
+                move_dims = (
+                    msg_in.dims[:targ_ax_ix] + msg_in.dims[targ_ax_ix + 1 :] + [axis]
+                )
                 msg_in = replace(msg_in, data=in_dat, dims=move_dims)
         else:
             in_dat = msg_in.data
@@ -196,13 +215,15 @@ def filterbank(
             # TODO: Parallelize this loop.
             for k_ix, k in enumerate(kernels):
                 n_out = in_dat.shape[-1] + k.shape[-1] - 1
-                dest_arr[..., k_ix, :n_out] = np.apply_along_axis(np.convolve, -1, in_dat, k, mode="full")
+                dest_arr[..., k_ix, :n_out] = np.apply_along_axis(
+                    np.convolve, -1, in_dat, k, mode="full"
+                )
             dest_arr[..., :overlap] += tail  # Add previous overlap
-            new_tail = dest_arr[..., in_dat.shape[-1]:n_dest]
+            new_tail = dest_arr[..., in_dat.shape[-1] : n_dest]
             if new_tail.size > 0:
                 # COPY overlap for next iteration
                 tail = new_tail.copy()
-            res = dest_arr[..., :in_dat.shape[-1]].copy()
+            res = dest_arr[..., : in_dat.shape[-1]].copy()
         elif mode == FilterbankMode.FFT:
             # Slice into non-overlapping windows
             win_msg = wingen.send(msg_in)
@@ -217,9 +238,12 @@ def filterbank(
             overlapped = ifft(conv_spec, axis=-1)
 
             # Do the overlap-add on the `axis` axis
-            overlapped[..., :1, :overlap] += tail  # Previous iteration's tail
-            overlapped[..., 1:, :overlap] += overlapped[..., :-1, -overlap:]  # window-to-window
-            new_tail = overlapped[..., -1:, -overlap:]  # Save tail
+            # Previous iteration's tail:
+            overlapped[..., :1, :overlap] += tail
+            # window-to-window:
+            overlapped[..., 1:, :overlap] += overlapped[..., :-1, -overlap:]
+            # Save tail:
+            new_tail = overlapped[..., -1:, -overlap:]
             if new_tail.size > 0:
                 # All of the above code works if input is size-zero, but we don't want to save a zero-size tail.
                 tail = new_tail  # Save the tail for the next iteration.
@@ -227,9 +251,7 @@ def filterbank(
             res = overlapped[..., :-overlap].reshape(overlapped.shape[:-2] + (-1,))
 
         msg_out = replace(
-            template,
-            data=res,
-            axes={**template.axes, axis: msg_in.axes[axis]}
+            template, data=res, axes={**template.axes, axis: msg_in.axes[axis]}
         )
 
 
@@ -242,6 +264,7 @@ class FilterbankSettings(ez.Settings):
 
 class Filterbank(GenAxisArray):
     """Unit for :obj:`spectrum`"""
+
     SETTINGS = FilterbankSettings
 
     INPUT_SETTINGS = ez.InputStream(FilterbankSettings)
@@ -251,5 +274,5 @@ class Filterbank(GenAxisArray):
             kernels=self.SETTINGS.kernels,
             mode=self.SETTINGS.mode,
             min_phase=self.SETTINGS.min_phase,
-            axis=self.SETTINGS.axis
+            axis=self.SETTINGS.axis,
         )

@@ -87,7 +87,7 @@ def test_butterworth_system(
 
     system = ButterworthSystem(settings)
 
-    ez.run(SYSTEM = system)
+    ez.run(SYSTEM=system)
 
     messages: typing.List[AxisArray] = []
     for msg in message_log(test_filename):

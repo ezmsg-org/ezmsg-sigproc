@@ -23,12 +23,14 @@ def test_adaptive_standard_scaler_river():
         # Test data values taken from river:
         # https://github.com/online-ml/river/blob/main/river/preprocessing/scale.py#L511-L536C17
         data = np.array([5.278, 5.050, 6.550, 7.446, 9.472, 10.353, 11.784, 11.173])
-        expected_result = np.array([0.0, -0.816, 0.812, 0.695, 0.754, 0.598, 0.651, 0.124])
+        expected_result = np.array(
+            [0.0, -0.816, 0.812, 0.695, 0.754, 0.598, 0.651, 0.124]
+        )
 
         test_input = AxisArray(
             np.tile(data, (2, 1)),
             dims=["ch", "time"],
-            axes=frozendict({"time": AxisArray.Axis()})
+            axes=frozendict({"time": AxisArray.Axis()}),
         )
 
         backup = [copy.deepcopy(test_input)]
@@ -53,7 +55,9 @@ class ScalerTestSystemSettings(ez.Settings):
     counter_settings: CounterSettings
     scaler_settings: AdaptiveStandardScalerSettings
     log_settings: MessageLoggerSettings
-    term_settings: TerminateOnTotalSettings = field(default_factory=TerminateOnTotalSettings)
+    term_settings: TerminateOnTotalSettings = field(
+        default_factory=TerminateOnTotalSettings
+    )
 
 
 class ScalerTestSystem(ez.Collection):
@@ -74,15 +78,15 @@ class ScalerTestSystem(ez.Collection):
         return (
             (self.COUNTER.OUTPUT_SIGNAL, self.SCALER.INPUT_SIGNAL),
             (self.SCALER.OUTPUT_SIGNAL, self.LOG.INPUT_MESSAGE),
-            (self.LOG.OUTPUT_MESSAGE, self.TERM.INPUT_MESSAGE)
+            (self.LOG.OUTPUT_MESSAGE, self.TERM.INPUT_MESSAGE),
         )
 
 
 def test_scaler_system(
-        tau: float = 1.0,
-        fs: float = 10.0,
-        duration: float = 2.0,
-        test_name: Optional[str] = None,
+    tau: float = 1.0,
+    fs: float = 10.0,
+    duration: float = 2.0,
+    test_name: Optional[str] = None,
 ):
     """
     For this test, we assume that Counter and scaler_np are functioning properly.
@@ -101,16 +105,13 @@ def test_scaler_system(
             dispatch_rate=duration,  # Simulation duration in 1.0 seconds
             mod=None,
         ),
-        scaler_settings=AdaptiveStandardScalerSettings(
-            time_constant=tau,
-            axis="time"
-        ),
+        scaler_settings=AdaptiveStandardScalerSettings(time_constant=tau, axis="time"),
         log_settings=MessageLoggerSettings(
             output=test_filename,
         ),
         term_settings=TerminateOnTotalSettings(
             total=int(duration * fs / block_size),
-        )
+        ),
     )
     system = ScalerTestSystem(settings)
     ez.run(SYSTEM=system)
@@ -124,7 +125,7 @@ def test_scaler_system(
     expected_input = AxisArray(
         np.arange(len(data))[None, :],
         dims=["ch", "time"],
-        axes=frozendict({"time": AxisArray.Axis(gain=1/fs, offset=0.0)})
+        axes=frozendict({"time": AxisArray.Axis(gain=1 / fs, offset=0.0)}),
     )
     _scaler = scaler_np(time_constant=tau, axis="time")
     expected_output = _scaler.send(expected_input)

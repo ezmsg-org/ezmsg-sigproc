@@ -39,9 +39,9 @@ def create_messages_with_periodic_signal(
         {"f": 35.0, "dur": 5.0, "offset": 5.0},
         {"f": 300.0, "dur": 5.0, "offset": 5.0},
     ],
-    fs: float = 1000.,
+    fs: float = 1000.0,
     msg_dur: float = 1.0,
-    win_step_dur: typing.Optional[float] = None
+    win_step_dur: typing.Optional[float] = None,
 ) -> typing.List[AxisArray]:
     """
     Create a continuous signal with periodic components. The signal will be divided into n segments,
@@ -57,12 +57,16 @@ def create_messages_with_periodic_signal(
     for s_p in sin_params:
         offs = s_p.get("offset", 0.0)
         b_t = np.logical_and(t_vec >= offs, t_vec <= offs + s_p["dur"])
-        data[b_t] += s_p.get("a", 1.) * np.sin(2 * np.pi * s_p["f"] * t_vec[b_t] + s_p.get("p", 0))
+        data[b_t] += s_p.get("a", 1.0) * np.sin(
+            2 * np.pi * s_p["f"] * t_vec[b_t] + s_p.get("p", 0)
+        )
 
     # How will we split the data into messages? With a rolling window or non-overlapping?
     if win_step_dur is not None:
         win_step = int(win_step_dur * fs)
-        data_splits = sliding_window_view(data, (int(msg_dur * fs),), axis=0)[::win_step]
+        data_splits = sliding_window_view(data, (int(msg_dur * fs),), axis=0)[
+            ::win_step
+        ]
     else:
         n_msgs = int(t_end / msg_dur)
         data_splits = np.array_split(data, n_msgs, axis=0)
@@ -76,7 +80,7 @@ def create_messages_with_periodic_signal(
             AxisArray(
                 split_dat[..., None],
                 dims=["time", "ch"],
-                axes=frozendict({"time": _time_axis})
+                axes=frozendict({"time": _time_axis}),
             )
         )
         offset += split_dat.shape[0] / fs

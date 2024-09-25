@@ -20,7 +20,7 @@ def gen_signal(fs, dur):
     # generate signal
     f_gains = [9, 5]  # frequency will scale as square of this value * time.
     t_offsets = [0.3 * dur, 0.1 * dur]  # When the chirp starts.
-    time = np.arange(int(dur*fs)) / fs
+    time = np.arange(int(dur * fs)) / fs
     # TODO: Replace with sps.chirp?
     chirp1, frequency1 = make_chirp(time, t_offsets[0], f_gains[0])
     chirp2, frequency2 = make_chirp(time, t_offsets[1], f_gains[1])
@@ -32,12 +32,20 @@ def gen_signal(fs, dur):
 def bandpass_kaiser(ntaps, lowcut, highcut, fs, width):
     atten = sps.kaiser_atten(ntaps, width / (0.5 * fs))
     beta = sps.kaiser_beta(atten)
-    taps = sps.firwin(ntaps, [lowcut, highcut], fs=fs, pass_zero="bandpass",
-                      window=("kaiser", beta), scale=False)
+    taps = sps.firwin(
+        ntaps,
+        [lowcut, highcut],
+        fs=fs,
+        pass_zero="bandpass",
+        window=("kaiser", beta),
+        scale=False,
+    )
     return taps
 
 
-@pytest.mark.parametrize("mode", [FilterbankMode.CONV, FilterbankMode.FFT, FilterbankMode.AUTO])
+@pytest.mark.parametrize(
+    "mode", [FilterbankMode.CONV, FilterbankMode.FFT, FilterbankMode.AUTO]
+)
 @pytest.mark.parametrize("kernel_type", ["kaiser", "brickwall"])
 def test_filterbank(mode: str, kernel_type: str):
     # Generate test signal
@@ -52,11 +60,9 @@ def test_filterbank(mode: str, kernel_type: str):
     for idx in range(0, len(tvec), step_size):
         in_messages.append(
             AxisArray(
-                data=chirp[:, idx:idx+step_size],
+                data=chirp[:, idx : idx + step_size],
                 dims=["ch", "time"],
-                axes={
-                    "time": AxisArray.Axis.TimeAxis(offset=tvec[idx], fs=fs)
-                }
+                axes={"time": AxisArray.Axis.TimeAxis(offset=tvec[idx], fs=fs)},
             )
         )
 
@@ -90,13 +96,18 @@ def test_filterbank(mode: str, kernel_type: str):
     #  - conv has transients at the beginning that we need to skip over
     #  - oaconvolve assumes the data is finished so it returns the trailing windows,
     #    but filterbank keeps the tail assuming more data is coming.
-    expected = np.stack([sps.oaconvolve(chirp, _[None, :], axes=1) for _ in kernels], axis=1)
+    expected = np.stack(
+        [sps.oaconvolve(chirp, _[None, :], axes=1) for _ in kernels], axis=1
+    )
     idx0 = ntaps if mode in [FilterbankMode.CONV, FilterbankMode.AUTO] else 0
-    assert np.allclose(result.data[..., idx0:], expected[..., idx0:result.data.shape[-1]])
+    assert np.allclose(
+        result.data[..., idx0:], expected[..., idx0 : result.data.shape[-1]]
+    )
 
     if False:
         # Debug visualize result
         import matplotlib.pyplot as plt
+
         # tmp = result.data
         tmp = expected
         nch = tmp.shape[0]

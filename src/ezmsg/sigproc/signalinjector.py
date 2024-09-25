@@ -8,8 +8,8 @@ import numpy.typing as npt
 
 
 class SignalInjectorSettings(ez.Settings):
-    time_dim: str = 'time' # Input signal needs a time dimension with units in sec.
-    frequency: typing.Optional[float] = None # Hz
+    time_dim: str = "time"  # Input signal needs a time dimension with units in sec.
+    frequency: typing.Optional[float] = None  # Hz
     amplitude: float = 1.0
     mixing_seed: typing.Optional[int] = None
 
@@ -46,7 +46,6 @@ class SignalInjector(ez.Unit):
     @ez.subscriber(INPUT_SIGNAL)
     @ez.publisher(OUTPUT_SIGNAL)
     async def inject(self, msg: AxisArray) -> typing.AsyncGenerator:
-
         if self.STATE.cur_shape != msg.shape:
             self.STATE.cur_shape = msg.shape
             rng = np.random.default_rng(self.SETTINGS.mixing_seed)
@@ -56,7 +55,7 @@ class SignalInjector(ez.Unit):
         if self.STATE.cur_frequency is None:
             yield self.OUTPUT_SIGNAL, msg
         else:
-            out_msg = replace(msg, data = msg.data.copy())
+            out_msg = replace(msg, data=msg.data.copy())
             t = out_msg.ax(self.SETTINGS.time_dim).values[..., np.newaxis]
             signal = np.sin(2 * np.pi * self.STATE.cur_frequency * t)
             mixed_signal = signal * self.STATE.mixing * self.STATE.cur_amplitude

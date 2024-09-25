@@ -11,8 +11,7 @@ from .base import GenAxisArray
 
 @consumer
 def downsample(
-        axis: typing.Optional[str] = None,
-        factor: int = 1
+    axis: typing.Optional[str] = None, factor: int = 1
 ) -> typing.Generator[AxisArray, AxisArray, None]:
     """
     Construct a generator that yields a downsampled version of the data .send() to it.
@@ -50,7 +49,10 @@ def downsample(
         axis_info = msg_in.get_axis(axis)
         axis_idx = msg_in.get_axis_idx(axis)
 
-        b_reset = msg_in.axes[axis].gain != check_input["gain"] or msg_in.key != check_input["key"]
+        b_reset = (
+            msg_in.axes[axis].gain != check_input["gain"]
+            or msg_in.key != check_input["key"]
+        )
         if b_reset:
             check_input["gain"] = axis_info.gain
             check_input["key"] = msg_in.key
@@ -78,9 +80,9 @@ def downsample(
                 axis: replace(
                     axis_info,
                     gain=axis_info.gain * factor,
-                    offset=axis_info.offset + axis_info.gain * n_step
-                )
-            }
+                    offset=axis_info.offset + axis_info.gain * n_step,
+                ),
+            },
         )
 
 
@@ -89,16 +91,17 @@ class DownsampleSettings(ez.Settings):
     Settings for :obj:`Downsample` node.
     See :obj:`downsample` documentation for a description of the parameters.
     """
+
     axis: typing.Optional[str] = None
     factor: int = 1
 
 
 class Downsample(GenAxisArray):
     """:obj:`Unit` for :obj:`bandpower`."""
+
     SETTINGS = DownsampleSettings
 
     def construct_generator(self):
         self.STATE.gen = downsample(
-            axis=self.SETTINGS.axis,
-            factor=self.SETTINGS.factor
+            axis=self.SETTINGS.axis, factor=self.SETTINGS.factor
         )

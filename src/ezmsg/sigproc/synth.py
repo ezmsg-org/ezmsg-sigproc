@@ -12,9 +12,7 @@ from .butterworthfilter import ButterworthFilter, ButterworthFilterSettings
 from .base import GenAxisArray
 
 
-def clock(
-    dispatch_rate: Optional[float]
-) -> Generator[ez.Flag, None, None]:
+def clock(dispatch_rate: Optional[float]) -> Generator[ez.Flag, None, None]:
     """
     Construct a generator that yields events at a specified rate.
 
@@ -34,9 +32,7 @@ def clock(
         yield ez.Flag()
 
 
-async def aclock(
-    dispatch_rate: Optional[float]
-) -> AsyncGenerator[ez.Flag, None]:
+async def aclock(dispatch_rate: Optional[float]) -> AsyncGenerator[ez.Flag, None]:
     """
     ``asyncio`` version of :obj:`clock`.
 
@@ -55,6 +51,7 @@ async def aclock(
 
 class ClockSettings(ez.Settings):
     """Settings for :obj:`Clock`. See :obj:`clock` for parameter description."""
+
     # Message dispatch rate (Hz), or None (fast as possible)
     dispatch_rate: Optional[float]
 
@@ -66,6 +63,7 @@ class ClockState(ez.State):
 
 class Clock(ez.Unit):
     """Unit for :obj:`clock`."""
+
     SETTINGS = ClockSettings
     STATE = ClockState
 
@@ -238,27 +236,26 @@ class Counter(ez.Unit):
             self.STATE.cur_settings.fs,
             n_ch=self.STATE.cur_settings.n_ch,
             dispatch_rate=self.STATE.cur_settings.dispatch_rate,
-            mod=self.STATE.cur_settings.mod
+            mod=self.STATE.cur_settings.mod,
         )
         self.STATE.new_generator.set()
-    
+
     @ez.subscriber(INPUT_CLOCK)
     @ez.publisher(OUTPUT_SIGNAL)
     async def on_clock(self, clock: ez.Flag):
-        if self.STATE.cur_settings.dispatch_rate == 'ext_clock':
+        if self.STATE.cur_settings.dispatch_rate == "ext_clock":
             out = await self.STATE.gen.__anext__()
             yield self.OUTPUT_SIGNAL, out
 
     @ez.publisher(OUTPUT_SIGNAL)
     async def run_generator(self) -> AsyncGenerator:
         while True:
-    
             await self.STATE.new_generator.wait()
             self.STATE.new_generator.clear()
-                
-            if self.STATE.cur_settings.dispatch_rate == 'ext_clock':
+
+            if self.STATE.cur_settings.dispatch_rate == "ext_clock":
                 continue
-            
+
             while not self.STATE.new_generator.is_set():
                 out = await self.STATE.gen.__anext__()
                 yield self.OUTPUT_SIGNAL, out
@@ -306,6 +303,7 @@ class SinGeneratorSettings(ez.Settings):
     Settings for :obj:`SinGenerator`.
     See :obj:`sin` for parameter descriptions.
     """
+
     time_axis: Optional[str] = "time"
     freq: float = 1.0  # Oscillation frequency in Hz
     amp: float = 1.0  # Amplitude
@@ -316,6 +314,7 @@ class SinGenerator(GenAxisArray):
     """
     Unit for :obj:`sin`.
     """
+
     SETTINGS = SinGeneratorSettings
 
     def construct_generator(self):
@@ -323,12 +322,13 @@ class SinGenerator(GenAxisArray):
             axis=self.SETTINGS.time_axis,
             freq=self.SETTINGS.freq,
             amp=self.SETTINGS.amp,
-            phase=self.SETTINGS.phase
+            phase=self.SETTINGS.phase,
         )
 
 
 class OscillatorSettings(ez.Settings):
     """Settings for :obj:`Oscillator`"""
+
     n_time: int
     """Number of samples to output per block."""
 
@@ -358,6 +358,7 @@ class Oscillator(ez.Collection):
     """
     :obj:`Collection that chains :obj:`Counter` and :obj:`SinGenerator`.
     """
+
     SETTINGS = OscillatorSettings
 
     INPUT_CLOCK = ez.InputStream(ez.Flag)
@@ -411,6 +412,7 @@ class RandomGenerator(ez.Unit):
     """
     Replaces input data with random data and yields the result.
     """
+
     SETTINGS = RandomGeneratorSettings
 
     INPUT_SIGNAL = ez.InputStream(AxisArray)
@@ -430,12 +432,12 @@ class NoiseSettings(ez.Settings):
     """
     See :obj:`CounterSettings` and :obj:`RandomGeneratorSettings`.
     """
+
     n_time: int  # Number of samples to output per block
     fs: float  # Sampling rate of signal output in Hz
     n_ch: int = 1  # Number of channels to output
-    dispatch_rate: Optional[
-        Union[float, str]
-    ] = None  # (Hz), 'realtime', or 'ext_clock'
+    dispatch_rate: Optional[Union[float, str]] = None
+    """(Hz), 'realtime', or 'ext_clock'"""
     loc: float = 0.0  # DC offset
     scale: float = 1.0  # Scale (in standard deviations)
 
@@ -447,6 +449,7 @@ class WhiteNoise(ez.Collection):
     """
     A :obj:`Collection` that chains a :obj:`Counter` and :obj:`RandomGenerator`.
     """
+
     SETTINGS = NoiseSettings
 
     INPUT_CLOCK = ez.InputStream(ez.Flag)
@@ -485,6 +488,7 @@ class PinkNoise(ez.Collection):
     """
     A :obj:`Collection` that chains :obj:`WhiteNoise` and :obj:`ButterworthFilter`.
     """
+
     SETTINGS = PinkNoiseSettings
 
     INPUT_CLOCK = ez.InputStream(ez.Flag)
@@ -497,7 +501,9 @@ class PinkNoise(ez.Collection):
         self.WHITE_NOISE.apply_settings(self.SETTINGS)
         self.FILTER.apply_settings(
             ButterworthFilterSettings(
-                axis="time", order=1, cutoff=self.SETTINGS.fs * 0.01  # Hz
+                axis="time",
+                order=1,
+                cutoff=self.SETTINGS.fs * 0.01,  # Hz
             )
         )
 
@@ -542,6 +548,7 @@ class Add(ez.Unit):
 
 class EEGSynthSettings(ez.Settings):
     """See :obj:`OscillatorSettings`."""
+
     fs: float = 500.0  # Hz
     n_time: int = 100
     alpha_freq: float = 10.5  # Hz
@@ -553,6 +560,7 @@ class EEGSynth(ez.Collection):
     A :obj:`Collection` that chains a :obj:`Clock` to both :obj:`PinkNoise`
     and :obj:`Oscillator`, then :obj:`Add` s the result.
     """
+
     SETTINGS = EEGSynthSettings
 
     OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
