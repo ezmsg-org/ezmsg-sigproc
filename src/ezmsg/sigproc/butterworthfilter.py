@@ -11,6 +11,7 @@ from .filter import filtergen, Filter, FilterState, FilterSettingsBase
 
 class ButterworthFilterSettings(FilterSettingsBase):
     """Settings for :obj:`ButterworthFilter`."""
+
     order: int = 0
 
     cuton: typing.Optional[float] = None
@@ -27,7 +28,11 @@ class ButterworthFilterSettings(FilterSettingsBase):
     or if it is less than cuton then it is the beginning of the bandstop. 
     """
 
-    def filter_specs(self) -> typing.Optional[typing.Tuple[str, typing.Union[float, typing.Tuple[float, float]]]]:
+    def filter_specs(
+        self,
+    ) -> typing.Optional[
+        typing.Tuple[str, typing.Union[float, typing.Tuple[float, float]]]
+    ]:
         """
         Determine the filter type given the corner frequencies.
 
@@ -83,7 +88,8 @@ def butter(
     ).filter_specs()
 
     # State variables
-    filter_gen = filtergen(axis, None, coef_type)  # Initialize filtergen as passthrough until we can calculate coefs.
+    # Initialize filtergen as passthrough until we can calculate coefs.
+    filter_gen = filtergen(axis, None, coef_type)
 
     # Reset if these change.
     check_input = {"gain": None}
@@ -98,7 +104,11 @@ def butter(
         if b_reset:
             check_input["gain"] = msg_in.axes[axis].gain
             coefs = scipy.signal.butter(
-                order, Wn=cutoffs, btype=btype, fs=1 / msg_in.axes[axis].gain, output=coef_type
+                order,
+                Wn=cutoffs,
+                btype=btype,
+                fs=1 / msg_in.axes[axis].gain,
+                output=coef_type,
             )
             filter_gen = filtergen(axis, coefs, coef_type)
 

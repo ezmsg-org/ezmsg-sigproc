@@ -10,9 +10,7 @@ from ..base import GenAxisArray
 
 
 @consumer
-def scale(
-    scale: float = 1.0
-) -> typing.Generator[AxisArray, AxisArray, None]:
+def scale(scale: float = 1.0) -> typing.Generator[AxisArray, AxisArray, None]:
     msg_in = AxisArray(np.array([]), dims=[""])
     msg_out = AxisArray(np.array([]), dims=[""])
     while True:

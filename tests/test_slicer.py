@@ -67,7 +67,7 @@ def test_slicer_gen_drop_dim():
         dims=["time", "ch"],
         axes={
             "time": AxisArray.Axis.TimeAxis(fs=100.0, offset=0.1),
-        }
+        },
     )
     backup = [copy.deepcopy(msg_in)]
 

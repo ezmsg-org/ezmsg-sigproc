@@ -10,8 +10,7 @@ from ..base import GenAxisArray
 
 
 @consumer
-def invert(
-) -> typing.Generator[AxisArray, AxisArray, None]:
+def invert() -> typing.Generator[AxisArray, AxisArray, None]:
     msg_in = AxisArray(np.array([]), dims=[""])
     msg_out = AxisArray(np.array([]), dims=[""])
     while True:

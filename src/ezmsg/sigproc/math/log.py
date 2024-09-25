@@ -29,6 +29,4 @@ class Log(GenAxisArray):
     SETTINGS = LogSettings
 
     def construct_generator(self):
-        self.STATE.gen = log(
-            base=self.SETTINGS.base
-        )
+        self.STATE.gen = log(base=self.SETTINGS.base)

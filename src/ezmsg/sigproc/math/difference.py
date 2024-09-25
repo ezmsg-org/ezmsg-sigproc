@@ -11,8 +11,7 @@ from ..base import GenAxisArray
 
 @consumer
 def const_difference(
-    value: float = 0.0,
-    subtrahend: bool = True
+    value: float = 0.0, subtrahend: bool = True
 ) -> typing.Generator[AxisArray, AxisArray, None]:
     """
     result = (in_data - value) if subtrahend else (value - in_data)
@@ -21,7 +20,9 @@ def const_difference(
     msg_out = AxisArray(np.array([]), dims=[""])
     while True:
         msg_in: AxisArray = yield msg_out
-        msg_out = replace(msg_in, data=(msg_in.data - value) if subtrahend else (value - msg_in.data))
+        msg_out = replace(
+            msg_in, data=(msg_in.data - value) if subtrahend else (value - msg_in.data)
+        )
 
 
 class ConstDifferenceSettings(ez.Settings):
@@ -34,9 +35,9 @@ class ConstDifference(GenAxisArray):
 
     def construct_generator(self):
         self.STATE.gen = const_difference(
-            value=self.SETTINGS.value,
-            subtrahend=self.SETTINGS.subtrahend
+            value=self.SETTINGS.value, subtrahend=self.SETTINGS.subtrahend
         )
+
 
 # class DifferenceSettings(ez.Settings):
 #     pass

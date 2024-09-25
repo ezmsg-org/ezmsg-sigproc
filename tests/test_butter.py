@@ -5,7 +5,9 @@ from frozendict import frozendict
 from ezmsg.util.messages.axisarray import AxisArray
 
 from ezmsg.sigproc.butterworthfilter import butter
-from ezmsg.sigproc.butterworthfilter import ButterworthFilterSettings as LegacyButterSettings
+from ezmsg.sigproc.butterworthfilter import (
+    ButterworthFilterSettings as LegacyButterSettings,
+)
 
 
 @pytest.mark.parametrize(
@@ -116,7 +118,11 @@ def test_butterworth(
     for split_dat in np.array_split(in_dat, n_splits, axis=time_ax):
         _time_axis = AxisArray.Axis.TimeAxis(fs=fs, offset=n_seen / fs)
         messages.append(
-            AxisArray(split_dat, dims=dat_dims, axes=frozendict({**other_axes, "time": _time_axis}))
+            AxisArray(
+                split_dat,
+                dims=dat_dims,
+                axes=frozendict({**other_axes, "time": _time_axis}),
+            )
         )
         n_seen += split_dat.shape[time_ax]
 

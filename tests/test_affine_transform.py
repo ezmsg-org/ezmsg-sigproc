@@ -64,7 +64,8 @@ def test_affine_passthrough():
 
     gen = affine_transform(weights="passthrough", axis="does not matter")
     msg_out = gen.send(msg_in)
-    assert msg_out.data is in_dat  # This is not desirable in ezmsg pipeline but fine for the generator
+    # We wouldn't want out_data is in_dat ezmsg pipeline but it's fine for the generator
+    assert msg_out.data is in_dat
     assert_messages_equal([msg_out], backup)
 
 

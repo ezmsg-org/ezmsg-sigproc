@@ -13,6 +13,7 @@ from .base import GenAxisArray
 
 class ActivationFunction(OptionsEnum):
     """Activation (transformation) function."""
+
     NONE = "none"
     """None."""
 
@@ -48,8 +49,12 @@ def activation(
         # str type. There's probably an easier way to support either enum or str argument. Oh well this works.
         function: str = function.lower()
         if function not in ActivationFunction.options():
-            raise ValueError(f"Unrecognized activation function {function}. Must be one of {ACTIVATIONS.keys()}")
-        function = list(ACTIVATIONS.keys())[ActivationFunction.options().index(function)]
+            raise ValueError(
+                f"Unrecognized activation function {function}. Must be one of {ACTIVATIONS.keys()}"
+            )
+        function = list(ACTIVATIONS.keys())[
+            ActivationFunction.options().index(function)
+        ]
         func = ACTIVATIONS[function]
 
     msg_out = AxisArray(np.array([]), dims=[""])
@@ -67,6 +72,4 @@ class Activation(GenAxisArray):
     SETTINGS = ActivationSettings
 
     def construct_generator(self):
-        self.STATE.gen = activation(
-            function=self.SETTINGS.function
-        )
+        self.STATE.gen = activation(function=self.SETTINGS.function)

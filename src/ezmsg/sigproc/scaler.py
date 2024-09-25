@@ -46,6 +46,7 @@ def scaler(
         standardized, or "Z-scored" version of the input.
     """
     from river import preprocessing
+
     msg_out = AxisArray(np.array([]), dims=[""])
     _scaler = None
     while True:
@@ -78,8 +79,7 @@ def scaler(
 
 @consumer
 def scaler_np(
-        time_constant: float = 1.0,
-        axis: typing.Optional[str] = None
+    time_constant: float = 1.0, axis: typing.Optional[str] = None
 ) -> typing.Generator[AxisArray, AxisArray, None]:
     """
     Create a generator function that applies an adaptive standard scaler.
@@ -143,8 +143,8 @@ def scaler_np(
             vars_sq_means = _ew_update(sample**2, vars_sq_means, alpha)
             means = _ew_update(sample, means, alpha)
             # Get step
-            varis = vars_sq_means - vars_means ** 2
-            y = ((sample - means) / (varis**0.5))
+            varis = vars_sq_means - vars_means**2
+            y = (sample - means) / (varis**0.5)
             result[sample_ix] = y
 
         result[np.isnan(result)] = 0.0
@@ -157,16 +157,17 @@ class AdaptiveStandardScalerSettings(ez.Settings):
     Settings for :obj:`AdaptiveStandardScaler`.
     See :obj:`scaler_np` for a description of the parameters.
     """
+
     time_constant: float = 1.0
     axis: typing.Optional[str] = None
 
 
 class AdaptiveStandardScaler(GenAxisArray):
     """Unit for :obj:`scaler_np`"""
+
     SETTINGS = AdaptiveStandardScalerSettings
 
     def construct_generator(self):
         self.STATE.gen = scaler_np(
-            time_constant=self.SETTINGS.time_constant,
-            axis=self.SETTINGS.axis
+            time_constant=self.SETTINGS.time_constant, axis=self.SETTINGS.axis
         )

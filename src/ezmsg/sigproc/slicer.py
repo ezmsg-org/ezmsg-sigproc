@@ -54,11 +54,11 @@ def slicer(
     _slice: typing.Optional[typing.Union[slice, npt.NDArray]] = None
     new_axis: typing.Optional[AxisArray.Axis] = None
     b_change_dims: bool = False  # If number of dimensions changes when slicing
-    
+
     # Reset if input changes
     check_input = {
         "key": None,  # key change used as proxy for label change, which we don't check explicitly
-        "len": None
+        "len": None,
     }
 
     while True:
@@ -70,7 +70,8 @@ def slicer(
         b_reset = _slice is None  # or new_axis is None
         b_reset = b_reset or msg_in.key != check_input["key"]
         b_reset = b_reset or (
-                (msg_in.data.shape[axis_idx] != check_input["len"]) and (type(_slice) is np.ndarray)
+            (msg_in.data.shape[axis_idx] != check_input["len"])
+            and (type(_slice) is np.ndarray)
         )
         if b_reset:
             check_input["key"] = msg_in.key
@@ -82,7 +83,8 @@ def slicer(
             _slices = parse_slice(selection)
             if len(_slices) == 1:
                 _slice = _slices[0]
-                b_change_dims = isinstance(_slice, int)  # If we drop the sliced dimension
+                # Do we drop the sliced dimension?
+                b_change_dims = isinstance(_slice, int)
             else:
                 # Multiple slices, but this cannot be done in a single step, so we convert the slices
                 #  to a discontinuous set of integer indexes.
@@ -91,26 +93,29 @@ def slicer(
                 _slice = np.s_[indices]  # Integer scalar array
 
             # Create the output axis.
-            if (axis in msg_in.axes
-                    and hasattr(msg_in.axes[axis], "labels")
-                    and len(msg_in.axes[axis].labels) > 0):
+            if (
+                axis in msg_in.axes
+                and hasattr(msg_in.axes[axis], "labels")
+                and len(msg_in.axes[axis].labels) > 0
+            ):
                 new_labels = msg_in.axes[axis].labels[_slice]
-                new_axis = replace(
-                    msg_in.axes[axis],
-                    labels=new_labels
-                )
+                new_axis = replace(msg_in.axes[axis], labels=new_labels)
 
         replace_kwargs = {}
         if b_change_dims:
             # Dropping the target axis
-            replace_kwargs["dims"] = [_ for dim_ix, _ in enumerate(msg_in.dims) if dim_ix != axis_idx]
+            replace_kwargs["dims"] = [
+                _ for dim_ix, _ in enumerate(msg_in.dims) if dim_ix != axis_idx
+            ]
             replace_kwargs["axes"] = {k: v for k, v in msg_in.axes.items() if k != axis}
         elif new_axis is not None:
-            replace_kwargs["axes"] = {k: (v if k != axis else new_axis) for k, v in msg_in.axes.items()}
+            replace_kwargs["axes"] = {
+                k: (v if k != axis else new_axis) for k, v in msg_in.axes.items()
+            }
         msg_out = replace(
             msg_in,
             data=slice_along_axis(msg_in.data, _slice, axis_idx),
-            **replace_kwargs
+            **replace_kwargs,
         )
 
 

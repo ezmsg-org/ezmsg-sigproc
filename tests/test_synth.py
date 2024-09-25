@@ -14,10 +14,16 @@ from ezmsg.util.messagecodec import message_log
 from ezmsg.util.terminate import TerminateOnTotalSettings, TerminateOnTotal
 from util import get_test_fn
 from ezmsg.sigproc.synth import (
-    clock, aclock, Clock, ClockSettings,
-    acounter, Counter, CounterSettings,
+    clock,
+    aclock,
+    Clock,
+    ClockSettings,
+    acounter,
+    Counter,
+    CounterSettings,
     sin,
-    EEGSynth, EEGSynthSettings
+    EEGSynth,
+    EEGSynthSettings,
 )
 
 
@@ -36,7 +42,8 @@ def test_clock_gen(dispatch_rate: typing.Optional[float]):
     if dispatch_rate is not None:
         assert (run_time - 1 / dispatch_rate) < t_elapsed < (run_time + 0.1)
     else:
-        assert t_elapsed < (n_target * 1e-4)  # 100 usec per iteration is pretty generous
+        # 100 usec per iteration is pretty generous
+        assert t_elapsed < (n_target * 1e-4)
 
 
 @pytest.mark.parametrize("dispatch_rate", [None, 2.0, 20.0])
@@ -55,13 +62,16 @@ async def test_aclock_agen(dispatch_rate: typing.Optional[float]):
     if dispatch_rate:
         assert (run_time - 1.1 / dispatch_rate) < t_elapsed < (run_time + 0.1)
     else:
-        assert t_elapsed < (n_target * 1e-4)  # 100 usec per iteration is pretty generous
+        # 100 usec per iteration is pretty generous
+        assert t_elapsed < (n_target * 1e-4)
 
 
 class ClockTestSystemSettings(ez.Settings):
     clock_settings: ClockSettings
     log_settings: MessageLoggerSettings
-    term_settings: TerminateOnTotalSettings = field(default_factory=TerminateOnTotalSettings)
+    term_settings: TerminateOnTotalSettings = field(
+        default_factory=TerminateOnTotalSettings
+    )
 
 
 class ClockTestSystem(ez.Collection):
@@ -79,14 +89,14 @@ class ClockTestSystem(ez.Collection):
     def network(self) -> ez.NetworkDefinition:
         return (
             (self.CLOCK.OUTPUT_CLOCK, self.LOG.INPUT_MESSAGE),
-            (self.LOG.OUTPUT_MESSAGE, self.TERM.INPUT_MESSAGE)
+            (self.LOG.OUTPUT_MESSAGE, self.TERM.INPUT_MESSAGE),
         )
 
 
 @pytest.mark.parametrize("dispatch_rate", [None, 2.0, 20.0])
 def test_clock_system(
-        dispatch_rate: typing.Optional[float],
-        test_name: typing.Optional[str] = None,
+    dispatch_rate: typing.Optional[float],
+    test_name: typing.Optional[str] = None,
 ):
     run_time = 1.0
     n_target = int(np.ceil(dispatch_rate * run_time)) if dispatch_rate else 100
@@ -95,7 +105,7 @@ def test_clock_system(
     settings = ClockTestSystemSettings(
         clock_settings=ClockSettings(dispatch_rate=dispatch_rate),
         log_settings=MessageLoggerSettings(output=test_filename),
-        term_settings=TerminateOnTotalSettings(total=n_target)
+        term_settings=TerminateOnTotalSettings(total=n_target),
     )
     system = ClockTestSystem(settings)
     ez.run(SYSTEM=system)
@@ -108,19 +118,20 @@ def test_clock_system(
     assert len(messages) >= n_target
 
 
-
 @pytest.mark.parametrize("block_size", [1, 20])
 @pytest.mark.parametrize("fs", [10.0, 1000.0])
 @pytest.mark.parametrize("n_ch", [3])
-@pytest.mark.parametrize("dispatch_rate", [None, "realtime", "ext_clock", 2.0, 20.0])  # "ext_clock" needs a separate test
-@pytest.mark.parametrize("mod", [2 ** 3, None])
+@pytest.mark.parametrize(
+    "dispatch_rate", [None, "realtime", "ext_clock", 2.0, 20.0]
+)  # "ext_clock" needs a separate test
+@pytest.mark.parametrize("mod", [2**3, None])
 @pytest.mark.asyncio
 async def test_acounter(
     block_size: int,
     fs: float,
     n_ch: int,
     dispatch_rate: typing.Optional[typing.Union[float, str]],
-    mod: typing.Optional[int]
+    mod: typing.Optional[int],
 ):
     target_dur = 2.6  # 2.6 seconds per test
     if dispatch_rate is None:
@@ -134,7 +145,7 @@ async def test_acounter(
             chunk_dur = 0.1
     else:
         # Note: float dispatch_rate will yield different number of samples than expected by target_dur and fs
-        chunk_dur = 1. / dispatch_rate
+        chunk_dur = 1.0 / dispatch_rate
     target_messages = int(target_dur / chunk_dur)
 
     # Run generator
@@ -163,14 +174,16 @@ async def test_acounter(
         atol = 0.002
     else:
         # Offsets are synthetic.
-        atol = 1.e-8
+        atol = 1.0e-8
     assert np.allclose(offsets[2:], expected_offsets[2:], atol=atol)
 
 
 class CounterTestSystemSettings(ez.Settings):
     counter_settings: CounterSettings
     log_settings: MessageLoggerSettings
-    term_settings: TerminateOnTotalSettings = field(default_factory=TerminateOnTotalSettings)
+    term_settings: TerminateOnTotalSettings = field(
+        default_factory=TerminateOnTotalSettings
+    )
 
 
 class CounterTestSystem(ez.Collection):
@@ -188,7 +201,7 @@ class CounterTestSystem(ez.Collection):
     def network(self) -> ez.NetworkDefinition:
         return (
             (self.COUNTER.OUTPUT_SIGNAL, self.LOG.INPUT_MESSAGE),
-            (self.LOG.OUTPUT_MESSAGE, self.TERM.INPUT_MESSAGE)
+            (self.LOG.OUTPUT_MESSAGE, self.TERM.INPUT_MESSAGE),
         )
 
 
@@ -203,14 +216,14 @@ class CounterTestSystem(ez.Collection):
         (10, 10.0, 20.0, 2**3),
         # No test for ext_clock because that requires a different system
         # (20, 10.0, "ext_clock", None),
-    ]
+    ],
 )
 def test_counter_system(
-        block_size: int,
-        fs: float,
-        dispatch_rate: typing.Optional[typing.Union[float, str]],
-        mod: typing.Optional[int],
-        test_name: typing.Optional[str] = None,
+    block_size: int,
+    fs: float,
+    dispatch_rate: typing.Optional[typing.Union[float, str]],
+    mod: typing.Optional[int],
+    test_name: typing.Optional[str] = None,
 ):
     n_ch = 3
     target_dur = 2.6  # 2.6 seconds per test
@@ -222,7 +235,7 @@ def test_counter_system(
             chunk_dur = block_size / fs
     else:
         # Note: float dispatch_rate will yield different number of samples than expected by target_dur and fs
-        chunk_dur = 1. / dispatch_rate
+        chunk_dur = 1.0 / dispatch_rate
     target_messages = int(target_dur / chunk_dur)
 
     test_filename = get_test_fn(test_name)
@@ -240,7 +253,7 @@ def test_counter_system(
         ),
         term_settings=TerminateOnTotalSettings(
             total=target_messages,
-        )
+        ),
     )
     system = CounterTestSystem(settings)
     ez.run(SYSTEM=system)
@@ -269,11 +282,7 @@ def test_counter_system(
 
 
 # TEST SIN #
-def test_sin_gen(
-        freq: float = 1.0,
-        amp: float = 1.0,
-        phase: float = 0.0
-):
+def test_sin_gen(freq: float = 1.0, amp: float = 1.0, phase: float = 0.0):
     axis: typing.Optional[str] = "time"
     srate = max(4.0 * freq, 1000.0)
     sim_dur = 30.0
@@ -282,13 +291,16 @@ def test_sin_gen(
     axis_idx = 0
 
     messages = []
-    for split_dat in np.array_split(np.arange(n_samples)[:, None], n_msgs, axis=axis_idx):
+    for split_dat in np.array_split(
+        np.arange(n_samples)[:, None], n_msgs, axis=axis_idx
+    ):
         _time_axis = AxisArray.Axis.TimeAxis(fs=srate, offset=float(split_dat[0, 0]))
         messages.append(
             AxisArray(split_dat, dims=["time", "ch"], axes={"time": _time_axis})
         )
 
-    def f_test(t): return amp * np.sin(2 * np.pi * freq * t + phase)
+    def f_test(t):
+        return amp * np.sin(2 * np.pi * freq * t + phase)
 
     gen = sin(axis=axis, freq=freq, amp=amp, phase=phase)
     results = []
@@ -297,7 +309,9 @@ def test_sin_gen(
         assert np.allclose(res.data, f_test(msg.data / srate))
         results.append(res)
     concat_ax_arr = AxisArray.concatenate(*results, dim="time")
-    assert np.allclose(concat_ax_arr.data, f_test(np.arange(n_samples) / srate)[:, None])
+    assert np.allclose(
+        concat_ax_arr.data, f_test(np.arange(n_samples) / srate)[:, None]
+    )
 
 
 # TODO: test SinGenerator in a system.
@@ -306,7 +320,9 @@ def test_sin_gen(
 class EEGSynthSettingsTest(ez.Settings):
     synth_settings: EEGSynthSettings
     log_settings: MessageLoggerSettings
-    term_settings: TerminateOnTotalSettings = field(default_factory=TerminateOnTotalSettings)
+    term_settings: TerminateOnTotalSettings = field(
+        default_factory=TerminateOnTotalSettings
+    )
 
 
 class EEGSynthIntegrationTest(ez.Collection):
@@ -324,7 +340,7 @@ class EEGSynthIntegrationTest(ez.Collection):
     def network(self) -> ez.NetworkDefinition:
         return (
             (self.SOURCE.OUTPUT_SIGNAL, self.SINK.INPUT_MESSAGE),
-            (self.SINK.OUTPUT_MESSAGE, self.TERM.INPUT_MESSAGE)
+            (self.SINK.OUTPUT_MESSAGE, self.TERM.INPUT_MESSAGE),
         )
 
 
@@ -332,7 +348,7 @@ def test_eegsynth_system(
     test_name: typing.Optional[str] = None,
 ):
     # Just a quick test to make sure the system runs. We aren't checking validity of values or anything.
-    fs = 500.
+    fs = 500.0
     n_time = 100  # samples per block. dispatch_rate = fs / n_time
     target_dur = 2.0
     target_messages = int(target_dur * fs / n_time)
@@ -352,7 +368,7 @@ def test_eegsynth_system(
         ),
         term_settings=TerminateOnTotalSettings(
             total=target_messages,
-        )
+        ),
     )
 
     system = EEGSynthIntegrationTest(settings)

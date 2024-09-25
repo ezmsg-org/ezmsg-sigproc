@@ -17,7 +17,9 @@ def make_chirp(t, t0, a):
 
 def scratch():
     scales = np.geomspace(4, 256, num=35)
-    wavelets = [f"cmor{x:.1f}-{y:.1f}" for x in [0.5, 1.5, 2.5] for y in [0.5, 1.0, 1.5]]
+    wavelets = [
+        f"cmor{x:.1f}-{y:.1f}" for x in [0.5, 1.5, 2.5] for y in [0.5, 1.0, 1.5]
+    ]
     wavelet = wavelets[1]
 
     # Generate test signal
@@ -51,6 +53,7 @@ def scratch():
     conv = np.convolve(chirp[0], int_psi_scales[-1])
 
     import matplotlib.pyplot as plt
+
     plt.plot(chirp[0])
     plt.plot(int_psi_scales[-1])
     plt.plot(conv)
@@ -69,7 +72,7 @@ def test_cwt():
     # Generate test signal
     fs = 1000
     dur = 2.0
-    tvec = np.arange(int(dur*fs)) / fs
+    tvec = np.arange(int(dur * fs)) / fs
     chirp1, frequency1 = make_chirp(tvec, 0.2, 9)
     chirp2, frequency2 = make_chirp(tvec, 0.1, 5)
     chirp = chirp1 + 0.6 * chirp2
@@ -83,20 +86,21 @@ def test_cwt():
     for idx in range(0, len(tvec), step_size):
         in_messages.append(
             AxisArray(
-                data=chirp[:, idx:idx+step_size],
+                data=chirp[:, idx : idx + step_size],
                 dims=["ch", "time"],
-                axes={
-                    "time": AxisArray.Axis.TimeAxis(offset=tvec[idx], fs=fs)
-                }
+                axes={"time": AxisArray.Axis.TimeAxis(offset=tvec[idx], fs=fs)},
             )
         )
 
     # Prepare expected output from pywt.cwt
-    expected, freqs = pywt.cwt(chirp, scales, wavelet, 1/fs, method="conv", axis=-1)
-    expected = np.swapaxes(expected, 0, 1)  # Swap scales and channels -> ch, freqs, time
+    expected, freqs = pywt.cwt(chirp, scales, wavelet, 1 / fs, method="conv", axis=-1)
+    # Swap scales and channels -> ch, freqs, time
+    expected = np.swapaxes(expected, 0, 1)
 
     # Prep filterbank
-    gen = cwt(scales=scales, wavelet=wavelet, min_phase=MinPhaseMode.HOMOMORPHIC, axis="time")
+    gen = cwt(
+        scales=scales, wavelet=wavelet, min_phase=MinPhaseMode.HOMOMORPHIC, axis="time"
+    )
 
     # Pass the messages
     out_messages = [gen.send(in_messages[0])]
@@ -108,6 +112,7 @@ def test_cwt():
     if False:
         # Debug visualize result
         import matplotlib.pyplot as plt
+
         tmp = result.data
         title = "ezmsg minphase homomorphic"
         # tmp = expected
@@ -118,7 +123,9 @@ def test_cwt():
         for ch_ix in range(nch):
             axes[0, ch_ix].set_title(f"Channel {ch_ix}")
             axes[0, ch_ix].plot(tvec, chirp[ch_ix])
-            _ = axes[1, ch_ix].pcolormesh(tvec[:tmp.shape[-1]], freqs, np.abs(tmp[ch_ix, :-1, :-1]))
+            _ = axes[1, ch_ix].pcolormesh(
+                tvec[: tmp.shape[-1]], freqs, np.abs(tmp[ch_ix, :-1, :-1])
+            )
             axes[1, ch_ix].set_yscale("log")
             axes[1, ch_ix].set_xlabel("Time (s)")
             axes[1, ch_ix].set_ylabel("Frequency (Hz)")

@@ -17,8 +17,10 @@ class FilterCoefficients:
 
 
 def _normalize_coefs(
-        coefs: typing.Union[FilterCoefficients, typing.Tuple[npt.NDArray, npt.NDArray],npt.NDArray]
-) -> typing.Tuple[str, typing.Tuple[npt.NDArray,...]]:
+    coefs: typing.Union[
+        FilterCoefficients, typing.Tuple[npt.NDArray, npt.NDArray], npt.NDArray
+    ],
+) -> typing.Tuple[str, typing.Tuple[npt.NDArray, ...]]:
     coef_type = "ba"
     if coefs is not None:
         # scipy.signal functions called with first arg `*coefs`.
@@ -86,7 +88,9 @@ def filtergen(
             n_tail = msg_in.data.ndim - axis_idx - 1
             zi = zi_func(*coefs)
             zi_expand = (None,) * axis_idx + (slice(None),) + (None,) * n_tail
-            n_tile = msg_in.data.shape[:axis_idx] + (1,) + msg_in.data.shape[axis_idx + 1 :]
+            n_tile = (
+                msg_in.data.shape[:axis_idx] + (1,) + msg_in.data.shape[axis_idx + 1 :]
+            )
             if coef_type == "sos":
                 # sos zi must keep its leading dimension (`order / 2` for low|high; `order` for bpass|bstop)
                 zi_expand = (slice(None),) + zi_expand
@@ -218,4 +222,7 @@ class Filter(ez.Unit):
         if one_dimensional:
             arr_out = np.squeeze(arr_out, axis=1)
 
-        yield self.OUTPUT_SIGNAL, replace(msg, data=arr_out),
+        yield (
+            self.OUTPUT_SIGNAL,
+            replace(msg, data=arr_out),
+        )

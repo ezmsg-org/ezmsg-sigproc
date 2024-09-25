@@ -46,7 +46,9 @@ def test_const_difference(value: float, subtrahend: bool):
 
     proc = const_difference(value, subtrahend)
     msg_out = proc.send(msg_in)
-    assert np.array_equal(msg_out.data, (in_dat - value) if subtrahend else (value - in_dat))
+    assert np.array_equal(
+        msg_out.data, (in_dat - value) if subtrahend else (value - in_dat)
+    )
 
 
 def test_invert():
