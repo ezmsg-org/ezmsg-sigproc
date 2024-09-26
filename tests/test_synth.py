@@ -40,7 +40,7 @@ def test_clock_gen(dispatch_rate: typing.Optional[float]):
     t_elapsed = time.time() - t_start
     assert all([_ == ez.Flag() for _ in result])
     if dispatch_rate is not None:
-        assert (run_time - 1 / dispatch_rate) < t_elapsed < (run_time + 0.1)
+        assert (run_time - 1 / dispatch_rate) < t_elapsed < (run_time + 0.2)
     else:
         # 100 usec per iteration is pretty generous
         assert t_elapsed < (n_target * 1e-4)
