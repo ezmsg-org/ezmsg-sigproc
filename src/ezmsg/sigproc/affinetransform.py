@@ -76,16 +76,15 @@ def affine_transform(
             ):
                 in_labels = msg_in.axes[axis].labels
                 new_labels = []
-                n_in = weights.shape[1 if right_multiply else 0]
-                n_out = weights.shape[0 if right_multiply else 1]
+                n_in, n_out = weights.shape
                 if len(in_labels) != n_in:
                     # Something upstream did something it wasn't supposed to. We will drop the labels.
                     ez.logger.warning(
                         f"Received {len(in_labels)} for {n_in} inputs. Check upstream labels."
                     )
                 else:
-                    b_used_inputs = np.any(weights, axis=0 if right_multiply else 1)
-                    b_filled_outputs = np.any(weights, axis=1 if right_multiply else 0)
+                    b_filled_outputs = np.any(weights, axis=0)
+                    b_used_inputs = np.any(weights, axis=1)
                     if np.all(b_used_inputs) and np.all(b_filled_outputs):
                         # All inputs are used and all outputs are used, but n_in != n_out.
                         # Mapping cannot be determined.
