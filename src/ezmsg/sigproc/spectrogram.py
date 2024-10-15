@@ -39,7 +39,11 @@ def spectrogram(
 
     pipeline = compose(
         windowing(
-            axis="time", newaxis="win", window_dur=window_dur, window_shift=window_shift
+            axis="time",
+            newaxis="win",
+            window_dur=window_dur,
+            window_shift=window_shift,
+            zero_pad_until="shift" if window_shift is not None else "input",
         ),
         spectrum(axis="time", window=window, transform=transform, output=output),
         modify_axis(name_map={"win": "time"}),
