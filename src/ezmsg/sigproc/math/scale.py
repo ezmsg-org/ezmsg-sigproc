@@ -11,10 +11,19 @@ from ..base import GenAxisArray
 
 @consumer
 def scale(scale: float = 1.0) -> typing.Generator[AxisArray, AxisArray, None]:
-    msg_in = AxisArray(np.array([]), dims=[""])
+    """
+    Scale the data by a constant factor.
+
+    Args:
+        scale: Factor by which to scale the data magnitude.
+
+    Returns: A primed generator that, when passed an input message via `.send(msg)`, yields an :obj:`AxisArray`
+     with the data payload containing the input :obj:`AxisArray` data scaled by a constant factor.
+
+    """
     msg_out = AxisArray(np.array([]), dims=[""])
     while True:
-        msg_in = yield msg_out
+        msg_in: AxisArray = yield msg_out
         msg_out = replace(msg_in, data=scale * msg_in.data)
 
 

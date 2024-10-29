@@ -20,8 +20,8 @@ def cwt(
     axis: str = "time",
 ) -> typing.Generator[AxisArray, AxisArray, None]:
     """
-    Build a generator to perform a continuous wavelet transform on sent AxisArray messages.
-    The function is equivalent to the `pywt.cwt` function, but is designed to work with streaming data.
+    Perform a continuous wavelet transform.
+    The function is equivalent to the :obj:`pywt.cwt` function, but is designed to work with streaming data.
 
     Args:
         scales: The wavelet scales to use.
@@ -31,7 +31,8 @@ def cwt(
           because fft and matrix multiplication is much faster on the last axis.
 
     Returns:
-        A Generator object that expects `.send(axis_array)` of continuous data
+        A primed Generator object that expects an :obj:`AxisArray` via `.send(axis_array)` of continuous data
+        and yields an :obj:`AxisArray` with a continuous wavelet transform in its data.
     """
     msg_out: typing.Optional[AxisArray] = None
 

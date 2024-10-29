@@ -48,6 +48,18 @@ def parse_slice(s: str) -> typing.Tuple[typing.Union[slice, int], ...]:
 def slicer(
     selection: str = "", axis: typing.Optional[str] = None
 ) -> typing.Generator[AxisArray, AxisArray, None]:
+    """
+    Slice along a particular axis.
+
+    Args:
+        selection: See :obj:`ezmsg.sigproc.slicer.parse_slice` for details.
+        axis: The name of the axis to slice along. If None, the last axis is used.
+
+    Returns:
+        A primed generator object ready to yield an :obj:`AxisArray` for each .send(axis_array)
+        with the data payload containing a sliced view of the input data.
+
+    """
     msg_out = AxisArray(np.array([]), dims=[""])
 
     # State variables

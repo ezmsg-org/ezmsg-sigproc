@@ -13,19 +13,22 @@ class ButterworthFilterSettings(FilterSettingsBase):
     """Settings for :obj:`ButterworthFilter`."""
 
     order: int = 0
+    """
+    Filter order
+    """
 
     cuton: typing.Optional[float] = None
     """
-    Cuton frequency (Hz). If cutoff is not specified then this is the highpass corner, otherwise
-    if it is lower than cutoff then this is the beginning of the bandpass
-    or if it is greater than cuton then it is the end of the bandstop. 
+    Cuton frequency (Hz). If `cutoff` is not specified then this is the highpass corner. Otherwise,
+    if this is lower than `cutoff` then this is the beginning of the bandpass
+    or if this is greater than `cutoff` then this is the end of the bandstop. 
     """
 
     cutoff: typing.Optional[float] = None
     """
-    Cutoff frequency (Hz). If cuton is not specified then this is the lowpass corner, otherwise
-    if it is greater than cuton then this is the end of the bandpass,
-    or if it is less than cuton then it is the beginning of the bandstop. 
+    Cutoff frequency (Hz). If `cuton` is not specified then this is the lowpass corner. Otherwise,
+    if this is greater than `cuton` then this is the end of the bandpass,
+    or if this is less than `cuton` then this is the beginning of the bandstop. 
     """
 
     def filter_specs(
@@ -76,7 +79,8 @@ def butter(
         coef_type: "ba" or "sos"
 
     Returns:
-        A primed generator object which accepts .send(axis_array) and yields filtered axis array.
+        A primed generator object which accepts an :obj:`AxisArray` via .send(axis_array)
+         and yields an :obj:`AxisArray` with filtered data.
 
     """
     # IO

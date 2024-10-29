@@ -25,10 +25,10 @@ def downsample(
         factor: Downsampling factor.
 
     Returns:
-        A primed generator object ready to receive a `.send(axis_array)`
-        and yields the downsampled data.
+        A primed generator object ready to receive an :obj:`AxisArray` via `.send(axis_array)`
+        and yields an :obj:`AxisArray` with its data downsampled.
         Note that if a send chunk does not have sufficient samples to reach the
-        next downsample interval then `None` is yielded.
+        next downsample interval then an :obj:`AxisArray` with size-zero data is yielded.
 
     """
     msg_out = AxisArray(np.array([]), dims=[""])

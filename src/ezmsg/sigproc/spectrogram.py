@@ -33,8 +33,8 @@ def spectrogram(
         output: See :obj:`ezmsg.sigproc.spectrum.spectrum`
 
     Returns:
-        A primed generator object that expects `.send(axis_array)` of continuous data
-        and yields an AxisArray of time-frequency power values.
+        A primed generator object that expects an :obj:`AxisArray` via `.send(axis_array)`
+        with continuous data in its .data payload, and yields an :obj:`AxisArray` of time-frequency power values.
     """
 
     pipeline = compose(

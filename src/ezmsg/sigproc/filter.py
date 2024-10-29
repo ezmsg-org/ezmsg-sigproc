@@ -38,7 +38,7 @@ def filtergen(
     axis: str, coefs: typing.Optional[typing.Tuple[np.ndarray]], coef_type: str
 ) -> typing.Generator[AxisArray, AxisArray, None]:
     """
-    Construct a generic filter generator function.
+    Filter data using the provided coefficients.
 
     Args:
         axis: The name of the axis to operate on.
@@ -46,7 +46,8 @@ def filtergen(
         coef_type: The type of filter coefficients. One of "ba" or "sos".
 
     Returns:
-        A generator that expects .send(axis_array) and yields the filtered :obj:`AxisArray`.
+        A primed generator that, when passed an :obj:`AxisArray` via `.send(axis_array)`,
+         yields an :obj:`AxisArray` with the data filtered.
     """
     # Massage inputs
     if coefs is not None and not isinstance(coefs, tuple):

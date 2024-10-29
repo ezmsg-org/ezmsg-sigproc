@@ -43,9 +43,9 @@ def filterbank(
     new_axis: str = "kernel",
 ) -> typing.Generator[AxisArray, AxisArray, None]:
     """
-    Returns a generator that perform multiple (direct or fft) convolutions on a signal using a bank of kernels.
-    This generator is intended to be used during online processing, therefore both direct and fft convolutions
-    use the overlap-add method.
+    Perform multiple (direct or fft) convolutions on a signal using a bank of kernels.
+     This is intended to be used during online processing, therefore both direct and fft convolutions
+     use the overlap-add method.
     Args:
         kernels:
         mode: "conv", "fft", or "auto". If "auto", the mode is determined by the size of the input data.
@@ -59,7 +59,8 @@ def filterbank(
         axis: The name of the axis to operate on. This should usually be "time".
         new_axis: The name of the new axis corresponding to the kernel index.
 
-    Returns:
+    Returns: A primed generator that, when passed an input message via `.send(msg)`, yields an :obj:`AxisArray`
+     with the data payload containing the absolute value of the input :obj:`AxisArray` data.
 
     """
     msg_out: typing.Optional[AxisArray] = None

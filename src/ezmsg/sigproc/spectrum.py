@@ -92,8 +92,8 @@ def spectrum(
         nfft: The number of points to use for the FFT. If None, the length of the input data is used.
 
     Returns:
-        A primed generator object that expects `.send(axis_array)` of continuous data
-        and yields an AxisArray of spectral magnitudes or powers.
+        A primed generator object that expects an :obj:`AxisArray` via `.send(axis_array)` containing continuous data
+        and yields an :obj:`AxisArray` with data of spectral magnitudes or powers.
     """
     msg_out = AxisArray(np.array([]), dims=[""])
 

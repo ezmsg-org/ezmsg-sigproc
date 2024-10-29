@@ -24,7 +24,7 @@ def affine_transform(
     Args:
         weights: An array of weights or a path to a file with weights compatible with np.loadtxt.
         axis: The name of the axis to apply the transformation to. Defaults to the leading (0th) axis in the array.
-        right_multiply: Set False to tranpose the weights before applying.
+        right_multiply: Set False to transpose the weights before applying.
 
     Returns:
         A primed generator object that yields an :obj:`AxisArray` object for every
