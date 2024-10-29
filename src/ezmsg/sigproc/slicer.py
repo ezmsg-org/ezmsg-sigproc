@@ -98,7 +98,8 @@ def slicer(
                 and hasattr(msg_in.axes[axis], "labels")
                 and len(msg_in.axes[axis].labels) > 0
             ):
-                new_labels = msg_in.axes[axis].labels[_slice]
+                in_labels = np.array(msg_in.axes[axis].labels)
+                new_labels = in_labels[_slice].tolist()
                 new_axis = replace(msg_in.axes[axis], labels=new_labels)
 
         replace_kwargs = {}
