@@ -24,7 +24,9 @@ def windowing(
     zero_pad_until: str = "input",
 ) -> typing.Generator[AxisArray, AxisArray, None]:
     """
-    Construct a generator that yields windows of data from an input :obj:`AxisArray`.
+    Apply a sliding window along the specified axis to input streaming data.
+    The `windowing` method is perhaps the most useful and versatile method in ezmsg.sigproc, but its parameterization
+    can be difficult. Please read the argument descriptions carefully.
 
     Args:
         axis: The axis along which to segment windows.
@@ -48,8 +50,8 @@ def windowing(
             - "none" does not pad the buffer. No outputs will be yielded until at least `window_dur` data has been seen.
 
     Returns:
-        A (primed) generator that accepts .send(an AxisArray object) and yields a list of windowed
-        AxisArray objects. The list will always be length-1 if `newaxis` is not None or `window_shift` is None.
+        A primed generator that accepts an :obj:`AxisArray` via `.send(axis_array)`
+        and yields an :obj:`AxisArray` with the data payload containing a windowed version of the input data.
     """
     # Check arguments
     if newaxis is None:

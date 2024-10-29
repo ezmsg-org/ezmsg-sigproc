@@ -27,7 +27,8 @@ def bandpower(
         bands: (min, max) tuples of band limits in Hz.
 
     Returns:
-        A primed generator object ready to yield an AxisArray for each .send(axis_array)
+        A primed generator object ready to yield an :obj:`AxisArray` for each .send(axis_array)
+        with the data payload being the average spectral power in each band of the input data.
     """
     msg_out = AxisArray(np.array([]), dims=[""])
 

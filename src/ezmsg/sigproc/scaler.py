@@ -33,8 +33,7 @@ def scaler(
     time_constant: float = 1.0, axis: typing.Optional[str] = None
 ) -> typing.Generator[AxisArray, AxisArray, None]:
     """
-    Create a generator function that applies the
-    adaptive standard scaler from https://riverml.xyz/latest/api/preprocessing/AdaptiveStandardScaler/
+    Apply the adaptive standard scaler from https://riverml.xyz/latest/api/preprocessing/AdaptiveStandardScaler/
     This is faster than :obj:`scaler_np` for single-channel data.
 
     Args:
@@ -42,8 +41,8 @@ def scaler(
         axis: The name of the axis to accumulate statistics over.
 
     Returns:
-        A primed generator object that expects `.send(axis_array)` and yields a
-        standardized, or "Z-scored" version of the input.
+        A primed generator object that expects to be sent a :obj:`AxisArray` via `.send(axis_array)`
+         and yields an :obj:`AxisArray` with its data being a standardized, or "Z-scored" version of the input data.
     """
     from river import preprocessing
 
@@ -90,8 +89,8 @@ def scaler_np(
         axis: The name of the axis to accumulate statistics over.
 
     Returns:
-        A primed generator object that expects `.send(axis_array)` and yields a
-        standardized, or "Z-scored" version of the input.
+        A primed generator object that expects to be sent a :obj:`AxisArray` via `.send(axis_array)`
+         and yields an :obj:`AxisArray` with its data being a standardized, or "Z-scored" version of the input data.
     """
     msg_out = AxisArray(np.array([]), dims=[""])
 

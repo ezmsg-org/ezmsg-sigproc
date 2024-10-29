@@ -43,7 +43,7 @@ def sampler(
     typing.List[SampleMessage], typing.Union[AxisArray, SampleTriggerMessage], None
 ]:
     """
-    A generator function that samples data into a buffer, accepts triggers, and returns slices of sampled
+    Sample data into a buffer, accept triggers, and return slices of sampled
     data around the trigger time.
 
     Args:

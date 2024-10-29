@@ -43,6 +43,18 @@ ACTIVATIONS = {
 def activation(
     function: typing.Union[str, ActivationFunction],
 ) -> typing.Generator[AxisArray, AxisArray, None]:
+    """
+    Transform the data with a simple activation function.
+
+    Args:
+        function: An enum value from ActivationFunction or a string representing the activation function.
+         Possible values are: SIGMOID, EXPIT, LOGIT, LOGEXPIT, "sigmoid", "expit", "logit", "log_expit".
+         SIGMOID and EXPIT are equivalent. See :obj:`scipy.special.expit` for more details.
+
+    Returns: A primed generator that, when passed an input message via `.send(msg)`, yields an AxisArray
+     with the data payload containing a transformed version of the input data.
+
+    """
     if type(function) is ActivationFunction:
         func = ACTIVATIONS[function]
     else:

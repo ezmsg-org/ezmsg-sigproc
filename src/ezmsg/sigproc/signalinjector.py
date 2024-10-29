@@ -22,6 +22,11 @@ class SignalInjectorState(ez.State):
 
 
 class SignalInjector(ez.Unit):
+    """
+    Add a sinusoidal signal to the input signal. Each feature gets a different amplitude of the sinusoid.
+    All features get the same frequency sinusoid. The frequency and base amplitude can be changed while running.
+    """
+
     SETTINGS = SignalInjectorSettings
     STATE = SignalInjectorState
 

@@ -16,6 +16,15 @@ def const_difference(
     """
     result = (in_data - value) if subtrahend else (value - in_data)
     https://en.wikipedia.org/wiki/Template:Arithmetic_operations
+
+    Args:
+        value: number to subtract or be subtracted from the input data
+        subtrahend: If True (default) then value is subtracted from the input data.
+         If False, the input data is subtracted from value.
+
+    Returns: A primed generator that, when passed an input message via `.send(msg)`, yields an :obj:`AxisArray`
+     with the data payload containing the difference between the input :obj:`AxisArray` data and the value.
+
     """
     msg_out = AxisArray(np.array([]), dims=[""])
     while True:
