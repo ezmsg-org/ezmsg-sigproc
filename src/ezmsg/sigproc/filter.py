@@ -97,7 +97,10 @@ def filtergen(
                 n_tile = (1,) + n_tile
             zi = np.tile(zi[zi_expand], n_tile)
 
-        dat_out, zi = filt_func(*coefs, msg_in.data, axis=axis_idx, zi=zi)
+        if msg_in.data.size > 0:
+            dat_out, zi = filt_func(*coefs, msg_in.data, axis=axis_idx, zi=zi)
+        else:
+            dat_out = msg_in.data
         msg_out = replace(msg_in, data=dat_out)
 
 
