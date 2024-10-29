@@ -138,3 +138,20 @@ def test_butterworth(
 
     result = np.concatenate([gen.send(_).data for _ in messages], axis=time_ax)
     assert np.allclose(result, out_dat)
+
+
+def test_butterworth_empty_msg():
+    proc = butter(
+        axis="time",
+        order=2,
+        cuton=0.1,
+        cutoff=1.0,
+        coef_type="sos",
+    )
+    msg_in = AxisArray(
+        data=np.zeros((0, 2)),
+        dims=["time", "ch"],
+        axes={"time": AxisArray.Axis.TimeAxis(fs=19.0, offset=0)},
+    )
+    res = proc.send(msg_in)
+    assert res.data.size == 0
