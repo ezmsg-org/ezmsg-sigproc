@@ -62,7 +62,7 @@ def ranged_aggregate(
         operation: :obj:`AggregationFunction` to apply to each band.
 
     Returns:
-        A primed generator object ready to yield an AxisArray for each .send(axis_array)
+        A primed generator object ready to yield an :obj:`AxisArray` for each .send(axis_array)
     """
     msg_out = AxisArray(np.array([]), dims=[""])
 
