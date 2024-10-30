@@ -63,6 +63,7 @@ def test_filterbank(mode: str, kernel_type: str):
                 data=chirp[:, idx : idx + step_size],
                 dims=["ch", "time"],
                 axes={"time": AxisArray.Axis.TimeAxis(offset=tvec[idx], fs=fs)},
+                key="test_filterbank",
             )
         )
 
@@ -91,6 +92,7 @@ def test_filterbank(mode: str, kernel_type: str):
     # Pass the messages
     out_messages = [gen.send(msg_in) for msg_in in in_messages]
     result = AxisArray.concatenate(*out_messages, dim="time")
+    assert result.key == "test_filterbank"
 
     # Compare to sps.oaconvolve(chirp), with the following differences:
     #  - conv has transients at the beginning that we need to skip over
