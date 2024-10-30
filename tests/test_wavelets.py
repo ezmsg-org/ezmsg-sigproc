@@ -89,6 +89,7 @@ def test_cwt():
                 data=chirp[:, idx : idx + step_size],
                 dims=["ch", "time"],
                 axes={"time": AxisArray.Axis.TimeAxis(offset=tvec[idx], fs=fs)},
+                key="test_cwt",
             )
         )
 
@@ -106,6 +107,7 @@ def test_cwt():
     out_messages = [gen.send(in_messages[0])]
     out_messages += [gen.send(msg_in) for msg_in in in_messages[1:]]
     result = AxisArray.concatenate(*out_messages, dim="time")
+    assert result.key == "test_cwt"
 
     # TODO: Compare result to expected
 
