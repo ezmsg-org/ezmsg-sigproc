@@ -115,6 +115,7 @@ def cwt(
                     **msg_in.axes,
                     "freq": AxisArray.Axis("Hz", offset=freqs[0], gain=fstep),
                 },
+                key=msg_in.key,
             )
             last_conv_samp = np.zeros(
                 dummy_shape[:-1] + (1,), dtype=template.data.dtype
