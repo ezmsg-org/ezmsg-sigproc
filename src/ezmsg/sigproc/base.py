@@ -1,3 +1,4 @@
+import math
 import traceback
 import typing
 
@@ -30,7 +31,7 @@ class GenAxisArray(ez.Unit):
     async def on_signal(self, message: AxisArray) -> typing.AsyncGenerator:
         try:
             ret = self.STATE.gen.send(message)
-            if ret.data.size > 0:
+            if math.prod(ret.data.shape) > 0:
                 yield self.OUTPUT_SIGNAL, ret
         except (StopIteration, GeneratorExit):
             ez.logger.debug(f"Generator closed in {self.address}")
