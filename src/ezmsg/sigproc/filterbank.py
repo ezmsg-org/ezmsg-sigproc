@@ -134,6 +134,7 @@ def filterbank(
                 + msg_in.dims[targ_ax_ix + 1 :]
                 + [new_axis, axis],
                 axes=msg_in.axes.copy(),  # We do not have info for kernel/filter axis :(.
+                key=msg_in.key,
             )
 
             # Determine optimal mode. Assumes 100 msec chunks.
