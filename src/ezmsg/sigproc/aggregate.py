@@ -20,11 +20,13 @@ class AggregationFunction(OptionsEnum):
     MEAN = "mean"
     MEDIAN = "median"
     STD = "std"
+    SUM = "sum"
     NANMAX = "nanmax"
     NANMIN = "nanmin"
     NANMEAN = "nanmean"
     NANMEDIAN = "nanmedian"
     NANSTD = "nanstd"
+    NANSUM = "nansum"
     ARGMIN = "argmin"
     ARGMAX = "argmax"
 
@@ -36,11 +38,13 @@ AGGREGATORS = {
     AggregationFunction.MEAN: np.mean,
     AggregationFunction.MEDIAN: np.median,
     AggregationFunction.STD: np.std,
+    AggregationFunction.SUM: np.sum,
     AggregationFunction.NANMAX: np.nanmax,
     AggregationFunction.NANMIN: np.nanmin,
     AggregationFunction.NANMEAN: np.nanmean,
     AggregationFunction.NANMEDIAN: np.nanmedian,
     AggregationFunction.NANSTD: np.nanstd,
+    AggregationFunction.NANSUM: np.nansum,
     AggregationFunction.ARGMIN: np.argmin,
     AggregationFunction.ARGMAX: np.argmax,
 }
