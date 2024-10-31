@@ -37,7 +37,12 @@ def get_msg_gen(n_chans=20, n_freqs=100, data_dur=30.0, fs=1024.0, key=""):
 
 @pytest.mark.parametrize(
     "agg_func",
-    [AggregationFunction.MEAN, AggregationFunction.MEDIAN, AggregationFunction.STD],
+    [
+        AggregationFunction.MEAN,
+        AggregationFunction.MEDIAN,
+        AggregationFunction.STD,
+        AggregationFunction.SUM,
+    ],
 )
 def test_aggregate(agg_func: AggregationFunction):
     bands = [(5.0, 20.0), (30.0, 50.0)]
@@ -74,6 +79,7 @@ def test_aggregate(agg_func: AggregationFunction):
         AggregationFunction.MEAN: partial(np.mean, axis=-1, keepdims=True),
         AggregationFunction.MEDIAN: partial(np.median, axis=-1, keepdims=True),
         AggregationFunction.STD: partial(np.std, axis=-1, keepdims=True),
+        AggregationFunction.SUM: partial(np.sum, axis=-1, keepdims=True),
     }[agg_func]
     expected_data = np.concatenate(
         [
