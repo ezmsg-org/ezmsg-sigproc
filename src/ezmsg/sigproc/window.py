@@ -79,7 +79,7 @@ def windowing(
     b_1to1 = window_shift is None
     newaxis_warned: bool = b_1to1
     out_newaxis: typing.Optional[AxisArray.Axis] = None
-    out_dims: typing.typing.Optional[typing.List[str]] = None
+    out_dims: typing.Optional[typing.List[str]] = None
 
     check_inputs = {"samp_shape": None, "fs": None, "key": None}
 
@@ -128,7 +128,8 @@ def windowing(
             buffer = np.zeros(
                 msg_in.data.shape[:axis_idx]
                 + (n_zero,)
-                + msg_in.data.shape[axis_idx + 1 :]
+                + msg_in.data.shape[axis_idx + 1 :],
+                dtype=msg_in.data.dtype,
             )
 
         # Add new data to buffer.
