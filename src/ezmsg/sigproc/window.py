@@ -125,12 +125,12 @@ def windowing(
             else:  # i.e. zero_pad_until == "input"
                 req_samples = msg_in.data.shape[axis_idx]
             n_zero = max(0, window_samples - req_samples)
-            buffer = np.zeros(
+            init_buffer_shape = (
                 msg_in.data.shape[:axis_idx]
                 + (n_zero,)
-                + msg_in.data.shape[axis_idx + 1 :],
-                dtype=msg_in.data.dtype,
+                + msg_in.data.shape[axis_idx + 1 :]
             )
+            buffer = np.zeros(init_buffer_shape, dtype=msg_in.data.dtype)
 
         # Add new data to buffer.
         # Currently, we concatenate the new time samples and clip the output.
