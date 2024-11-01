@@ -42,10 +42,11 @@ def log(
 
 class LogSettings(ez.Settings):
     base: float = 10.0
+    clip_zero: bool = False
 
 
 class Log(GenAxisArray):
     SETTINGS = LogSettings
 
     def construct_generator(self):
-        self.STATE.gen = log(base=self.SETTINGS.base)
+        self.STATE.gen = log(base=self.SETTINGS.base, clip_zero=self.SETTINGS.clip_zero)
