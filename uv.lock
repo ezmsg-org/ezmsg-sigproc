@@ -125,7 +125,7 @@ wheels = [
 
 [[package]]
 name = "ezmsg-sigproc"
-version = "1.3.2.dev0+g021511b.d20240926"
+version = "1.3.3.dev10+g5aaad7f.d20241101"
 source = { editable = "." }
 dependencies = [
     { name = "ezmsg" },

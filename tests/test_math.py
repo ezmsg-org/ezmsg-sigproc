@@ -62,13 +62,17 @@ def test_invert():
 
 
 @pytest.mark.parametrize("base", [np.e, 2, 10])
-def test_log(base: float):
+@pytest.mark.parametrize("dtype", [int, float])
+@pytest.mark.parametrize("clip", [False, True])
+def test_log(base: float, dtype, clip: bool):
     n_times = 130
     n_chans = 255
-    in_dat = np.arange(n_times * n_chans).reshape(n_times, n_chans)
+    in_dat = np.arange(n_times * n_chans).reshape(n_times, n_chans).astype(dtype)
     msg_in = AxisArray(in_dat, dims=["time", "ch"])
-    proc = log(base)
+    proc = log(base, clip_zero=clip)
     msg_out = proc.send(msg_in)
+    if clip and dtype is float:
+        in_dat = np.clip(in_dat, a_min=np.finfo(msg_in.data.dtype).tiny, a_max=None)
     assert np.array_equal(msg_out.data, np.log(in_dat) / np.log(base))
 
 
