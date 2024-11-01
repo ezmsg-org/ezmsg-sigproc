@@ -12,12 +12,14 @@ from ..base import GenAxisArray
 @consumer
 def log(
     base: float = 10.0,
+    clip_zero: bool = True,
 ) -> typing.Generator[AxisArray, AxisArray, None]:
     """
     Take the logarithm of the data. See :obj:`np.log` for more details.
 
     Args:
         base: The base of the logarithm. Default is 10.
+        clip_zero: If True, clip the data to the minimum positive value of the data type before taking the log.
 
     Returns: A primed generator that, when passed an input message via `.send(msg)`, yields an :obj:`AxisArray`
      with the data payload containing the logarithm of the input :obj:`AxisArray` data.
@@ -27,6 +29,10 @@ def log(
     log_base = np.log(base)
     while True:
         msg_in: AxisArray = yield msg_out
+        if clip_zero:
+            msg_in.data = np.clip(
+                msg_in.data, a_min=np.finfo(msg_in.data.dtype).tiny, a_max=None
+            )
         msg_out = replace(msg_in, data=np.log(msg_in.data) / log_base)
 
 
