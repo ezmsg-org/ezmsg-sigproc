@@ -177,7 +177,9 @@ def windowing(
         if b_1to1:
             # one-to-one mode -- Each send yields exactly one window containing only the most recent samples.
             buffer = slice_along_axis(buffer, slice(-window_samples, None), axis_idx)
-            out_dat = np.expand_dims(buffer, axis=axis_idx)
+            out_dat = buffer.reshape(
+                buffer.shape[:axis_idx] + (1,) + buffer.shape[axis_idx:]
+            )
             out_newaxis = replace(out_newaxis, offset=buffer_offset[-window_samples])
         elif buffer.shape[axis_idx] >= window_samples:
             # Deterministic window shifts.
