@@ -183,6 +183,8 @@ def windowing(
             out_newaxis = replace(out_newaxis, offset=buffer_offset[-window_samples])
         elif buffer.shape[axis_idx] >= window_samples:
             # Deterministic window shifts.
+            # Note: After https://github.com/ezmsg-org/ezmsg/pull/152, add `window_shift_samples` as the last arg
+            #  to `sliding_win_oneaxis` and remove the call to `slice_along_axis`.
             out_dat = sliding_win_oneaxis(buffer, window_samples, axis_idx)
             out_dat = slice_along_axis(
                 out_dat, slice(None, None, window_shift_samples), axis_idx
