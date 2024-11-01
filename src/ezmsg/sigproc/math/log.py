@@ -12,7 +12,7 @@ from ..base import GenAxisArray
 @consumer
 def log(
     base: float = 10.0,
-    clip_zero: bool = True,
+    clip_zero: bool = False,
 ) -> typing.Generator[AxisArray, AxisArray, None]:
     """
     Take the logarithm of the data. See :obj:`np.log` for more details.
@@ -29,7 +29,11 @@ def log(
     log_base = np.log(base)
     while True:
         msg_in: AxisArray = yield msg_out
-        if clip_zero:
+        if (
+            clip_zero
+            and np.any(msg_in.data <= 0)
+            and np.issubdtype(msg_in.data.dtype, np.floating)
+        ):
             msg_in.data = np.clip(
                 msg_in.data, a_min=np.finfo(msg_in.data.dtype).tiny, a_max=None
             )
