@@ -1,7 +1,5 @@
 import copy
-from dataclasses import dataclass, field
 from pathlib import Path
-import typing
 
 import numpy as np
 from ezmsg.util.messages.axisarray import AxisArray
@@ -9,22 +7,6 @@ from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.sigproc.affinetransform import affine_transform, common_rereference
 
 from util import assert_messages_equal
-
-
-# Define a custom Axis class that has a `labels` attribute
-@dataclass
-class CustomAxis(AxisArray.Axis):
-    labels: typing.List[str] = field(default_factory=lambda: [])
-
-    @classmethod
-    def SpaceAxis(
-        cls, labels: typing.List[str]
-    ):  # , locs: typing.Optional[npt.NDArray] = None):
-        return cls(unit="mm", labels=labels)
-
-
-# Monkey-patch AxisArray with our customized Axis
-AxisArray.Axis = CustomAxis
 
 
 def test_affine_generator():
@@ -35,7 +17,9 @@ def test_affine_generator():
         data=in_dat,
         dims=["time", "ch"],
         axes={
-            "ch": AxisArray.Axis.SpaceAxis(labels=[f"ch_{i}" for i in range(n_chans)])
+            "ch": AxisArray.CoordinateAxis(
+                data=np.array([f"ch_{i}" for i in range(n_chans)]), dims=["ch"]
+            )
         },
     )
 
@@ -61,26 +45,26 @@ def test_affine_generator():
     gen = affine_transform(weights=csv_path, axis="ch", right_multiply=False)
     msg_out = gen.send(msg_in)
     assert np.allclose(msg_out.data, expected_out)
-    assert len(msg_out.axes["ch"].labels) == weights.shape[0]
-    assert msg_out.axes["ch"].labels[:-1] == msg_in.axes["ch"].labels
+    assert len(msg_out.axes["ch"].data) == weights.shape[0]
+    assert (msg_out.axes["ch"].data[:-1] == msg_in.axes["ch"].data).all()
 
     # Try again as str, not Path
     gen = affine_transform(weights=str(csv_path), axis="ch", right_multiply=False)
     msg_out = gen.send(msg_in)
     assert np.allclose(msg_out.data, expected_out)
-    assert len(msg_out.axes["ch"].labels) == weights.shape[0]
+    assert len(msg_out.axes["ch"].data) == weights.shape[0]
 
     # Try again as direct ndarray
     gen = affine_transform(weights=weights, axis="ch", right_multiply=False)
     msg_out = gen.send(msg_in)
     assert np.allclose(msg_out.data, expected_out)
-    assert len(msg_out.axes["ch"].labels) == weights.shape[0]
+    assert len(msg_out.axes["ch"].data) == weights.shape[0]
 
     # One more time, but we pre-transpose the weights and do not override right_multiply
     gen = affine_transform(weights=weights.T, axis="ch", right_multiply=True)
     msg_out = gen.send(msg_in)
     assert np.allclose(msg_out.data, expected_out)
-    assert len(msg_out.axes["ch"].labels) == weights.shape[0]
+    assert len(msg_out.axes["ch"].data) == weights.shape[0]
 
 
 def test_affine_passthrough():
