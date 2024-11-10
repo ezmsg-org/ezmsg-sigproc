@@ -71,10 +71,10 @@ def affine_transform(
             # Determine if we need to modify the transformed axis.
             if (
                 axis in msg_in.axes
-                and hasattr(msg_in.axes[axis], "labels")
+                and isinstance(msg_in.axes[axis], AxisArray.CoordinateAxis)
                 and weights.shape[0] != weights.shape[1]
             ):
-                in_labels = msg_in.axes[axis].labels
+                in_labels = msg_in.axes[axis].data
                 new_labels = []
                 n_in, n_out = weights.shape
                 if len(in_labels) != n_in:
@@ -101,8 +101,8 @@ def affine_transform(
                                 new_labels.append("")
                     elif np.all(b_filled_outputs):
                         # Transform is dropping some of the inputs.
-                        new_labels = np.array(in_labels)[b_used_inputs].tolist()
-                new_axis = replace(msg_in.axes[axis], labels=new_labels)
+                        new_labels = np.array(in_labels)[b_used_inputs]
+                new_axis = replace(msg_in.axes[axis], data=np.array(new_labels))
 
         data = msg_in.data
 
