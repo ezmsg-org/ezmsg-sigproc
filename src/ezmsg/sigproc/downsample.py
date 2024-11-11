@@ -22,6 +22,7 @@ def downsample(
 
     Args:
         axis: The name of the axis along which to downsample.
+            Note: The axis must exist in the message .axes and be of type AxisArray.LinearAxis.
         factor: Downsampling factor.
 
     Returns:
