@@ -71,7 +71,7 @@ def affine_transform(
             # Determine if we need to modify the transformed axis.
             if (
                 axis in msg_in.axes
-                and isinstance(msg_in.axes[axis], AxisArray.CoordinateAxis)
+                and hasattr(msg_in.axes[axis], "data")
                 and weights.shape[0] != weights.shape[1]
             ):
                 in_labels = msg_in.axes[axis].data
