@@ -24,11 +24,12 @@ def cwt(
     The function is equivalent to the :obj:`pywt.cwt` function, but is designed to work with streaming data.
 
     Args:
-        scales: The wavelet scales to use.
+        scales: The wavelet scales to use. Note: Scales will be sorted from largest to smallest.
         wavelet: Wavelet object or name of wavelet to use.
         min_phase: See filterbank MinPhaseMode for details.
         axis: The target axis for operation. Note that this will be moved to the -1th dimension
           because fft and matrix multiplication is much faster on the last axis.
+          This axis must be in the msg.axes and it must be of type AxisArray.LinearAxis.
 
     Returns:
         A primed Generator object that expects an :obj:`AxisArray` via `.send(axis_array)` of continuous data
@@ -37,7 +38,7 @@ def cwt(
     msg_out: typing.Optional[AxisArray] = None
 
     # Check parameters
-    scales = np.array(scales)
+    scales = np.sort(scales)[::-1]
     assert np.all(scales > 0), "Scales must be positive."
     assert scales.ndim == 1, "Scales must be a 1D list, tuple, or array."
     if not isinstance(wavelet, (pywt.ContinuousWavelet, pywt.Wavelet)):
@@ -103,7 +104,6 @@ def cwt(
                 pywt.scale2frequency(wavelet, scales, precision)
                 / msg_in.axes[axis].gain
             )
-            fstep = (freqs[1] - freqs[0]) if len(freqs) > 1 else 1.0
             # Create output template
             dummy_shape = in_shape + (len(scales), 0)
             template = AxisArray(
@@ -113,7 +113,9 @@ def cwt(
                 dims=msg_in.dims[:ax_idx] + msg_in.dims[ax_idx + 1 :] + ["freq", axis],
                 axes={
                     **msg_in.axes,
-                    "freq": AxisArray.Axis("Hz", offset=freqs[0], gain=fstep),
+                    "freq": AxisArray.CoordinateAxis(
+                        unit="Hz", data=freqs, dims=["freq"]
+                    ),
                 },
                 key=msg_in.key,
             )
