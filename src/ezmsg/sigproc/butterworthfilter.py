@@ -73,6 +73,7 @@ def butter(
 
     Args:
         axis: The name of the axis to filter.
+            Note: The axis must be represented in the message .axes and be of type AxisArray.LinearAxis.
         order: Filter order.
         cuton: Corner frequency of the filter in Hz.
         cutoff: Corner frequency of the filter in Hz.

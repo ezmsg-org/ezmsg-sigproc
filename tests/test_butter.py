@@ -88,7 +88,12 @@ def test_butterworth(
         dat_shape.insert(time_ax, n_times)
         dat_dims = ["freq", "ch"]
         dat_dims.insert(time_ax, "time")
-        other_axes = {"freq": AxisArray.Axis(unit="Hz"), "ch": AxisArray.Axis()}
+        other_axes = {
+            "freq": AxisArray.LinearAxis(unit="Hz", offset=0.0, gain=1.0),
+            "ch": AxisArray.CoordinateAxis(
+                data=np.arange(n_chans).astype(str), dims=["ch"]
+            ),
+        }
     in_dat = np.arange(np.prod(dat_shape), dtype=float).reshape(*dat_shape)
 
     # Calculate Expected Result
@@ -122,6 +127,7 @@ def test_butterworth(
                 split_dat,
                 dims=dat_dims,
                 axes=frozendict({**other_axes, "time": _time_axis}),
+                key="test_butterworth",
             )
         )
         n_seen += split_dat.shape[time_ax]
@@ -151,7 +157,11 @@ def test_butterworth_empty_msg():
     msg_in = AxisArray(
         data=np.zeros((0, 2)),
         dims=["time", "ch"],
-        axes={"time": AxisArray.Axis.TimeAxis(fs=19.0, offset=0)},
+        axes={
+            "time": AxisArray.Axis.TimeAxis(fs=19.0, offset=0),
+            "ch": AxisArray.CoordinateAxis(data=np.arange(2).astype(str), dims=["ch"]),
+        },
+        key="test_butterworth_empty_msg",
     )
     res = proc.send(msg_in)
     assert res.data.size == 0
