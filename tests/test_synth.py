@@ -158,6 +158,10 @@ async def test_acounter(
         assert msg.data.shape == (block_size, n_ch)
         assert "time" in msg.axes
         assert msg.axes["time"].gain == 1 / fs
+        assert "ch" in msg.axes
+        assert np.array_equal(
+            msg.axes["ch"].data, np.array([f"Ch{_}" for _ in range(n_ch)])
+        )
 
     agg = AxisArray.concatenate(*messages, dim="time")
 
