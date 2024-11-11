@@ -35,9 +35,7 @@ def _debug_plot_welch(raw: AxisArray, result: AxisArray, welch_db: bool = True):
     fig, ax = plt.subplots(2, 1)
 
     t_ax = raw.axes["time"]
-    t_vec = (
-        np.arange(raw.data.shape[raw.get_axis_idx("time")]) * t_ax.gain + t_ax.offset
-    )
+    t_vec = t_ax.value(np.arange(raw.data.shape[raw.get_axis_idx("time")]))
     ch0_raw = raw.data[..., :, 0]
     if ch0_raw.ndim > 1:
         # For multi-win inputs
@@ -46,10 +44,7 @@ def _debug_plot_welch(raw: AxisArray, result: AxisArray, welch_db: bool = True):
     ax[0].set_xlabel("Time (s)")
 
     f_ax = result.axes["freq"]
-    f_vec = (
-        np.arange(result.data.shape[result.get_axis_idx("freq")]) * f_ax.gain
-        + f_ax.offset
-    )
+    f_vec = f_ax.value(np.arange(result.data.shape[result.get_axis_idx("freq")]))
     ch0_spec = result.data[..., :, 0]
     if ch0_spec.ndim > 1:
         ch0_spec = ch0_spec[0]
@@ -103,6 +98,7 @@ def test_spectrum_gen_multiwin(
     assert "time" not in result.axes
     assert "ch" in result.dims
     assert "win" in result.dims
+    assert "ch" in result.axes  # We will not check anything else about axes["ch"].
     assert "freq" in result.axes
     assert result.axes["freq"].gain == 1 / win_dur
     assert "freq" in result.dims
@@ -111,7 +107,7 @@ def test_spectrum_gen_multiwin(
         win_len if output == SpectralOutput.FULL else (win_len // 2 + 1 - (win_len % 2))
     )
     assert result.data.shape[fax_ix] == f_len
-    f_vec = result.axes["freq"].gain * np.arange(f_len) + result.axes["freq"].offset
+    f_vec = result.axes["freq"].value(np.arange(f_len))
     if output == SpectralOutput.NEGATIVE:
         f_vec = np.abs(f_vec)
     for s_p in sin_params:
