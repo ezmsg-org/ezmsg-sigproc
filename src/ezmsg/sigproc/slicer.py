@@ -4,7 +4,7 @@ import typing
 import numpy as np
 import numpy.typing as npt
 import ezmsg.core as ez
-from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
+from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis, AxisBase
 from ezmsg.util.generator import consumer
 
 from .base import GenAxisArray
@@ -15,7 +15,10 @@ Slicer:Select a subset of data along a particular axis.
 """
 
 
-def parse_slice(s: str) -> typing.Tuple[typing.Union[slice, int], ...]:
+def parse_slice(
+    s: str,
+    axinfo: typing.Optional[AxisArray.CoordinateAxis] = None,
+) -> typing.Tuple[typing.Union[slice, int], ...]:
     """
     Parses a string representation of a slice and returns a tuple of slice objects.
 
@@ -26,9 +29,13 @@ def parse_slice(s: str) -> typing.Tuple[typing.Union[slice, int], ...]:
     - "5" (or any integer) -> (5,). Take only that item.
         applying this to a ndarray or AxisArray will drop the dimension.
     - A comma-separated list of the above -> a tuple of slices | ints
+    - A comma-separated list of values and axinfo is provided and is a CoordinateAxis -> a tuple of ints
 
     Args:
         s: The string representation of the slice.
+        axinfo: (Optional) If provided, and of type CoordinateAxis,
+          and `s` is a comma-separated list of values, then the values
+          in s will be checked against the values in axinfo.data.
 
     Returns:
         A tuple of slice objects and/or ints.
@@ -38,9 +45,15 @@ def parse_slice(s: str) -> typing.Tuple[typing.Union[slice, int], ...]:
     if "," not in s:
         parts = [part.strip() for part in s.split(":")]
         if len(parts) == 1:
+            if (
+                axinfo is not None
+                and hasattr(axinfo, "data")
+                and parts[0] in axinfo.data
+            ):
+                return tuple(np.where(axinfo.data == parts[0])[0])
             return (int(parts[0]),)
         return (slice(*(int(part.strip()) if part else None for part in parts)),)
-    suplist = [parse_slice(_) for _ in s.split(",")]
+    suplist = [parse_slice(_, axinfo=axinfo) for _ in s.split(",")]
     return tuple([item for sublist in suplist for item in sublist])
 
 
@@ -64,7 +77,7 @@ def slicer(
 
     # State variables
     _slice: typing.Optional[typing.Union[slice, npt.NDArray]] = None
-    new_axis: typing.Optional[AxisArray.Axis] = None
+    new_axis: typing.Optional[AxisBase] = None
     b_change_dims: bool = False  # If number of dimensions changes when slicing
 
     # Reset if input changes
@@ -92,7 +105,7 @@ def slicer(
             b_change_dims = False
 
             # Calculate the slice
-            _slices = parse_slice(selection)
+            _slices = parse_slice(selection, msg_in.axes.get(axis, None))
             if len(_slices) == 1:
                 _slice = _slices[0]
                 # Do we drop the sliced dimension?
@@ -107,12 +120,15 @@ def slicer(
             # Create the output axis.
             if (
                 axis in msg_in.axes
-                and hasattr(msg_in.axes[axis], "labels")
-                and len(msg_in.axes[axis].labels) > 0
+                and hasattr(msg_in.axes[axis], "data")
+                and len(msg_in.axes[axis].data) > 0
             ):
-                in_labels = np.array(msg_in.axes[axis].labels)
-                new_labels = in_labels[_slice].tolist()
-                new_axis = replace(msg_in.axes[axis], labels=new_labels)
+                in_data = np.array(msg_in.axes[axis].data)
+                if b_change_dims:
+                    out_data = in_data[_slice : _slice + 1]
+                else:
+                    out_data = in_data[_slice]
+                new_axis = replace(msg_in.axes[axis], data=out_data)
 
         replace_kwargs = {}
         if b_change_dims:
