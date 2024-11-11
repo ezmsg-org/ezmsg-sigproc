@@ -10,10 +10,7 @@ from util import create_messages_with_periodic_signal, assert_messages_equal
 def _debug_plot(result):
     import matplotlib.pyplot as plt
 
-    t_vec = (
-        result.axes["time"].offset
-        + np.arange(result.data.shape[0]) * result.axes["time"].gain
-    )
+    t_vec = result.axes["time"].value(np.arange(result.data.shape[0]))
     plt.plot(t_vec, result.data[..., 0])
 
 
@@ -54,10 +51,7 @@ def test_bandpower():
     # _debug_plot(result)
 
     # Check the amplitudes at the midpoints of each of our sinusoids.
-    t_vec = (
-        result.axes["time"].offset
-        + np.arange(result.data.shape[0]) * result.axes["time"].gain
-    )
+    t_vec = result.axes["time"].value(np.arange(result.data.shape[0]))
     mags = []
     for s_p in sin_params[:2]:
         ix = np.argmin(np.abs(t_vec - (s_p["offset"] + s_p["dur"] / 2)))
