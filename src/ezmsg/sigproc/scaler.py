@@ -87,6 +87,7 @@ def scaler_np(
     Args:
         time_constant: Decay constant `tau` in seconds.
         axis: The name of the axis to accumulate statistics over.
+            Note: The axis must be in the msg.axes and be of type AxisArray.LinearAxis.
 
     Returns:
         A primed generator object that expects to be sent a :obj:`AxisArray` via `.send(axis_array)`
