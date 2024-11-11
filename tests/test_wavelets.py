@@ -64,7 +64,7 @@ def scratch():
 def test_cwt():
     # scale near 1 is approx fs, 256 is approx 256 Hz
     # we want up to ~ 200 Hz, so that's a scale of 256
-    scales = np.geomspace(4, 256, num=70)
+    scales = np.geomspace(4, 256, num=70)[::-1]
     # wavelets = [f"cmor{x:.1f}-{y:.1f}" for x in [0.5, 1.5, 2.5] for y in [0.5, 1.0, 1.5]]
     # wavelet = wavelets[4]
     wavelet = "morl"
@@ -88,7 +88,12 @@ def test_cwt():
             AxisArray(
                 data=chirp[:, idx : idx + step_size],
                 dims=["ch", "time"],
-                axes={"time": AxisArray.Axis.TimeAxis(offset=tvec[idx], fs=fs)},
+                axes={
+                    "ch": AxisArray.CoordinateAxis(
+                        data=np.array([f"Ch{_}" for _ in range(2)]), dims=["ch"]
+                    ),
+                    "time": AxisArray.Axis.TimeAxis(offset=tvec[idx], fs=fs),
+                },
                 key="test_cwt",
             )
         )
@@ -109,7 +114,10 @@ def test_cwt():
     result = AxisArray.concatenate(*out_messages, dim="time")
     assert result.key == "test_cwt"
 
-    # TODO: Compare result to expected
+    # Compare result to expected
+    ez_freqs = result.axes["freq"].data
+    assert np.array_equal(ez_freqs, freqs)
+    # TODO: Compare data ?! Hard to do because pywt.cwt uses filtfilt and different coeffs.
 
     if False:
         # Debug visualize result
@@ -120,15 +128,22 @@ def test_cwt():
         # tmp = expected
         # title = "pywavelets"
         nch = tmp.shape[0]
-        fig, axes = plt.subplots(2, nch)
-        fig.suptitle(title)
+        fig, axes = plt.subplots(3, nch, figsize=(8, 8), tight_layout=True)
         for ch_ix in range(nch):
             axes[0, ch_ix].set_title(f"Channel {ch_ix}")
             axes[0, ch_ix].plot(tvec, chirp[ch_ix])
+
+            axes[1, ch_ix].set_title(title)
             _ = axes[1, ch_ix].pcolormesh(
                 tvec[: tmp.shape[-1]], freqs, np.abs(tmp[ch_ix, :-1, :-1])
             )
             axes[1, ch_ix].set_yscale("log")
             axes[1, ch_ix].set_xlabel("Time (s)")
             axes[1, ch_ix].set_ylabel("Frequency (Hz)")
+
+            axes[2, ch_ix].set_title("pywt.cwt filtfilt")
+            _ = axes[2, ch_ix].pcolormesh(
+                tvec[: expected.shape[-1]], freqs, np.abs(expected[ch_ix, :-1, :-1])
+            )
+            axes[2, ch_ix].set_yscale("log")
         plt.show()
