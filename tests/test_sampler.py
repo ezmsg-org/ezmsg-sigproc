@@ -45,9 +45,13 @@ def test_sampler_gen():
                 {
                     "time": AxisArray.Axis.TimeAxis(
                         fs=fs, offset=offsets[ix * n_per_chunk]
-                    )
+                    ),
+                    "ch": AxisArray.CoordinateAxis(
+                        data=np.arange(n_chans).astype(str), dims=["ch"]
+                    ),
                 }
             ),
+            key="test_sampler_gen",
         )
         for ix in range(n_chunks)
     ]
