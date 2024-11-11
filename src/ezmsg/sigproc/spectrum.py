@@ -79,6 +79,7 @@ def spectrum(
 
     Args:
         axis: The name of the axis on which to calculate the spectrum.
+            Note: The axis must have an .axes entry of type LinearAxis, not CoordinateAxis.
         out_axis: The name of the new axis. Defaults to "freq".
         window: The :obj:`WindowFunction` to apply to the data slice prior to calculating the spectrum.
         transform: The :obj:`SpectralTransform` to apply to the spectral magnitude.
@@ -101,7 +102,7 @@ def spectrum(
     apply_window = window != WindowFunction.NONE
     do_fftshift &= output == SpectralOutput.FULL
     f_sl = slice(None)
-    freq_axis: typing.Optional[AxisArray.Axis] = None
+    freq_axis: typing.Optional[AxisArray.LinearAxis] = None
     fftfun: typing.Optional[typing.Callable] = None
     f_transform: typing.Optional[typing.Callable] = None
     new_dims: typing.Optional[typing.List[str]] = None
@@ -174,7 +175,7 @@ def spectrum(
                     freqs = np.fft.fftshift(freqs, axes=-1)
                 freqs = freqs[f_sl]
             freqs = freqs.tolist()  # To please type checking
-            freq_axis = AxisArray.Axis(
+            freq_axis = AxisArray.LinearAxis(
                 unit="Hz", gain=freqs[1] - freqs[0], offset=freqs[0]
             )
             if out_axis is None:
