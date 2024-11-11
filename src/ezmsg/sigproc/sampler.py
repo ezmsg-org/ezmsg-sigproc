@@ -52,6 +52,7 @@ def sampler(
             need a buffer of 0.5 + (1.5 - -1.0) = 3.0 seconds. It is best to at least double your estimate if memory allows.
         axis: The axis along which to sample the data.
             None (default) will choose the first axis in the first input.
+            Note: (for now) the axis must exist in the msg .axes and be of type AxisArray.LinearAxis
         period: The period in seconds during which to sample the data.
             Defaults to None. Only used if not None and the trigger message does not define its own period.
         value: The value to sample. Defaults to None.
