@@ -87,7 +87,15 @@ def test_window_gen_nodur():
     test_msg = AxisArray(
         data=data,
         dims=["ch", "time"],
-        axes=frozendict({"time": AxisArray.Axis.TimeAxis(fs=500.0, offset=0.0)}),
+        axes=frozendict(
+            {
+                "time": AxisArray.Axis.TimeAxis(fs=500.0, offset=0.0),
+                "ch": AxisArray.CoordinateAxis(
+                    data=np.arange(nchans).astype(str), unit="label", dims=["ch"]
+                ),
+            }
+        ),
+        key="test_window_gen_nodur",
     )
     backup = [copy.deepcopy(test_msg)]
     gen = windowing(window_dur=None)
@@ -139,7 +147,15 @@ def test_window_generator(
     test_msg = AxisArray(
         data[..., ()],
         dims=["ch", "time"] if time_ax == 1 else ["time", "ch"],
-        axes=frozendict({"time": AxisArray.Axis.TimeAxis(fs=fs, offset=0.0)}),
+        axes=frozendict(
+            {
+                "time": AxisArray.Axis.TimeAxis(fs=fs, offset=0.0),
+                "ch": AxisArray.CoordinateAxis(
+                    data=np.arange(nchans).astype(str), unit="label", dims=["ch"]
+                ),
+            }
+        ),
+        key="test_window_generator",
     )
     messages = []
     backup = []
@@ -152,10 +168,12 @@ def test_window_generator(
             test_msg,
             data=msg_data,
             axes={
-                "time": AxisArray.Axis.TimeAxis(
-                    fs=fs, offset=tvec[msg_ix * msg_block_size]
-                )
+                **test_msg.axes,
+                "time": replace(
+                    test_msg.axes["time"], offset=tvec[msg_ix * msg_block_size]
+                ),
             },
+            key=test_msg.key,
         )
         messages.append(test_msg)
         backup.append(copy.deepcopy(test_msg))
@@ -178,12 +196,11 @@ def test_window_generator(
 
     # Post-process the results to yield a single data array and a single vector of offsets.
     win_ax = time_ax
-    time_ax = win_ax + 1
+    # time_ax = win_ax + 1
     result = np.concatenate([_.data for _ in results], win_ax)
     offsets = np.hstack(
         [
-            _.axes[newaxis or "win"].offset
-            + _.axes[newaxis or "win"].gain * np.arange(_.data.shape[win_ax])
+            _.axes[newaxis or "win"].value(np.arange(_.data.shape[win_ax]))
             for _ in results
         ]
     )
