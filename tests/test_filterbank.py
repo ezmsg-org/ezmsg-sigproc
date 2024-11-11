@@ -62,7 +62,7 @@ def test_filterbank(mode: str, kernel_type: str):
             AxisArray(
                 data=chirp[:, idx : idx + step_size],
                 dims=["ch", "time"],
-                axes={"time": AxisArray.Axis.TimeAxis(offset=tvec[idx], fs=fs)},
+                axes={"time": AxisArray.TimeAxis(offset=tvec[idx], fs=fs)},
                 key="test_filterbank",
             )
         )

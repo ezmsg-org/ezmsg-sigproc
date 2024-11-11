@@ -6,7 +6,7 @@ import typing
 import numpy as np
 import numpy.typing as npt
 import ezmsg.core as ez
-from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.axisarray import AxisArray, AxisBase
 from ezmsg.util.generator import consumer
 
 from .base import GenAxisArray
@@ -47,7 +47,7 @@ def affine_transform(
 
     # State variables
     # New axis with transformed labels, if required
-    new_axis: typing.Optional[AxisArray.Axis] = None
+    new_axis: typing.Optional[AxisBase] = None
 
     # Reset if any of these change.
     check_input = {"key": None}

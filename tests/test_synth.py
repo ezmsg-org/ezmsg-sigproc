@@ -298,7 +298,7 @@ def test_sin_gen(freq: float = 1.0, amp: float = 1.0, phase: float = 0.0):
     for split_dat in np.array_split(
         np.arange(n_samples)[:, None], n_msgs, axis=axis_idx
     ):
-        _time_axis = AxisArray.Axis.TimeAxis(fs=srate, offset=float(split_dat[0, 0]))
+        _time_axis = AxisArray.TimeAxis(fs=srate, offset=float(split_dat[0, 0]))
         messages.append(
             AxisArray(split_dat, dims=["time", "ch"], axes={"time": _time_axis})
         )
