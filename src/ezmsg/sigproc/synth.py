@@ -138,6 +138,17 @@ async def acounter(
 
     n_sent: int = 0  # It is convenient to know how many samples we have sent.
     clock_zero: float = time.time()  # time associated with first sample
+    template = AxisArray(
+        data=np.array([[]]),
+        dims=["time", "ch"],
+        axes={
+            "time": AxisArray.Axis.TimeAxis(fs=fs),
+            "ch": AxisArray.CoordinateAxis(
+                data=np.array([f"Ch{_}" for _ in range(n_ch)]), dims=["ch"]
+            ),
+        },
+        key="acounter",
+    )
 
     while True:
         # 1. Sleep, if necessary, until we are at the end of the current block
@@ -167,10 +178,13 @@ async def acounter(
             # offset += clock_zero  # ??
 
         # 4. yield output
-        yield AxisArray(
-            block_samp,
-            dims=["time", "ch"],
-            axes={"time": AxisArray.Axis.TimeAxis(fs=fs, offset=offset)},
+        yield replace(
+            template,
+            data=block_samp,
+            axes={
+                "time": replace(template.axes["time"], offset=offset),
+                "ch": template.axes["ch"],
+            },
         )
 
         # 5. Update state for next iteration (after next yield)
@@ -273,6 +287,7 @@ def sin(
 
     Args:
         axis: The name of the axis over which the sinusoid passes.
+            Note: The axis must exist in the msg.axes and be of type AxisArray.LinearAxis.
         freq: The frequency of the sinusoid, in Hz.
         amp: The amplitude of the sinusoid.
         phase: The initial phase of the sinusoid, in radians.
