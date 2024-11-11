@@ -31,6 +31,7 @@ def windowing(
     Args:
         axis: The axis along which to segment windows.
             If None, defaults to the first dimension of the first seen AxisArray.
+            Note: The windowed axis must be an AxisArray.LinearAxis, not an AxisArray.CoordinateAxis.
         newaxis: New axis on which windows are delimited, immediately
         preceding the target windowed axis. The data length along newaxis may be 0 if
         this most recent push did not provide enough data for a new window.
@@ -78,7 +79,7 @@ def windowing(
     shift_deficit: int = 0
     b_1to1 = window_shift is None
     newaxis_warned: bool = b_1to1
-    out_newaxis: typing.Optional[AxisArray.Axis] = None
+    out_newaxis: typing.Optional[AxisArray.LinearAxis] = None
     out_dims: typing.Optional[typing.List[str]] = None
 
     check_inputs = {"samp_shape": None, "fs": None, "key": None}

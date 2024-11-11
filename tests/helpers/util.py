@@ -53,7 +53,6 @@ def create_messages_with_periodic_signal(
     data = np.zeros((len(t_vec),))
     # TODO: each freq should be evaluated independently and the dict should have a "dur" and "offset" value, both in sec
     # TODO: Get rid of `win_dur` and replace with `msg_dur`
-    # TODO: if win_step_dur is not None then we do sliding_window_view
     for s_p in sin_params:
         offs = s_p.get("offset", 0.0)
         b_t = np.logical_and(t_vec >= offs, t_vec <= offs + s_p["dur"])
@@ -74,13 +73,22 @@ def create_messages_with_periodic_signal(
     # Create the output messages
     offset = 0.0
     messages = []
+    _ch_axis = AxisArray.CoordinateAxis(
+        data=np.array(["Ch1"]), unit="label", dims=["ch"]
+    )
     for split_dat in data_splits:
         _time_axis = AxisArray.Axis.TimeAxis(fs=fs, offset=offset)
         messages.append(
             AxisArray(
                 split_dat[..., None],
                 dims=["time", "ch"],
-                axes=frozendict({"time": _time_axis}),
+                axes=frozendict(
+                    {
+                        "time": _time_axis,
+                        "ch": _ch_axis,
+                    }
+                ),
+                key="ezmsg.sigproc generated periodic signal",
             )
         )
         offset += split_dat.shape[0] / fs
