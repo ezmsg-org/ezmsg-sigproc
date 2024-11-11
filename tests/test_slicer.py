@@ -31,7 +31,7 @@ def test_slicer_generator():
         in_dat,
         dims=["time", "ch"],
         axes={
-            "time": AxisArray.Axis.TimeAxis(fs=100.0, offset=0.1),
+            "time": AxisArray.TimeAxis(fs=100.0, offset=0.1),
             "ch": AxisArray.CoordinateAxis(
                 data=np.array([f"Ch{_}" for _ in range(n_chans)]), dims=["ch"]
             ),
@@ -77,7 +77,7 @@ def test_slicer_gen_drop_dim():
         in_dat,
         dims=["time", "ch"],
         axes={
-            "time": AxisArray.Axis.TimeAxis(fs=100.0, offset=0.1),
+            "time": AxisArray.TimeAxis(fs=100.0, offset=0.1),
             "ch": AxisArray.CoordinateAxis(
                 data=np.array([f"Ch{_}" for _ in range(n_chans)]), dims=["ch"]
             ),
@@ -106,7 +106,7 @@ def test_slicer_label(selection: str):
         in_dat,
         dims=["time", "ch"],
         axes={
-            "time": AxisArray.Axis.TimeAxis(fs=100.0, offset=0.1),
+            "time": AxisArray.TimeAxis(fs=100.0, offset=0.1),
             "ch": AxisArray.CoordinateAxis(
                 data=np.array([f"Ch{_}" for _ in range(n_chans)]), dims=["ch"]
             ),

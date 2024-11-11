@@ -43,9 +43,7 @@ def test_sampler_gen():
             dims=["ch", "time"],
             axes=frozendict(
                 {
-                    "time": AxisArray.Axis.TimeAxis(
-                        fs=fs, offset=offsets[ix * n_per_chunk]
-                    ),
+                    "time": AxisArray.TimeAxis(fs=fs, offset=offsets[ix * n_per_chunk]),
                     "ch": AxisArray.CoordinateAxis(
                         data=np.arange(n_chans).astype(str), dims=["ch"]
                     ),

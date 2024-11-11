@@ -77,7 +77,7 @@ def create_messages_with_periodic_signal(
         data=np.array(["Ch1"]), unit="label", dims=["ch"]
     )
     for split_dat in data_splits:
-        _time_axis = AxisArray.Axis.TimeAxis(fs=fs, offset=offset)
+        _time_axis = AxisArray.TimeAxis(fs=fs, offset=offset)
         messages.append(
             AxisArray(
                 split_dat[..., None],

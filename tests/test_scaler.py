@@ -30,7 +30,7 @@ def test_adaptive_standard_scaler_river():
         test_input = AxisArray(
             np.tile(data, (2, 1)),
             dims=["ch", "time"],
-            axes=frozendict({"time": AxisArray.Axis()}),
+            axes=frozendict({"time": AxisArray.TimeAxis(fs=100.0)}),
         )
 
         backup = [copy.deepcopy(test_input)]
@@ -125,7 +125,7 @@ def test_scaler_system(
     expected_input = AxisArray(
         np.arange(len(data))[None, :],
         dims=["ch", "time"],
-        axes=frozendict({"time": AxisArray.Axis(gain=1 / fs, offset=0.0)}),
+        axes=frozendict({"time": AxisArray.TimeAxis(fs=fs)}),
     )
     _scaler = scaler_np(time_constant=tau, axis="time")
     expected_output = _scaler.send(expected_input)

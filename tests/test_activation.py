@@ -25,7 +25,7 @@ def test_activation(function: str):
                 data=msg_sig,
                 dims=["time", "ch", "feat"],
                 axes=frozendict(
-                    {"time": AxisArray.Axis.TimeAxis(fs=in_fs, offset=msg_ix / in_fs)}
+                    {"time": AxisArray.TimeAxis(fs=in_fs, offset=msg_ix / in_fs)}
                 ),
             )
             yield msg

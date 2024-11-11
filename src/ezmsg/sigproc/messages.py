@@ -26,5 +26,5 @@ def TSMessage(
     dims[time_dim] = "time"
     offset = time.time() if timestamp is None else timestamp
     offset_adj = data.shape[time_dim] / fs  # offset corresponds to idx[0] on time_dim
-    axis = AxisArray.Axis.TimeAxis(fs, offset=offset - offset_adj)
+    axis = AxisArray.TimeAxis(fs, offset=offset - offset_adj)
     return AxisArray(data, dims=dims, axes=dict(time=axis))
