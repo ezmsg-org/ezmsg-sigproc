@@ -43,7 +43,16 @@ def test_downsample_core(block_size: int, factor: int):
                 data=msg_sig,
                 dims=["time", "ch", "feat"],
                 axes=frozendict(
-                    {"time": AxisArray.Axis.TimeAxis(fs=in_fs, offset=msg_offs)}
+                    {
+                        "time": AxisArray.Axis.TimeAxis(fs=in_fs, offset=msg_offs),
+                        "ch": AxisArray.CoordinateAxis(
+                            data=np.arange(n_channels).astype(str), dims=["ch"]
+                        ),
+                        "feat": AxisArray.CoordinateAxis(
+                            data=np.array([f"Feat{_ + 1}" for _ in range(n_features)]),
+                            dims=["feat"],
+                        ),
+                    }
                 ),
                 key="test_downsample_core",
             )
