@@ -88,7 +88,7 @@ def test_spectrum_gen_multiwin(
         sin_params=sin_params, fs=fs, msg_dur=win_dur, win_step_dur=win_step_dur
     )
     input_multiwin = AxisArray.concatenate(*messages, dim="win")
-    input_multiwin.axes["win"] = AxisArray.Axis.TimeAxis(offset=0, fs=1 / win_step_dur)
+    input_multiwin.axes["win"] = AxisArray.TimeAxis(offset=0, fs=1 / win_step_dur)
 
     gen = spectrum(axis="time", window=window, transform=transform, output=output)
     result = gen.send(input_multiwin)

@@ -142,7 +142,7 @@ async def acounter(
         data=np.array([[]]),
         dims=["time", "ch"],
         axes={
-            "time": AxisArray.Axis.TimeAxis(fs=fs),
+            "time": AxisArray.TimeAxis(fs=fs),
             "ch": AxisArray.CoordinateAxis(
                 data=np.array([f"Ch{_}" for _ in range(n_ch)]), dims=["ch"]
             ),

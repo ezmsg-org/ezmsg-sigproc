@@ -92,7 +92,7 @@ def test_cwt():
                     "ch": AxisArray.CoordinateAxis(
                         data=np.array([f"Ch{_}" for _ in range(2)]), dims=["ch"]
                     ),
-                    "time": AxisArray.Axis.TimeAxis(offset=tvec[idx], fs=fs),
+                    "time": AxisArray.TimeAxis(offset=tvec[idx], fs=fs),
                 },
                 key="test_cwt",
             )

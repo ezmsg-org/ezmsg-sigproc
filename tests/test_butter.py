@@ -121,7 +121,7 @@ def test_butterworth(
     n_seen = 0
     messages = []
     for split_dat in np.array_split(in_dat, n_splits, axis=time_ax):
-        _time_axis = AxisArray.Axis.TimeAxis(fs=fs, offset=n_seen / fs)
+        _time_axis = AxisArray.TimeAxis(fs=fs, offset=n_seen / fs)
         messages.append(
             AxisArray(
                 split_dat,
@@ -158,7 +158,7 @@ def test_butterworth_empty_msg():
         data=np.zeros((0, 2)),
         dims=["time", "ch"],
         axes={
-            "time": AxisArray.Axis.TimeAxis(fs=19.0, offset=0),
+            "time": AxisArray.TimeAxis(fs=19.0, offset=0),
             "ch": AxisArray.CoordinateAxis(data=np.arange(2).astype(str), dims=["ch"]),
         },
         key="test_butterworth_empty_msg",

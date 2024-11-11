@@ -5,7 +5,7 @@ import numpy as np
 import numpy.typing as npt
 import ezmsg.core as ez
 from ezmsg.util.generator import consumer
-from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
+from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis, AxisBase
 
 from .spectral import OptionsEnum
 from .base import GenAxisArray
@@ -72,7 +72,7 @@ def ranged_aggregate(
 
     # State variables
     slices: typing.Optional[typing.List[typing.Tuple[typing.Any, ...]]] = None
-    out_axis: typing.Optional[AxisArray.Axis] = None
+    out_axis: typing.Optional[AxisBase] = None
     ax_vec: typing.Optional[npt.NDArray] = None
 
     # Reset if any of these changes. Key not checked because continuity between chunks not required.

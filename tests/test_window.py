@@ -89,7 +89,7 @@ def test_window_gen_nodur():
         dims=["ch", "time"],
         axes=frozendict(
             {
-                "time": AxisArray.Axis.TimeAxis(fs=500.0, offset=0.0),
+                "time": AxisArray.TimeAxis(fs=500.0, offset=0.0),
                 "ch": AxisArray.CoordinateAxis(
                     data=np.arange(nchans).astype(str), unit="label", dims=["ch"]
                 ),
@@ -149,7 +149,7 @@ def test_window_generator(
         dims=["ch", "time"] if time_ax == 1 else ["time", "ch"],
         axes=frozendict(
             {
-                "time": AxisArray.Axis.TimeAxis(fs=fs, offset=0.0),
+                "time": AxisArray.TimeAxis(fs=fs, offset=0.0),
                 "ch": AxisArray.CoordinateAxis(
                     data=np.arange(nchans).astype(str), unit="label", dims=["ch"]
                 ),

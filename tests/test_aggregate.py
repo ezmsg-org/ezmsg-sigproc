@@ -23,7 +23,7 @@ def get_msg_gen(n_chans=20, n_freqs=100, data_dur=30.0, fs=1024.0, key=""):
                 dims=["time", "ch", "freq"],
                 axes=frozendict(
                     {
-                        "time": AxisArray.Axis.TimeAxis(fs=fs, offset=offset),
+                        "time": AxisArray.TimeAxis(fs=fs, offset=offset),
                         "freq": AxisArray.LinearAxis(gain=1.0, offset=0.0, unit="Hz"),
                     }
                 ),
