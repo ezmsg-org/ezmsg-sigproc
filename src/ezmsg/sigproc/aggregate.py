@@ -76,7 +76,7 @@ def ranged_aggregate(
     ax_vec: typing.Optional[npt.NDArray] = None
 
     # Reset if any of these changes. Key not checked because continuity between chunks not required.
-    check_inputs = {"gain": None, "offset": None}
+    check_inputs = {"gain": None, "offset": None, "len": None, "key": None}
 
     while True:
         msg_in: AxisArray = yield msg_out
@@ -86,35 +86,52 @@ def ranged_aggregate(
             axis = axis or msg_in.dims[0]
             target_axis = msg_in.get_axis(axis)
 
-            b_reset = target_axis.gain != check_inputs["gain"]
-            b_reset = b_reset or target_axis.offset != check_inputs["offset"]
+            # Check if we need to reset state
+            b_reset = msg_in.key != check_inputs["key"]
+            if hasattr(target_axis, "data"):
+                b_reset = b_reset or len(target_axis.data) != check_inputs["len"]
+            elif isinstance(target_axis, AxisArray.LinearAxis):
+                b_reset = b_reset or target_axis.gain != check_inputs["gain"]
+                b_reset = b_reset or target_axis.offset != check_inputs["offset"]
+
             if b_reset:
-                check_inputs["gain"] = target_axis.gain
-                check_inputs["offset"] = target_axis.offset
+                # Update check variables
+                check_inputs["key"] = msg_in.key
+                if hasattr(target_axis, "data"):
+                    check_inputs["len"] = len(target_axis.data)
+                else:
+                    check_inputs["gain"] = target_axis.gain
+                    check_inputs["offset"] = target_axis.offset
 
                 # If the axis we are operating on has changed (e.g., "time" or "win" axis always changes),
                 #  or the key has changed, then recalculate slices.
 
                 ax_idx = msg_in.get_axis_idx(axis)
 
-                ax_vec = (
-                    target_axis.offset
-                    + np.arange(msg_in.data.shape[ax_idx]) * target_axis.gain
-                )
+                if hasattr(target_axis, "data"):
+                    ax_vec = target_axis.data
+                else:
+                    ax_vec = target_axis.value(np.arange(msg_in.data.shape[ax_idx]))
+
                 slices = []
-                mids = []
+                ax_dat = []
                 for start, stop in bands:
                     inds = np.where(np.logical_and(ax_vec >= start, ax_vec <= stop))[0]
-                    mids.append(np.mean(inds) * target_axis.gain + target_axis.offset)
                     slices.append(np.s_[inds[0] : inds[-1] + 1])
-                out_ax_kwargs = {
-                    "unit": target_axis.unit,
-                    "offset": mids[0],
-                    "gain": (mids[1] - mids[0]) if len(mids) > 1 else 1.0,
-                }
-                if hasattr(target_axis, "labels"):
-                    out_ax_kwargs["labels"] = [f"{_[0]} - {_[1]}" for _ in bands]
-                out_axis = replace(target_axis, **out_ax_kwargs)
+                    if hasattr(target_axis, "data"):
+                        if ax_vec.dtype.type is np.str_:
+                            sl_dat = f"{ax_vec[start]} - {ax_vec[stop]}"
+                        else:
+                            sl_dat = ax_dat.append(np.mean(ax_vec[inds]))
+                    else:
+                        sl_dat = target_axis.value(np.mean(inds))
+                    ax_dat.append(sl_dat)
+
+                out_axis = AxisArray.CoordinateAxis(
+                    data=np.array(ax_dat),
+                    dims=[axis],
+                    unit=target_axis.unit,
+                )
 
             agg_func = AGGREGATORS[operation]
             out_data = [
