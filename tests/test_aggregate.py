@@ -24,7 +24,7 @@ def get_msg_gen(n_chans=20, n_freqs=100, data_dur=30.0, fs=1024.0, key=""):
                 axes=frozendict(
                     {
                         "time": AxisArray.Axis.TimeAxis(fs=fs, offset=offset),
-                        "freq": AxisArray.Axis(gain=1.0, offset=0.0, unit="Hz"),
+                        "freq": AxisArray.LinearAxis(gain=1.0, offset=0.0, unit="Hz"),
                     }
                 ),
                 key=key,
@@ -66,15 +66,13 @@ def test_aggregate(agg_func: AggregationFunction):
     # Check output axis
     for out_msg in out_msgs:
         ax = out_msg.axes[targ_ax]
-        assert ax.offset == np.mean(bands[0])
-        if len(bands) > 1:
-            assert ax.gain == np.mean(bands[1]) - np.mean(bands[0])
+        assert np.array_equal(ax.data, np.array([np.mean(band) for band in bands]))
         assert ax.unit == in_msgs[0].axes[targ_ax].unit
 
     # Check data
     data = AxisArray.concatenate(*in_msgs, dim="time").data
     targ_ax = in_msgs[0].axes[targ_ax]
-    targ_ax_vec = targ_ax.offset + np.arange(data.shape[-1]) * targ_ax.gain
+    targ_ax_vec = targ_ax.value(np.arange(data.shape[-1]))
     agg_func = {
         AggregationFunction.MEAN: partial(np.mean, axis=-1, keepdims=True),
         AggregationFunction.MEDIAN: partial(np.median, axis=-1, keepdims=True),
