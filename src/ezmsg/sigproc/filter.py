@@ -1,9 +1,9 @@
 import asyncio
-from dataclasses import dataclass, replace, field
+from dataclasses import dataclass, field
 import typing
 
 import ezmsg.core as ez
-from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.axisarray import AxisArray, fast_replace as replace
 from ezmsg.util.generator import consumer
 import numpy as np
 import numpy.typing as npt

@@ -1,4 +1,3 @@
-from dataclasses import replace
 import traceback
 import typing
 
@@ -9,6 +8,7 @@ from ezmsg.util.messages.axisarray import (
     AxisArray,
     slice_along_axis,
     sliding_win_oneaxis,
+    fast_replace as replace,
 )
 from ezmsg.util.generator import consumer
 
