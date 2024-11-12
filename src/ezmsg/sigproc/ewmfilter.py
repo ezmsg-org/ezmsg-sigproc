@@ -2,7 +2,7 @@ import asyncio
 import typing
 
 import ezmsg.core as ez
-from ezmsg.util.messages.axisarray import AxisArray, fast_replace as replace
+from ezmsg.util.messages.axisarray import AxisArray, replace
 import numpy as np
 
 from .window import Window, WindowSettings
