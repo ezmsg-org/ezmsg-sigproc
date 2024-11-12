@@ -1,8 +1,11 @@
-from dataclasses import replace
 import typing
 
 import numpy as np
-from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
+from ezmsg.util.messages.axisarray import (
+    AxisArray,
+    slice_along_axis,
+    fast_replace as replace,
+)
 from ezmsg.util.generator import consumer
 import ezmsg.core as ez
 
