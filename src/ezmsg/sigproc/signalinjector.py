@@ -1,8 +1,7 @@
-from dataclasses import replace
 import typing
 
 import ezmsg.core as ez
-from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.axisarray import AxisArray, fast_replace as replace
 import numpy as np
 import numpy.typing as npt
 
