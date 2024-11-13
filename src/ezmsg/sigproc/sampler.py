@@ -10,8 +10,8 @@ import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import (
     AxisArray,
     slice_along_axis,
-    replace,
 )
+from ezmsg.util.messages.util import replace
 from ezmsg.util.generator import consumer
 
 
