@@ -3,7 +3,8 @@ import typing
 import numpy as np
 import ezmsg.core as ez
 from ezmsg.util.generator import consumer
-from ezmsg.util.messages.axisarray import AxisArray, replace
+from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.util import replace
 
 from ..base import GenAxisArray
 
