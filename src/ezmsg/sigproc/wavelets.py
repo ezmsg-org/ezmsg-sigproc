@@ -4,7 +4,8 @@ import numpy as np
 import numpy.typing as npt
 import pywt
 import ezmsg.core as ez
-from ezmsg.util.messages.axisarray import AxisArray, replace
+from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.util import replace
 from ezmsg.util.generator import consumer
 
 from .base import GenAxisArray

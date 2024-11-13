@@ -3,7 +3,8 @@ import typing
 import numpy as np
 import scipy.special
 import ezmsg.core as ez
-from ezmsg.util.messages.axisarray import AxisArray, replace
+from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.util import replace
 from ezmsg.util.generator import consumer
 
 from .spectral import OptionsEnum

@@ -5,7 +5,8 @@ import typing
 import numpy as np
 import numpy.typing as npt
 import ezmsg.core as ez
-from ezmsg.util.messages.axisarray import AxisArray, AxisBase, replace
+from ezmsg.util.messages.axisarray import AxisArray, AxisBase
+from ezmsg.util.messages.util import replace
 from ezmsg.util.generator import consumer
 
 from .base import GenAxisArray
