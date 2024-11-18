@@ -31,10 +31,9 @@ def test_butterworth_legacy_filter_settings(cutoff: float, cuton: float, order: 
             If cuton is larger than cutoff we assume bandstop.
         order (int): The order of the filter.
     """
-    settings_obj = LegacyButterSettings(
-        axis="time", fs=500, order=order, cuton=cuton, cutoff=cutoff
-    )
-    btype, Wn = settings_obj.filter_specs()
+    btype, Wn = LegacyButterSettings(
+        order=order, cuton=cuton, cutoff=cutoff
+    ).filter_specs()
     if cuton is None:
         assert btype == "lowpass"
         assert Wn == cutoff
@@ -98,7 +97,7 @@ def test_butterworth(
 
     # Calculate Expected Result
     btype, Wn = LegacyButterSettings(
-        axis="time", fs=500, order=order, cuton=cuton, cutoff=cutoff
+        order=order, cuton=cuton, cutoff=cutoff
     ).filter_specs()
     coefs = scipy.signal.butter(order, Wn, btype=btype, output=coef_type, fs=fs)
     tmp_dat = np.moveaxis(in_dat, time_ax, -1)
@@ -115,7 +114,7 @@ def test_butterworth(
         if n_dims == 3:
             zi = np.tile(zi[:, None, None, :], (1, n_freqs, n_chans, 1))
         out_dat, _ = scipy.signal.sosfilt(coefs, tmp_dat, zi=zi)
-    out_dat = np.moveaxis(out_dat, -1, time_ax)
+    expected = np.moveaxis(out_dat, -1, time_ax)
 
     # Split the data into multiple messages
     n_seen = 0
@@ -143,7 +142,7 @@ def test_butterworth(
     )
 
     result = np.concatenate([gen.send(_).data for _ in messages], axis=time_ax)
-    assert np.allclose(result, out_dat)
+    assert np.allclose(result, expected)
 
 
 def test_butterworth_empty_msg():

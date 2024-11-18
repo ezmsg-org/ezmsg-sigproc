@@ -1,4 +1,3 @@
-import asyncio
 from dataclasses import dataclass, field
 import typing
 
@@ -9,6 +8,8 @@ from ezmsg.util.generator import consumer
 import numpy as np
 import numpy.typing as npt
 import scipy.signal
+
+from ezmsg.sigproc.base import GenAxisArray
 
 
 @dataclass
@@ -106,128 +107,95 @@ def filtergen(
         msg_out = replace(msg_in, data=dat_out)
 
 
-class FilterSettingsBase(ez.Settings):
+# Type aliases
+BACoeffs = typing.Tuple[npt.NDArray, npt.NDArray]
+SOSCoeffs = npt.NDArray
+FilterCoefsMultiType = typing.Union[BACoeffs, SOSCoeffs]
+
+
+@consumer
+def filter_gen_by_design(
+    axis: str,
+    coef_type: str,
+    design_fun: typing.Callable[[float], typing.Optional[FilterCoefsMultiType]],
+) -> typing.Generator[AxisArray, AxisArray, None]:
+    """
+    Filter data using a filter whose coefficients are calculated using the provided design function.
+
+    Args:
+        axis: The name of the axis to filter.
+            Note: The axis must be represented in the message .axes and be of type AxisArray.LinearAxis.
+        coef_type: "ba" or "sos"
+        design_fun: A callable that takes "fs" as its only argument and returns a tuple of filter coefficients.
+          If the design_fun returns None then the filter will act as a passthrough.
+          Hint: To make a design function that only requires fs, use functools.partial to set other parameters.
+          See butterworthfilter for an example.
+
+    Returns:
+
+    """
+    msg_out = AxisArray(np.array([]), dims=[""])
+
+    # State variables
+    # Initialize filtergen as passthrough until we receive a message that allows us to design the filter.
+    filter_gen = filtergen(axis, None, coef_type)
+
+    # Reset if these change.
+    check_input = {"gain": None}
+    # No need to check parameters that don't affect the design; filter_gen should check most of its parameters.
+
+    while True:
+        msg_in: AxisArray = yield msg_out
+        axis = axis or msg_in.dims[0]
+        b_reset = msg_in.axes[axis].gain != check_input["gain"]
+        if b_reset:
+            check_input["gain"] = msg_in.axes[axis].gain
+            coefs = design_fun(1 / msg_in.axes[axis].gain)
+            filter_gen = filtergen(axis, coefs, coef_type)
+
+        msg_out = filter_gen.send(msg_in)
+
+
+class FilterBaseSettings(ez.Settings):
     axis: typing.Optional[str] = None
-    fs: typing.Optional[float] = None
+    coef_type: str = "ba"
 
 
-class FilterSettings(FilterSettingsBase):
-    # If you'd like to statically design a filter, define it in settings
-    filt: typing.Optional[FilterCoefficients] = None
+class FilterBase(GenAxisArray):
+    SETTINGS = FilterBaseSettings
 
+    # Backwards-compatible with `Filter` unit
+    INPUT_FILTER = ez.InputStream(FilterCoefsMultiType)
 
-class FilterState(ez.State):
-    axis: typing.Optional[str] = None
-    zi: typing.Optional[np.ndarray] = None
-    filt_designed: bool = False
-    filt: typing.Optional[FilterCoefficients] = None
-    filt_set: asyncio.Event = field(default_factory=asyncio.Event)
-    samp_shape: typing.Optional[typing.Tuple[int, ...]] = None
-    fs: typing.Optional[float] = None  # Hz
-
-
-class Filter(ez.Unit):
-    SETTINGS = FilterSettingsBase
-    STATE = FilterState
-
-    INPUT_FILTER = ez.InputStream(FilterCoefficients)
-    INPUT_SIGNAL = ez.InputStream(AxisArray)
-    OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
-
-    def design_filter(self) -> typing.Optional[typing.Tuple[np.ndarray, np.ndarray]]:
+    def design_filter(
+        self,
+    ) -> typing.Callable[[float], typing.Optional[FilterCoefsMultiType]]:
         raise NotImplementedError("Must implement 'design_filter' in Unit subclass!")
 
-    # Set up filter with static initialization if specified
-    async def initialize(self) -> None:
-        if self.SETTINGS.axis is not None:
-            self.STATE.axis = self.SETTINGS.axis
-
-        if isinstance(self.SETTINGS, FilterSettings):
-            if self.SETTINGS.filt is not None:
-                self.STATE.filt = self.SETTINGS.filt
-                self.STATE.filt_set.set()
-        else:
-            self.STATE.filt_set.clear()
-
-        if self.SETTINGS.fs is not None:
-            try:
-                self.update_filter()
-            except NotImplementedError:
-                ez.logger.debug("Using filter coefficients.")
+    def construct_generator(self):
+        design_fun = self.design_filter()
+        self.STATE.gen = filter_gen_by_design(
+            self.SETTINGS.axis, self.SETTINGS.coef_type, design_fun
+        )
 
     @ez.subscriber(INPUT_FILTER)
-    async def redesign(self, message: FilterCoefficients):
-        self.STATE.filt = message
+    async def redesign(self, message: FilterBaseSettings) -> None:
+        self.apply_settings(message)
+        self.construct_generator()
 
-    def update_filter(self):
-        try:
-            coefs = self.design_filter()
-            self.STATE.filt = (
-                FilterCoefficients() if coefs is None else FilterCoefficients(*coefs)
-            )
-            self.STATE.filt_set.set()
-            self.STATE.filt_designed = True
-        except NotImplementedError as e:
-            raise e
-        except Exception as e:
-            ez.logger.warning(f"Error when designing filter: {e}")
 
-    @ez.subscriber(INPUT_SIGNAL)
-    @ez.publisher(OUTPUT_SIGNAL)
-    async def apply_filter(self, msg: AxisArray) -> typing.AsyncGenerator:
-        axis_name = msg.dims[0] if self.STATE.axis is None else self.STATE.axis
-        axis_idx = msg.get_axis_idx(axis_name)
-        axis = msg.get_axis(axis_name)
-        fs = 1.0 / axis.gain
+class FilterSettings(FilterBaseSettings):
+    # If you'd like to statically design a filter, define it in settings
+    coefs: typing.Optional[FilterCoefficients] = None
+    # Note: coef_type = "ba" is assumed for this class.
 
-        if self.STATE.fs != fs and self.STATE.filt_designed is True:
-            self.STATE.fs = fs
-            self.update_filter()
 
-        # Ensure filter is defined
-        # TODO: Maybe have me be a passthrough filter until coefficients are received
-        if self.STATE.filt is None:
-            self.STATE.filt_set.clear()
-            ez.logger.info("Awaiting filter coefficients...")
-            await self.STATE.filt_set.wait()
-            ez.logger.info("Filter coefficients received.")
+class Filter(FilterBase):
+    SETTINGS = FilterSettings
 
-        assert self.STATE.filt is not None
+    INPUT_FILTER = ez.InputStream(FilterCoefficients)
 
-        arr_in = msg.data
-
-        # If the array is one dimensional, add a temporary second dimension so that the math works out
-        one_dimensional = False
-        if arr_in.ndim == 1:
-            arr_in = np.expand_dims(arr_in, axis=1)
-            one_dimensional = True
-
-        # We will perform filter with time dimension as last axis
-        arr_in = np.moveaxis(arr_in, axis_idx, -1)
-        samp_shape = arr_in[..., 0].shape
-
-        # Re-calculate/reset zi if necessary
-        if self.STATE.zi is None or samp_shape != self.STATE.samp_shape:
-            zi: np.ndarray = scipy.signal.lfilter_zi(
-                self.STATE.filt.b, self.STATE.filt.a
-            )
-            self.STATE.samp_shape = samp_shape
-            self.STATE.zi = np.array([zi] * np.prod(self.STATE.samp_shape))
-            self.STATE.zi = self.STATE.zi.reshape(
-                tuple(list(self.STATE.samp_shape) + [zi.shape[0]])
-            )
-
-        arr_out, self.STATE.zi = scipy.signal.lfilter(
-            self.STATE.filt.b, self.STATE.filt.a, arr_in, zi=self.STATE.zi
-        )
-
-        arr_out = np.moveaxis(arr_out, -1, axis_idx)
-
-        # Remove temporary first dimension if necessary
-        if one_dimensional:
-            arr_out = np.squeeze(arr_out, axis=1)
-
-        yield (
-            self.OUTPUT_SIGNAL,
-            replace(msg, data=arr_out),
-        )
+    def design_filter(self) -> typing.Callable[[float], typing.Optional[BACoeffs]]:
+        if self.SETTINGS.coefs is None:
+            return lambda fs: None
+        return lambda fs: (self.SETTINGS.coefs.b, self.SETTINGS.coefs.a)
