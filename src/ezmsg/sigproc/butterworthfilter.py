@@ -1,15 +1,18 @@
+import functools
 import typing
 
-import ezmsg.core as ez
 import scipy.signal
-import numpy as np
 from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.util.generator import consumer
 
-from .filter import filtergen, Filter, FilterState, FilterSettingsBase
+from .filter import (
+    FilterBaseSettings,
+    FilterCoefsMultiType,
+    FilterBase,
+    filter_gen_by_design,
+)
 
 
-class ButterworthFilterSettings(FilterSettingsBase):
+class ButterworthFilterSettings(FilterBaseSettings):
     """Settings for :obj:`ButterworthFilter`."""
 
     order: int = 0
@@ -58,7 +61,61 @@ class ButterworthFilterSettings(FilterSettingsBase):
                 return "bandstop", (self.cutoff, self.cuton)
 
 
-@consumer
+def butter_design_fun(
+    fs: float,
+    order: int = 0,
+    cuton: typing.Optional[float] = None,
+    cutoff: typing.Optional[float] = None,
+    coef_type: str = "ba",
+) -> typing.Optional[FilterCoefsMultiType]:
+    """
+    See :obj:`ButterworthFilterSettings.filter_specs` for an explanation of specifying different
+    filter types (lowpass, highpass, bandpass, bandstop) from the parameters.
+    You are likely to want to use this function with :obj:`filter_by_design`, which only passes `fs` to the design
+    function (this), meaning that you should wrap this function with a lambda or prepare with functools.partial.
+
+    Args:
+        fs: The sampling frequency of the data in Hz.
+        order: Filter order.
+        cuton: Corner frequency of the filter in Hz.
+        cutoff: Corner frequency of the filter in Hz.
+        coef_type: "ba", "sos", or "zpk"
+
+    Returns:
+        The filter coefficients as a tuple of (b, a) for coef_type "ba", or as a single ndarray for "sos",
+        or (z, p, k) for "zpk".
+
+    """
+    coefs = None
+    if order > 0:
+        btype, cutoffs = ButterworthFilterSettings(
+            order=order, cuton=cuton, cutoff=cutoff
+        ).filter_specs()
+        coefs = scipy.signal.butter(
+            order,
+            Wn=cutoffs,
+            btype=btype,
+            fs=fs,
+            output=coef_type,
+        )
+    return coefs
+
+
+class ButterworthFilter(FilterBase):
+    SETTINGS = ButterworthFilterSettings
+
+    def design_filter(
+        self,
+    ) -> typing.Callable[[float], typing.Optional[FilterCoefsMultiType]]:
+        return functools.partial(
+            butter_design_fun,
+            order=self.SETTINGS.order,
+            cuton=self.SETTINGS.cuton,
+            cutoff=self.SETTINGS.cutoff,
+            coef_type=self.SETTINGS.coef_type,
+        )
+
+
 def butter(
     axis: typing.Optional[str],
     order: int = 0,
@@ -67,6 +124,7 @@ def butter(
     coef_type: str = "ba",
 ) -> typing.Generator[AxisArray, AxisArray, None]:
     """
+    Convenience generator wrapping filter_gen_by_design for Butterworth filters.
     Apply Butterworth filter to streaming data. Uses :obj:`scipy.signal.butter` to design the filter.
     See :obj:`ButterworthFilterSettings.filter_specs` for an explanation of specifying different
     filter types (lowpass, highpass, bandpass, bandstop) from the parameters.
@@ -84,79 +142,11 @@ def butter(
          and yields an :obj:`AxisArray` with filtered data.
 
     """
-    # IO
-    msg_out = AxisArray(np.array([]), dims=[""])
-
-    # Check parameters
-    btype, cutoffs = ButterworthFilterSettings(
-        order=order, cuton=cuton, cutoff=cutoff
-    ).filter_specs()
-
-    # State variables
-    # Initialize filtergen as passthrough until we can calculate coefs.
-    filter_gen = filtergen(axis, None, coef_type)
-
-    # Reset if these change.
-    check_input = {"gain": None}
-    # Key not checked because filter_gen will handle resetting if .key changes.
-
-    while True:
-        msg_in: AxisArray = yield msg_out
-        axis = axis or msg_in.dims[0]
-
-        b_reset = msg_in.axes[axis].gain != check_input["gain"]
-        b_reset = b_reset and order > 0  # Not passthrough
-        if b_reset:
-            check_input["gain"] = msg_in.axes[axis].gain
-            coefs = scipy.signal.butter(
-                order,
-                Wn=cutoffs,
-                btype=btype,
-                fs=1 / msg_in.axes[axis].gain,
-                output=coef_type,
-            )
-            filter_gen = filtergen(axis, coefs, coef_type)
-
-        msg_out = filter_gen.send(msg_in)
-
-
-class ButterworthFilterState(FilterState):
-    design: ButterworthFilterSettings
-
-
-class ButterworthFilter(Filter):
-    """:obj:`Unit` for :obj:`butterworth`"""
-
-    SETTINGS = ButterworthFilterSettings
-    STATE = ButterworthFilterState
-
-    INPUT_FILTER = ez.InputStream(ButterworthFilterSettings)
-
-    async def initialize(self) -> None:
-        self.STATE.design = self.SETTINGS
-        self.STATE.filt_designed = True
-        await super().initialize()
-
-    def design_filter(self) -> typing.Optional[typing.Tuple[np.ndarray, np.ndarray]]:
-        specs = self.STATE.design.filter_specs()
-        if self.STATE.design.order > 0 and specs is not None:
-            btype, cut = specs
-            return scipy.signal.butter(
-                self.STATE.design.order,
-                Wn=cut,
-                btype=btype,
-                fs=self.STATE.fs,
-                output="ba",
-            )
-        else:
-            return None
-
-    @ez.subscriber(INPUT_FILTER)
-    async def redesign(self, message: ButterworthFilterSettings) -> None:
-        if type(message) is not ButterworthFilterSettings:
-            return
-
-        if self.STATE.design.order != message.order:
-            self.STATE.zi = None
-        self.STATE.design = message
-        self.update_filter()
+    design_fun = functools.partial(
+        butter_design_fun,
+        order=order,
+        cuton=cuton,
+        cutoff=cutoff,
+        coef_type=coef_type,
+    )
+    return filter_gen_by_design(axis, coef_type, design_fun)
