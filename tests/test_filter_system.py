@@ -31,6 +31,8 @@ def test_filter_system(filter_type: str, coef_type: str):
     btype = "bandpass"
     fs = 500.0
     n_ch = 8
+    n_time = 100
+    n_total = int(fs / n_time)  # 1 second of messages
 
     if filter_type == "butter":
         filter_comp = ButterworthFilter(
@@ -48,11 +50,11 @@ def test_filter_system(filter_type: str, coef_type: str):
         )
 
     comps = {
-        "SRC": EEGSynth(n_time=100, fs=fs, n_ch=n_ch, alpha_freq=10.5),  # 2 seconds
+        "SRC": EEGSynth(n_time=n_time, fs=fs, n_ch=n_ch, alpha_freq=10.5),
         "FILTER": filter_comp,
         "LOGRAW": MessageLogger(output=test_filename_raw),
         "LOGFILT": MessageLogger(output=test_filename),
-        "TERM": TerminateOnTotal(10),
+        "TERM": TerminateOnTotal(n_total),
     }
     conns = (
         (comps["SRC"].OUTPUT_SIGNAL, comps["FILTER"].INPUT_SIGNAL),
@@ -63,7 +65,7 @@ def test_filter_system(filter_type: str, coef_type: str):
     ez.run(components=comps, connections=conns)
 
     messages: typing.List[AxisArray] = [_ for _ in message_log(test_filename)]
-    assert len(messages) >= 10
+    assert len(messages) >= n_total
     inputs = AxisArray.concatenate(
         *[_ for _ in message_log(test_filename_raw)], dim="time"
     )
@@ -97,6 +99,9 @@ def test_filter_system(filter_type: str, coef_type: str):
             output=coef_type,
         )
     if coef_type == "ba":
+        # Next 2 lines normalize the coefficients, but are in fact unneeded for the test.
+        system = scipy.signal.dlti(*coefs)
+        coefs = (system.num, system.den)
         zi = scipy.signal.lfilter_zi(*coefs)[:, None]
         expected, _ = scipy.signal.lfilter(
             coefs[0], coefs[1], inputs.data, axis=inputs.get_axis_idx("time"), zi=zi
