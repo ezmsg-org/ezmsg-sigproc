@@ -59,9 +59,3 @@ def test_decimate_system(factor: float):
         expected = antialiased[:: int(factor)]
 
     assert np.allclose(outputs.data, expected)
-    """
-    import matplotlib.pyplot as plt
-    plt.plot(expected[:, 0])
-    plt.plot(outputs.data[:, 0])
-    plt.show()
-    """
