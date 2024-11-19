@@ -14,39 +14,56 @@ from .filterbank import filterbank, FilterbankMode, MinPhaseMode
 
 @consumer
 def cwt(
-    scales: typing.Union[list, tuple, npt.NDArray],
+    frequencies: typing.Optional[typing.Union[list, tuple, npt.NDArray]],
     wavelet: typing.Union[str, pywt.ContinuousWavelet, pywt.Wavelet],
     min_phase: MinPhaseMode = MinPhaseMode.NONE,
     axis: str = "time",
+    scales: typing.Optional[typing.Union[list, tuple, npt.NDArray]] = None,
 ) -> typing.Generator[AxisArray, AxisArray, None]:
     """
     Perform a continuous wavelet transform.
     The function is equivalent to the :obj:`pywt.cwt` function, but is designed to work with streaming data.
 
     Args:
-        scales: The wavelet scales to use. Note: Scales will be sorted from largest to smallest.
+        frequencies: The wavelet frequencies to use in Hz. If `None` provided then the scales will be used.
+          Note: frequencies will be sorted from smallest to largest.
         wavelet: Wavelet object or name of wavelet to use.
         min_phase: See filterbank MinPhaseMode for details.
         axis: The target axis for operation. Note that this will be moved to the -1th dimension
           because fft and matrix multiplication is much faster on the last axis.
           This axis must be in the msg.axes and it must be of type AxisArray.LinearAxis.
+        scales: The scales to use. If None, the scales will be calculated from the frequencies.
+          Note: Scales will be sorted from largest to smallest.
+          Note: Use of scales is deprecated in favor of frequencies. Convert scales to frequencies using
+            `pywt.scale2frequency(wavelet, scales, precision=10) * fs` where fs is the sampling frequency.
 
     Returns:
         A primed Generator object that expects an :obj:`AxisArray` via `.send(axis_array)` of continuous data
         and yields an :obj:`AxisArray` with a continuous wavelet transform in its data.
     """
+    precision = 10
     msg_out: typing.Optional[AxisArray] = None
 
     # Check parameters
-    scales = np.sort(scales)[::-1]
-    assert np.all(scales > 0), "Scales must be positive."
-    assert scales.ndim == 1, "Scales must be a 1D list, tuple, or array."
+    if frequencies is None and scales is None:
+        raise ValueError("Either frequencies or scales must be provided.")
+    if frequencies is not None and scales is not None:
+        raise ValueError("Only one of frequencies or scales can be provided.")
+    if scales is not None:
+        scales = np.sort(scales)[::-1]
+        assert np.all(scales > 0), "scales must be positive."
+        assert scales.ndim == 1, "scales must be a 1D list, tuple, or array."
+
     if not isinstance(wavelet, (pywt.ContinuousWavelet, pywt.Wavelet)):
         wavelet = pywt.DiscreteContinuousWavelet(wavelet)
-    precision = 10
+
+    if frequencies is not None:
+        frequencies = np.sort(frequencies)
+        assert np.all(frequencies > 0), "frequencies must be positive."
+        assert frequencies.ndim == 1, "frequencies must be a 1D list, tuple, or array."
 
     # State variables
-    neg_rt_scales = -np.sqrt(scales)[:, None]
+    neg_rt_scales: typing.Optional[npt.NDArray] = None
     int_psi, wave_xvec = pywt.integrate_wavelet(wavelet, precision=precision)
     int_psi = np.conj(int_psi) if wavelet.complex_cwt else int_psi
     template: typing.Optional[AxisArray] = None
@@ -76,6 +93,12 @@ def cwt(
             check_input["gain"] = msg_in.axes[axis].gain
             check_input["shape"] = in_shape
             check_input["key"] = msg_in.key
+
+            if frequencies is not None:
+                scales = pywt.frequency2scale(
+                    wavelet, frequencies * msg_in.axes[axis].gain, precision=precision
+                )
+            neg_rt_scales = -np.sqrt(scales)[:, None]
 
             # convert int_psi, wave_xvec to the same precision as the data
             dt_data = msg_in.data.dtype  # _check_dtype(msg_in.data)

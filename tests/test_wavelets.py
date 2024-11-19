@@ -62,9 +62,7 @@ def scratch():
 
 
 def test_cwt():
-    # scale near 1 is approx fs, 256 is approx 256 Hz
-    # we want up to ~ 200 Hz, so that's a scale of 256
-    scales = np.geomspace(4, 256, num=70)[::-1]
+    frequencies = np.geomspace(4, 200, num=50)
     # wavelets = [f"cmor{x:.1f}-{y:.1f}" for x in [0.5, 1.5, 2.5] for y in [0.5, 1.0, 1.5]]
     # wavelet = wavelets[4]
     wavelet = "morl"
@@ -79,6 +77,8 @@ def test_cwt():
     chirp *= gaussian(tvec, 0.5, 0.2)
     chirp = np.vstack((chirp, np.roll(chirp, fs)))
     # TODO: Replace with sps.chirp?
+    # scales = np.geomspace(4, 256, num=70)[::-1]
+    scales = pywt.frequency2scale(wavelet, frequencies / fs, precision=10)
 
     # Split signal into messages
     step_size = 100
@@ -105,7 +105,10 @@ def test_cwt():
 
     # Prep filterbank
     gen = cwt(
-        scales=scales, wavelet=wavelet, min_phase=MinPhaseMode.HOMOMORPHIC, axis="time"
+        frequencies=frequencies,
+        wavelet=wavelet,
+        min_phase=MinPhaseMode.HOMOMORPHIC,
+        axis="time",
     )
 
     # Pass the messages
@@ -116,34 +119,36 @@ def test_cwt():
 
     # Compare result to expected
     ez_freqs = result.axes["freq"].data
-    assert np.array_equal(ez_freqs, freqs)
-    # TODO: Compare data ?! Hard to do because pywt.cwt uses filtfilt and different coeffs.
+    assert np.allclose(ez_freqs, freqs)
+    # It is impossible to check the data result because pywt.cwt uses filtfilt and different coeffs (not minphase).
+    # Use the below snippet to visualize the result and compare to expected.
 
-    if False:
-        # Debug visualize result
-        import matplotlib.pyplot as plt
+    """
+    # Debug visualize result
+    import matplotlib.pyplot as plt
 
-        tmp = result.data
-        title = "ezmsg minphase homomorphic"
-        # tmp = expected
-        # title = "pywavelets"
-        nch = tmp.shape[0]
-        fig, axes = plt.subplots(3, nch, figsize=(8, 8), tight_layout=True)
-        for ch_ix in range(nch):
-            axes[0, ch_ix].set_title(f"Channel {ch_ix}")
-            axes[0, ch_ix].plot(tvec, chirp[ch_ix])
+    tmp = result.data
+    title = "ezmsg minphase homomorphic"
+    # tmp = expected
+    # title = "pywavelets"
+    nch = tmp.shape[0]
+    fig, axes = plt.subplots(3, nch, figsize=(8, 8), tight_layout=True)
+    for ch_ix in range(nch):
+        axes[0, ch_ix].set_title(f"Channel {ch_ix}")
+        axes[0, ch_ix].plot(tvec, chirp[ch_ix])
 
-            axes[1, ch_ix].set_title(title)
-            _ = axes[1, ch_ix].pcolormesh(
-                tvec[: tmp.shape[-1]], freqs, np.abs(tmp[ch_ix, :-1, :-1])
-            )
-            axes[1, ch_ix].set_yscale("log")
-            axes[1, ch_ix].set_xlabel("Time (s)")
-            axes[1, ch_ix].set_ylabel("Frequency (Hz)")
+        axes[1, ch_ix].set_title(title)
+        _ = axes[1, ch_ix].pcolormesh(
+            tvec[: tmp.shape[-1]], freqs, np.abs(tmp[ch_ix, :-1, :-1])
+        )
+        axes[1, ch_ix].set_yscale("log")
+        axes[1, ch_ix].set_xlabel("Time (s)")
+        axes[1, ch_ix].set_ylabel("Frequency (Hz)")
 
-            axes[2, ch_ix].set_title("pywt.cwt filtfilt")
-            _ = axes[2, ch_ix].pcolormesh(
-                tvec[: expected.shape[-1]], freqs, np.abs(expected[ch_ix, :-1, :-1])
-            )
-            axes[2, ch_ix].set_yscale("log")
-        plt.show()
+        axes[2, ch_ix].set_title("pywt.cwt filtfilt")
+        _ = axes[2, ch_ix].pcolormesh(
+            tvec[: expected.shape[-1]], freqs, np.abs(expected[ch_ix, :-1, :-1])
+        )
+        axes[2, ch_ix].set_yscale("log")
+    plt.show()
+    """
