@@ -1,7 +1,6 @@
 import copy
 import os
 from typing import Optional, List
-from dataclasses import field
 import importlib.util
 
 import numpy as np
@@ -51,37 +50,6 @@ def test_adaptive_standard_scaler_river():
     assert_messages_equal([test_input], backup)
 
 
-class ScalerTestSystemSettings(ez.Settings):
-    counter_settings: CounterSettings
-    scaler_settings: AdaptiveStandardScalerSettings
-    log_settings: MessageLoggerSettings
-    term_settings: TerminateOnTotalSettings = field(
-        default_factory=TerminateOnTotalSettings
-    )
-
-
-class ScalerTestSystem(ez.Collection):
-    SETTINGS = ScalerTestSystemSettings
-
-    COUNTER = Counter()
-    SCALER = AdaptiveStandardScaler()
-    LOG = MessageLogger()
-    TERM = TerminateOnTotal()
-
-    def configure(self) -> None:
-        self.COUNTER.apply_settings(self.SETTINGS.counter_settings)
-        self.SCALER.apply_settings(self.SETTINGS.scaler_settings)
-        self.LOG.apply_settings(self.SETTINGS.log_settings)
-        self.TERM.apply_settings(self.SETTINGS.term_settings)
-
-    def network(self) -> ez.NetworkDefinition:
-        return (
-            (self.COUNTER.OUTPUT_SIGNAL, self.SCALER.INPUT_SIGNAL),
-            (self.SCALER.OUTPUT_SIGNAL, self.LOG.INPUT_MESSAGE),
-            (self.LOG.OUTPUT_MESSAGE, self.TERM.INPUT_MESSAGE),
-        )
-
-
 def test_scaler_system(
     tau: float = 1.0,
     fs: float = 10.0,
@@ -92,29 +60,42 @@ def test_scaler_system(
     For this test, we assume that Counter and scaler_np are functioning properly.
     The purpose of this test is exclusively to test that the AdaptiveStandardScaler and AdaptiveStandardScalerSettings
     generated classes are wrapping scaler_np and exposing its parameters.
-    This test passing should only be considered a success if test_adaptive_standard_scaler_river also passed.
+    This test passing should only be considered a success if test_scaler_np also passed.
     """
     block_size: int = 4
     test_filename = get_test_fn(test_name)
     ez.logger.info(test_filename)
-    settings = ScalerTestSystemSettings(
-        counter_settings=CounterSettings(
-            n_time=block_size,
-            fs=fs,
-            n_ch=1,
-            dispatch_rate=duration,  # Simulation duration in 1.0 seconds
-            mod=None,
+
+    comps = {
+        "COUNTER": Counter(
+            CounterSettings(
+                n_time=block_size,
+                fs=fs,
+                n_ch=1,
+                dispatch_rate=duration,  # Simulation duration in 1.0 seconds
+                mod=None,
+            )
         ),
-        scaler_settings=AdaptiveStandardScalerSettings(time_constant=tau, axis="time"),
-        log_settings=MessageLoggerSettings(
-            output=test_filename,
+        "SCALER": AdaptiveStandardScaler(
+            AdaptiveStandardScalerSettings(time_constant=tau, axis="time")
         ),
-        term_settings=TerminateOnTotalSettings(
-            total=int(duration * fs / block_size),
+        "LOG": MessageLogger(
+            MessageLoggerSettings(
+                output=test_filename,
+            )
         ),
+        "TERM": TerminateOnTotal(
+            TerminateOnTotalSettings(
+                total=int(duration * fs / block_size),
+            )
+        ),
+    }
+    conns = (
+        (comps["COUNTER"].OUTPUT_SIGNAL, comps["SCALER"].INPUT_SIGNAL),
+        (comps["SCALER"].OUTPUT_SIGNAL, comps["LOG"].INPUT_MESSAGE),
+        (comps["LOG"].OUTPUT_MESSAGE, comps["TERM"].INPUT_MESSAGE),
     )
-    system = ScalerTestSystem(settings)
-    ez.run(SYSTEM=system)
+    ez.run(components=comps, connections=conns)
 
     # Collect result
     messages: List[AxisArray] = [_ for _ in message_log(test_filename)]
