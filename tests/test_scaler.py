@@ -4,6 +4,7 @@ from typing import Optional, List
 import importlib.util
 
 import numpy as np
+from ezmsg.util.messages.chunker import array_chunker
 from frozendict import frozendict
 import pytest
 import ezmsg.core as ez
@@ -37,17 +38,29 @@ def test_adaptive_standard_scaler_river():
     backup = [copy.deepcopy(test_input)]
 
     # The River example used alpha = 0.6
-    # tau = -gain / np.log(1 - alpha) and here we're using gain = 1.0
-    tau = 1.0914
+    # tau = -gain / np.log(1 - alpha) and here we're using gain = 0.01
+    tau = 0.010913566679372915
     _scaler = scaler(time_constant=tau, axis="time")
     output = _scaler.send(test_input)
     assert np.allclose(output.data[0], expected_result, atol=1e-3)
     assert_messages_equal([test_input], backup)
 
-    _scaler_np = scaler_np(time_constant=tau, axis="time")
-    output = _scaler_np.send(test_input)
-    assert np.allclose(output.data[0], expected_result, atol=1e-3)
-    assert_messages_equal([test_input], backup)
+
+def test_scaler_np():
+    data = np.array([5.278, 5.050, 6.550, 7.446, 9.472, 10.353, 11.784, 11.173])
+    expected_result = np.array([0.0, -0.816, 0.812, 0.695, 0.754, 0.598, 0.651, 0.124])
+    chunker = array_chunker(data, 3, fs=100.0)
+    test_input = list(chunker)
+    backup = copy.deepcopy(test_input)
+
+    tau = 0.010913566679372915
+    gen = scaler_np(time_constant=tau, axis="time")
+    outputs = []
+    for chunk in test_input:
+        outputs.append(gen.send(chunk))
+    output = AxisArray.concatenate(*outputs, dim="time")
+    assert np.allclose(output.data, expected_result, atol=1e-3)
+    assert_messages_equal(test_input, backup)
 
 
 def test_scaler_system(
