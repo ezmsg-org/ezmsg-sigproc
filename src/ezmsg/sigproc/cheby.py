@@ -28,7 +28,7 @@ class ChebyshevFilterSettings(FilterBaseSettings):
     """
     A scalar or length-2 sequence giving the critical frequencies.
     For Type I filters, this is the point in the transition band at which the gain first drops below -rp.
-    For digital filters, Wn are in the same units as fs.
+    For digital filters, Wn are in the same units as fs unless wn_hz is False.
     For analog filters, Wn is an angular frequency (e.g., rad/s).
     """
 
@@ -47,6 +47,11 @@ class ChebyshevFilterSettings(FilterBaseSettings):
     Which type of Chebyshev filter to design. Either "cheby1" or "cheby2".
     """
 
+    wn_hz: bool = True
+    """
+    Set False if provided Wn are normalized from 0 to 1, where 1 is the Nyquist frequency
+    """
+
 
 def cheby_design_fun(
     fs: float,
@@ -57,6 +62,7 @@ def cheby_design_fun(
     analog: bool = False,
     coef_type: str = "ba",
     cheby_type: str = "cheby1",
+    wn_hz: bool = True,
 ) -> typing.Optional[FilterCoefsMultiType]:
     """
     Chebyshev type I and type II digital and analog filter design.
@@ -77,7 +83,7 @@ def cheby_design_fun(
                 btype=btype,
                 analog=analog,
                 output=coef_type,
-                fs=fs,
+                fs=fs if wn_hz else None,
             )
         elif cheby_type == "cheby2":
             coefs = scipy.signal.cheby2(
@@ -109,4 +115,5 @@ class ChebyshevFilter(FilterBase):
             analog=self.SETTINGS.analog,
             coef_type=self.SETTINGS.coef_type,
             cheby_type=self.SETTINGS.cheby_type,
+            wn_hz=self.SETTINGS.wn_hz,
         )

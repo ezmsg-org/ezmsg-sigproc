@@ -1,9 +1,8 @@
-import scipy.signal
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 
+from .cheby import ChebyshevFilter, ChebyshevFilterSettings
 from .downsample import Downsample, DownsampleSettings
-from .filter import Filter, FilterCoefficients, FilterSettings
 
 
 class Decimate(ez.Collection):
@@ -17,23 +16,20 @@ class Decimate(ez.Collection):
     INPUT_SIGNAL = ez.InputStream(AxisArray)
     OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
 
-    FILTER = Filter()
+    FILTER = ChebyshevFilter()
     DOWNSAMPLE = Downsample()
 
     def configure(self) -> None:
+        cheby_settings = ChebyshevFilterSettings(
+            order=8 if self.SETTINGS.factor > 1 else 0,
+            ripple_tol=0.05,
+            Wn=0.8 / self.SETTINGS.factor if self.SETTINGS.factor > 1 else None,
+            btype="lowpass",
+            axis=self.SETTINGS.axis,
+            wn_hz=False,
+        )
+        self.FILTER.apply_settings(cheby_settings)
         self.DOWNSAMPLE.apply_settings(self.SETTINGS)
-
-        if self.SETTINGS.factor < 1:
-            raise ValueError("Decimation factor must be >= 1 (no decimation")
-        elif self.SETTINGS.factor == 1:
-            coefs = FilterCoefficients()
-        else:
-            # See scipy.signal.decimate for IIR Filter Condition
-            b, a = scipy.signal.cheby1(8, 0.05, 0.8 / self.SETTINGS.factor)
-            system = scipy.signal.dlti(b, a)
-            coefs = FilterCoefficients(b=system.num, a=system.den)  # type: ignore
-
-        self.FILTER.apply_settings(FilterSettings(coefs=coefs))
 
     def network(self) -> ez.NetworkDefinition:
         return (
