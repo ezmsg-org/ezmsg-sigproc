@@ -3,6 +3,7 @@ import typing
 
 import scipy.signal
 from ezmsg.util.messages.axisarray import AxisArray
+from scipy.signal import normalize
 
 from .filter import (
     FilterBaseSettings,
@@ -98,6 +99,8 @@ def butter_design_fun(
             fs=fs,
             output=coef_type,
         )
+    if coef_type == "ba":
+        coefs = normalize(*coefs)
     return coefs
 
 
