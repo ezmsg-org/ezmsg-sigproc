@@ -99,7 +99,7 @@ def butter_design_fun(
             fs=fs,
             output=coef_type,
         )
-    if coef_type == "ba":
+    if coefs is not None and coef_type == "ba":
         coefs = normalize(*coefs)
     return coefs
 
