@@ -18,13 +18,13 @@ from util import get_test_fn
 
 @pytest.mark.parametrize("filter_type", ["butter", "cheby1", "cheby2"])
 @pytest.mark.parametrize("coef_type", ["ba", "sos"])
-def test_filter_system(filter_type: str, coef_type: str):
+@pytest.mark.parametrize("order", [4, 0])
+def test_filter_system(filter_type: str, coef_type: str, order: int):
     test_filename = get_test_fn()
     test_filename_raw = test_filename.parent / (
         test_filename.stem + "raw" + test_filename.suffix
     )
 
-    order = 4
     cuton = 5.0
     cutoff = 20.0
     Wn = (cuton, cutoff)
@@ -70,6 +70,11 @@ def test_filter_system(filter_type: str, coef_type: str):
         *[_ for _ in message_log(test_filename_raw)], dim="time"
     )
     outputs = AxisArray.concatenate(*messages, dim="time")
+
+    if order == 0:
+        # Passthrough
+        assert np.allclose(outputs.data, inputs.data)
+        return
 
     # Calculate expected
     if filter_type == "butter":

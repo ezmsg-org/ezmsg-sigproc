@@ -89,7 +89,7 @@ def cheby_design_fun(
                 output=coef_type,
                 fs=fs,
             )
-    if coef_type == "ba":
+    if coefs is not None and coef_type == "ba":
         coefs = normalize(*coefs)
     return coefs
 
