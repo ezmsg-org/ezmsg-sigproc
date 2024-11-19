@@ -26,14 +26,14 @@ class Decimate(ez.Collection):
         if self.SETTINGS.factor < 1:
             raise ValueError("Decimation factor must be >= 1 (no decimation")
         elif self.SETTINGS.factor == 1:
-            filt = FilterCoefficients()
+            coefs = FilterCoefficients()
         else:
             # See scipy.signal.decimate for IIR Filter Condition
             b, a = scipy.signal.cheby1(8, 0.05, 0.8 / self.SETTINGS.factor)
             system = scipy.signal.dlti(b, a)
-            filt = FilterCoefficients(b=system.num, a=system.den)  # type: ignore
+            coefs = FilterCoefficients(b=system.num, a=system.den)  # type: ignore
 
-        self.FILTER.apply_settings(FilterSettings(filt=filt))
+        self.FILTER.apply_settings(FilterSettings(coefs=coefs))
 
     def network(self) -> ez.NetworkDefinition:
         return (
