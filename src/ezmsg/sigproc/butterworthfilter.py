@@ -35,6 +35,11 @@ class ButterworthFilterSettings(FilterBaseSettings):
     or if this is less than `cuton` then this is the beginning of the bandstop. 
     """
 
+    wn_hz: bool = True
+    """
+    Set False if provided Wn are normalized from 0 to 1, where 1 is the Nyquist frequency
+    """
+
     def filter_specs(
         self,
     ) -> typing.Optional[
@@ -68,6 +73,7 @@ def butter_design_fun(
     cuton: typing.Optional[float] = None,
     cutoff: typing.Optional[float] = None,
     coef_type: str = "ba",
+    wn_hz: bool = True,
 ) -> typing.Optional[FilterCoefsMultiType]:
     """
     See :obj:`ButterworthFilterSettings.filter_specs` for an explanation of specifying different
@@ -81,6 +87,7 @@ def butter_design_fun(
         cuton: Corner frequency of the filter in Hz.
         cutoff: Corner frequency of the filter in Hz.
         coef_type: "ba", "sos", or "zpk"
+        wn_hz: Set False if provided Wn are normalized from 0 to 1, where 1 is the Nyquist frequency
 
     Returns:
         The filter coefficients as a tuple of (b, a) for coef_type "ba", or as a single ndarray for "sos",
@@ -96,7 +103,7 @@ def butter_design_fun(
             order,
             Wn=cutoffs,
             btype=btype,
-            fs=fs,
+            fs=fs if wn_hz else None,
             output=coef_type,
         )
     if coefs is not None and coef_type == "ba":
