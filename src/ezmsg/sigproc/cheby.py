@@ -2,6 +2,7 @@ import functools
 import typing
 
 import scipy.signal
+from scipy.signal import normalize
 
 from .filter import (
     FilterBaseSettings,
@@ -88,6 +89,8 @@ def cheby_design_fun(
                 output=coef_type,
                 fs=fs,
             )
+    if coef_type == "ba":
+        coefs = normalize(*coefs)
     return coefs
 
 
