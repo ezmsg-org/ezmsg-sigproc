@@ -13,11 +13,31 @@ from ezmsg.util.terminate import TerminateOnTotalSettings, TerminateOnTotal
 from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
 from ezmsg.util.messagecodec import message_log
 
-from ezmsg.sigproc.scaler import scaler, scaler_np
+from ezmsg.sigproc.scaler import scaler, scaler_np, EWMA, ewma_step
 from ezmsg.sigproc.scaler import AdaptiveStandardScalerSettings, AdaptiveStandardScaler
 from ezmsg.sigproc.synth import Counter, CounterSettings
 
 from util import get_test_fn, assert_messages_equal
+
+
+def test_ewma():
+    alpha = 0.6
+    n_times = 100
+    n_ch = 32
+    n_feat = 4
+    data = np.arange(1, n_times * n_ch * n_feat + 1, dtype=float).reshape(
+        n_times, n_ch, n_feat
+    )
+
+    # Expected
+    expected = [data[0]]
+    for ix, dat in enumerate(data):
+        expected.append(ewma_step(dat, expected[-1], alpha))
+    expected = np.stack(expected)[1:]
+
+    ewma = EWMA(alpha=alpha)
+    res = ewma.compute(data)
+    assert np.allclose(res, expected)
 
 
 @pytest.fixture
