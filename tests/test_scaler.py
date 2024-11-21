@@ -20,14 +20,20 @@ from ezmsg.sigproc.synth import Counter, CounterSettings
 from util import get_test_fn, assert_messages_equal
 
 
-@pytest.mark.skipif(
-    importlib.util.find_spec("river") is None, reason="requires `river` package"
-)
-def test_adaptive_standard_scaler_river():
+@pytest.fixture
+def fixture_arrays():
     # Test data values taken from river:
     # https://github.com/online-ml/river/blob/main/river/preprocessing/scale.py#L511-L536C17
     data = np.array([5.278, 5.050, 6.550, 7.446, 9.472, 10.353, 11.784, 11.173])
     expected_result = np.array([0.0, -0.816, 0.812, 0.695, 0.754, 0.598, 0.651, 0.124])
+    return data, expected_result
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("river") is None, reason="requires `river` package"
+)
+def test_adaptive_standard_scaler_river(fixture_arrays):
+    data, expected_result = fixture_arrays
 
     test_input = AxisArray(
         np.tile(data, (2, 1)),
@@ -46,10 +52,9 @@ def test_adaptive_standard_scaler_river():
     assert_messages_equal([test_input], backup)
 
 
-def test_scaler_np():
-    data = np.array([5.278, 5.050, 6.550, 7.446, 9.472, 10.353, 11.784, 11.173])
-    expected_result = np.array([0.0, -0.816, 0.812, 0.695, 0.754, 0.598, 0.651, 0.124])
-    chunker = array_chunker(data, 3, fs=100.0)
+def test_scaler_np(fixture_arrays):
+    data, expected_result = fixture_arrays
+    chunker = array_chunker(data, 4, fs=100.0)
     test_input = list(chunker)
     backup = copy.deepcopy(test_input)
 
