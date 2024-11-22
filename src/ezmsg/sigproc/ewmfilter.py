@@ -24,7 +24,8 @@ class EWMState(ez.State):
 
 class EWM(ez.Unit):
     """
-    Exponentially Weighted Moving Average Standardization
+    Exponentially Weighted Moving Average Standardization.
+    This is deprecated. Please use :obj:`ezmsg.sigproc.scaler.AdaptiveStandardScaler` instead.
 
     References https://stackoverflow.com/a/42926270
     """
@@ -37,6 +38,9 @@ class EWM(ez.Unit):
     OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
 
     async def initialize(self) -> None:
+        ez.logger.warning(
+            "EWM/EWMFilter is deprecated and will be removed in a future version. Use AdaptiveStandardScaler instead."
+        )
         self.STATE.signal_queue = asyncio.Queue()
         self.STATE.buffer_queue = asyncio.Queue()
 
@@ -113,7 +117,7 @@ class EWMFilter(ez.Collection):
     leads to :obj:`Window` which then feeds into :obj:`EWM` 's INPUT_BUFFER
     and another branch that feeds directly into :obj:`EWM` 's INPUT_SIGNAL.
 
-    Consider :obj:`scaler` for a more efficient alternative.
+    This is deprecated. Please use :obj:`ezmsg.sigproc.scaler.AdaptiveStandardScaler` instead.
     """
 
     SETTINGS = EWMFilterSettings
