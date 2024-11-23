@@ -14,7 +14,7 @@ from .base import GenAxisArray
 
 @consumer
 def downsample(
-    axis: typing.Optional[str] = None, factor: int = 1
+    axis: str | None = None, factor: int = 1
 ) -> typing.Generator[AxisArray, AxisArray, None]:
     """
     Construct a generator that yields a downsampled version of the data .send() to it.
@@ -96,7 +96,7 @@ class DownsampleSettings(ez.Settings):
     See :obj:`downsample` documentation for a description of the parameters.
     """
 
-    axis: typing.Optional[str] = None
+    axis: str | None = None
     factor: int = 1
 
 

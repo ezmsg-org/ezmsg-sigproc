@@ -1,5 +1,3 @@
-import typing
-
 import pytest
 import numpy as np
 import scipy.signal
@@ -43,7 +41,7 @@ def test_decimate_system(factor: float):
     ez.run(components=comps, connections=conns)
     # Unfortunately, we can't test the factor < 1 error because MessageLogger raises its own 0-msg error.
 
-    messages: typing.List[AxisArray] = [_ for _ in message_log(test_filename)]
+    messages: list[AxisArray] = [_ for _ in message_log(test_filename)]
     assert len(messages) >= n_total
     inputs = [_ for _ in message_log(test_filename_raw)]
     inputs = AxisArray.concatenate(*inputs, dim="time")

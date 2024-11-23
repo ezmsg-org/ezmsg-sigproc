@@ -1,6 +1,5 @@
 import copy
 import os
-from typing import Optional, List
 
 import pytest
 import numpy as np
@@ -132,9 +131,7 @@ class DownsampleSystem(ez.Collection):
 
 @pytest.mark.parametrize("block_size", [10])
 @pytest.mark.parametrize("factor", [3])
-def test_downsample_system(
-    block_size: int, factor: int, test_name: Optional[str] = None
-):
+def test_downsample_system(block_size: int, factor: int, test_name: str | None = None):
     in_fs = 19.0
     num_msgs = int(4.0 / (block_size / in_fs))  # Ensure 4 seconds of data
 
@@ -157,7 +154,7 @@ def test_downsample_system(
 
     ez.run(SYSTEM=system)
 
-    messages: List[AxisArray] = [_ for _ in message_log(test_filename)]
+    messages: list[AxisArray] = [_ for _ in message_log(test_filename)]
     os.remove(test_filename)
     ez.logger.info(f"Analyzing recording of { len( messages ) } messages...")
 

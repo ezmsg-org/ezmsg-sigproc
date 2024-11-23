@@ -21,8 +21,8 @@ Slicer:Select a subset of data along a particular axis.
 
 def parse_slice(
     s: str,
-    axinfo: typing.Optional[AxisArray.CoordinateAxis] = None,
-) -> typing.Tuple[typing.Union[slice, int], ...]:
+    axinfo: AxisArray.CoordinateAxis | None = None,
+) -> tuple[slice | int, ...]:
     """
     Parses a string representation of a slice and returns a tuple of slice objects.
 
@@ -63,7 +63,7 @@ def parse_slice(
 
 @consumer
 def slicer(
-    selection: str = "", axis: typing.Optional[str] = None
+    selection: str = "", axis: str | None = None
 ) -> typing.Generator[AxisArray, AxisArray, None]:
     """
     Slice along a particular axis.
@@ -80,8 +80,8 @@ def slicer(
     msg_out = AxisArray(np.array([]), dims=[""])
 
     # State variables
-    _slice: typing.Optional[typing.Union[slice, npt.NDArray]] = None
-    new_axis: typing.Optional[AxisBase] = None
+    _slice: slice | npt.NDArray | None = None
+    new_axis: AxisBase | None = None
     b_change_dims: bool = False  # If number of dimensions changes when slicing
 
     # Reset if input changes
@@ -154,7 +154,7 @@ def slicer(
 
 class SlicerSettings(ez.Settings):
     selection: str = ""
-    axis: typing.Optional[str] = None
+    axis: str | None = None
 
 
 class Slicer(GenAxisArray):

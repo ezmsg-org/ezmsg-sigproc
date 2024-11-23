@@ -31,7 +31,7 @@ def _alpha_from_tau(tau: float, dt: float) -> float:
 
 
 def ewma_step(
-    sample: npt.NDArray, zi: npt.NDArray, alpha, beta: typing.Optional[None] = None
+    sample: npt.NDArray, zi: npt.NDArray, alpha: float, beta: float | None = None
 ):
     """
     Do an exponentially weighted moving average step.
@@ -80,7 +80,7 @@ class EWMA_Deprecated:
     def __init__(self, alpha: float, max_len: int):
         self.alpha = alpha
         self.beta = 1 - alpha
-        self.prev: typing.Optional[npt.NDArray] = None
+        self.prev: npt.NDArray | None = None
         self.weights = np.empty((max_len + 1,), float)
         self._precalc_weights(max_len)
         self._step_func = functools.partial(ewma_step, alpha=self.alpha, beta=self.beta)
@@ -89,9 +89,7 @@ class EWMA_Deprecated:
         #   (1-α)^0, (1-α)^1, (1-α)^2, ..., (1-α)^n
         np.power(self.beta, np.arange(n + 1), out=self.weights)
 
-    def compute(
-        self, arr: npt.NDArray, out: typing.Optional[npt.NDArray] = None
-    ) -> npt.NDArray:
+    def compute(self, arr: npt.NDArray, out: npt.NDArray | None = None) -> npt.NDArray:
         if out is None:
             out = np.empty(arr.shape, arr.dtype)
 
@@ -164,7 +162,7 @@ class EWMA_Deprecated:
 
 @consumer
 def scaler(
-    time_constant: float = 1.0, axis: typing.Optional[str] = None
+    time_constant: float = 1.0, axis: str | None = None
 ) -> typing.Generator[AxisArray, AxisArray, None]:
     """
     Apply the adaptive standard scaler from https://riverml.xyz/latest/api/preprocessing/AdaptiveStandardScaler/
@@ -212,7 +210,7 @@ def scaler(
 
 @consumer
 def scaler_np(
-    time_constant: float = 1.0, axis: typing.Optional[str] = None
+    time_constant: float = 1.0, axis: str | None = None
 ) -> typing.Generator[AxisArray, AxisArray, None]:
     """
     Create a generator function that applies an adaptive standard scaler.
@@ -230,8 +228,8 @@ def scaler_np(
     msg_out = AxisArray(np.array([]), dims=[""])
 
     # State variables
-    samps_ewma: typing.Optional[EWMA] = None
-    vars_sq_ewma: typing.Optional[EWMA] = None
+    samps_ewma: EWMA | None = None
+    vars_sq_ewma: EWMA | None = None
 
     # Reset if input changes
     check_input = {
@@ -278,7 +276,7 @@ class AdaptiveStandardScalerSettings(ez.Settings):
     """
 
     time_constant: float = 1.0
-    axis: typing.Optional[str] = None
+    axis: str | None = None
 
 
 class AdaptiveStandardScaler(GenAxisArray):

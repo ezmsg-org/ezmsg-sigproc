@@ -2,7 +2,6 @@ import copy
 from dataclasses import field
 import os
 import pytest
-import typing
 
 import numpy as np
 import scipy.signal as sps
@@ -223,7 +222,7 @@ class SpectrumIntegrationTest(ez.Collection):
 
 
 def test_spectrum_system(
-    test_name: typing.Optional[str] = None,
+    test_name: str | None = None,
 ):
     fs = 500.0
     n_time = 100  # samples per block. dispatch_rate = fs / n_time
@@ -263,7 +262,7 @@ def test_spectrum_system(
     system = SpectrumIntegrationTest(settings)
     ez.run(SYSTEM=system)
 
-    messages: typing.List[AxisArray] = [_ for _ in message_log(test_filename)]
+    messages: list[AxisArray] = [_ for _ in message_log(test_filename)]
     os.remove(test_filename)
     agg = AxisArray.concatenate(*messages, dim="time")
     # Spectral length is half window length because we output only POSITIVE frequencies.

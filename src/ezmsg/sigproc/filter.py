@@ -19,10 +19,8 @@ class FilterCoefficients:
 
 
 def _normalize_coefs(
-    coefs: typing.Union[
-        FilterCoefficients, typing.Tuple[npt.NDArray, npt.NDArray], npt.NDArray
-    ],
-) -> typing.Tuple[str, typing.Tuple[npt.NDArray, ...]]:
+    coefs: FilterCoefficients | tuple[npt.NDArray, npt.NDArray] | npt.NDArray,
+) -> tuple[str, tuple[npt.NDArray, ...]]:
     coef_type = "ba"
     if coefs is not None:
         # scipy.signal functions called with first arg `*coefs`.
@@ -37,7 +35,7 @@ def _normalize_coefs(
 
 @consumer
 def filtergen(
-    axis: str, coefs: typing.Optional[typing.Tuple[np.ndarray]], coef_type: str
+    axis: str, coefs: npt.NDArray | tuple[npt.NDArray] | None, coef_type: str
 ) -> typing.Generator[AxisArray, AxisArray, None]:
     """
     Filter data using the provided coefficients.
@@ -63,7 +61,7 @@ def filtergen(
     zi_func = {"ba": scipy.signal.lfilter_zi, "sos": scipy.signal.sosfilt_zi}[coef_type]
 
     # State variables
-    zi: typing.Optional[npt.NDArray] = None
+    zi: npt.NDArray | None = None
 
     # Reset if these change.
     check_input = {"key": None, "shape": None}
@@ -108,16 +106,16 @@ def filtergen(
 
 
 # Type aliases
-BACoeffs = typing.Tuple[npt.NDArray, npt.NDArray]
+BACoeffs = tuple[npt.NDArray, npt.NDArray]
 SOSCoeffs = npt.NDArray
-FilterCoefsMultiType = typing.Union[BACoeffs, SOSCoeffs]
+FilterCoefsMultiType = BACoeffs | SOSCoeffs
 
 
 @consumer
 def filter_gen_by_design(
     axis: str,
     coef_type: str,
-    design_fun: typing.Callable[[float], typing.Optional[FilterCoefsMultiType]],
+    design_fun: typing.Callable[[float], FilterCoefsMultiType | None],
 ) -> typing.Generator[AxisArray, AxisArray, None]:
     """
     Filter data using a filter whose coefficients are calculated using the provided design function.
@@ -157,7 +155,7 @@ def filter_gen_by_design(
 
 
 class FilterBaseSettings(ez.Settings):
-    axis: typing.Optional[str] = None
+    axis: str | None = None
     coef_type: str = "ba"
 
 
@@ -169,7 +167,7 @@ class FilterBase(GenAxisArray):
 
     def design_filter(
         self,
-    ) -> typing.Callable[[float], typing.Optional[FilterCoefsMultiType]]:
+    ) -> typing.Callable[[float], FilterCoefsMultiType | None]:
         raise NotImplementedError("Must implement 'design_filter' in Unit subclass!")
 
     def construct_generator(self):
@@ -186,7 +184,7 @@ class FilterBase(GenAxisArray):
 
 class FilterSettings(FilterBaseSettings):
     # If you'd like to statically design a filter, define it in settings
-    coefs: typing.Optional[FilterCoefficients] = None
+    coefs: FilterCoefficients | None = None
     # Note: coef_type = "ba" is assumed for this class.
 
 
@@ -195,7 +193,7 @@ class Filter(FilterBase):
 
     INPUT_FILTER = ez.InputStream(FilterCoefficients)
 
-    def design_filter(self) -> typing.Callable[[float], typing.Optional[BACoeffs]]:
+    def design_filter(self) -> typing.Callable[[float], BACoeffs | None]:
         if self.SETTINGS.coefs is None:
             return lambda fs: None
         return lambda fs: (self.SETTINGS.coefs.b, self.SETTINGS.coefs.a)

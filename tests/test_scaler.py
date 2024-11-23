@@ -1,6 +1,5 @@
 import copy
 import os
-import typing
 import importlib.util
 
 import numpy as np
@@ -92,7 +91,7 @@ def test_scaler_system(
     tau: float = 1.0,
     fs: float = 10.0,
     duration: float = 2.0,
-    test_name: typing.Optional[str] = None,
+    test_name: str | None = None,
 ):
     """
     For this test, we assume that Counter and scaler_np are functioning properly.
@@ -136,7 +135,7 @@ def test_scaler_system(
     ez.run(components=comps, connections=conns)
 
     # Collect result
-    messages: typing.List[AxisArray] = [_ for _ in message_log(test_filename)]
+    messages: list[AxisArray] = [_ for _ in message_log(test_filename)]
     os.remove(test_filename)
 
     data = np.concatenate([_.data for _ in messages]).squeeze()

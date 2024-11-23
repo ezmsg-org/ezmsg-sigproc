@@ -1,6 +1,5 @@
 import copy
 import os
-from typing import Optional, List
 
 import numpy as np
 from frozendict import frozendict
@@ -145,7 +144,7 @@ class SamplerSystem(ez.Collection):
         )
 
 
-def test_sampler_system(test_name: Optional[str] = None):
+def test_sampler_system(test_name: str | None = None):
     freq = 40.0
     period = (0.5, 1.5)
     n_msgs = 4
@@ -177,7 +176,7 @@ def test_sampler_system(test_name: Optional[str] = None):
     system = SamplerSystem(settings)
 
     ez.run(SYSTEM=system)
-    messages: List[SampleTriggerMessage] = [_ for _ in message_log(test_filename)]
+    messages: list[SampleTriggerMessage] = [_ for _ in message_log(test_filename)]
     os.remove(test_filename)
     ez.logger.info(f"Analyzing recording of {len(messages)} messages...")
     assert len(messages) == n_msgs

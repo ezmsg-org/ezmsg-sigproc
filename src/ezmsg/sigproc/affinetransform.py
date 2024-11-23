@@ -14,8 +14,8 @@ from .base import GenAxisArray
 
 @consumer
 def affine_transform(
-    weights: typing.Union[np.ndarray, str, Path],
-    axis: typing.Optional[str] = None,
+    weights: np.ndarray | str | Path,
+    axis: str | None = None,
     right_multiply: bool = True,
 ) -> typing.Generator[AxisArray, AxisArray, None]:
     """
@@ -47,7 +47,7 @@ def affine_transform(
 
     # State variables
     # New axis with transformed labels, if required
-    new_axis: typing.Optional[AxisBase] = None
+    new_axis: AxisBase | None = None
 
     # Reset if any of these change.
     check_input = {"key": None}
@@ -133,8 +133,8 @@ class AffineTransformSettings(ez.Settings):
     See :obj:`affine_transform` for argument details.
     """
 
-    weights: typing.Union[np.ndarray, str, Path]
-    axis: typing.Optional[str] = None
+    weights: np.ndarray | str | Path
+    axis: str | None = None
     right_multiply: bool = True
 
 
@@ -157,7 +157,7 @@ def zeros_for_noop(data: npt.NDArray, **ignore_kwargs) -> npt.NDArray:
 
 @consumer
 def common_rereference(
-    mode: str = "mean", axis: typing.Optional[str] = None, include_current: bool = True
+    mode: str = "mean", axis: str | None = None, include_current: bool = True
 ) -> typing.Generator[AxisArray, AxisArray, None]:
     """
     Perform common average referencing (CAR) on streaming data.
@@ -214,7 +214,7 @@ class CommonRereferenceSettings(ez.Settings):
     """
 
     mode: str = "mean"
-    axis: typing.Optional[str] = None
+    axis: str | None = None
     include_current: bool = True
 
 
