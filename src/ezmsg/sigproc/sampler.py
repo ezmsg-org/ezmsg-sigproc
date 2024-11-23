@@ -20,7 +20,7 @@ class SampleTriggerMessage:
     timestamp: float = field(default_factory=time.time)
     """Time of the trigger, in seconds. The Clock depends on the input but defaults to time.time"""
 
-    period: typing.Optional[typing.Tuple[float, float]] = None
+    period: tuple[float, float] | None = None
     """The period around the timestamp, in seconds"""
 
     value: typing.Any = None
@@ -39,13 +39,11 @@ class SampleMessage:
 @consumer
 def sampler(
     buffer_dur: float,
-    axis: typing.Optional[str] = None,
-    period: typing.Optional[typing.Tuple[float, float]] = None,
+    axis: str | None = None,
+    period: tuple[float, float] | None = None,
     value: typing.Any = None,
     estimate_alignment: bool = True,
-) -> typing.Generator[
-    typing.List[SampleMessage], typing.Union[AxisArray, SampleTriggerMessage], None
-]:
+) -> typing.Generator[list[SampleMessage], AxisArray | SampleTriggerMessage, None]:
     """
     Sample data into a buffer, accept triggers, and return slices of sampled
     data around the trigger time.
@@ -74,7 +72,7 @@ def sampler(
 
     # State variables (most shared between trigger- and data-processing.
     triggers: deque[SampleTriggerMessage] = deque()
-    buffer: typing.Optional[npt.NDArray] = None
+    buffer: npt.NDArray | None = None
     n_samples: int = 0
     offset: float = 0.0
 
@@ -230,8 +228,8 @@ class SamplerSettings(ez.Settings):
     """
 
     buffer_dur: float
-    axis: typing.Optional[str] = None
-    period: typing.Optional[typing.Tuple[float, float]] = None
+    axis: str | None = None
+    period: tuple[float, float] | None = None
     """Optional default period if unspecified in SampleTriggerMessage"""
 
     value: typing.Any = None
@@ -248,9 +246,7 @@ class SamplerSettings(ez.Settings):
 
 class SamplerState(ez.State):
     cur_settings: SamplerSettings
-    gen: typing.Generator[
-        typing.Union[AxisArray, SampleTriggerMessage], typing.List[SampleMessage], None
-    ]
+    gen: typing.Generator[AxisArray | SampleTriggerMessage, list[SampleMessage], None]
 
 
 class Sampler(ez.Unit):
@@ -295,7 +291,7 @@ class Sampler(ez.Unit):
 
 
 class TriggerGeneratorSettings(ez.Settings):
-    period: typing.Tuple[float, float]
+    period: tuple[float, float]
     """The period around the trigger event."""
 
     prewait: float = 0.5

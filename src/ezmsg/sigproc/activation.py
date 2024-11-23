@@ -41,7 +41,7 @@ ACTIVATIONS = {
 
 @consumer
 def activation(
-    function: typing.Union[str, ActivationFunction],
+    function: str | ActivationFunction,
 ) -> typing.Generator[AxisArray, AxisArray, None]:
     """
     Transform the data with a simple activation function.

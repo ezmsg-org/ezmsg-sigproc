@@ -68,14 +68,14 @@ class SpectralOutput(OptionsEnum):
 
 @consumer
 def spectrum(
-    axis: typing.Optional[str] = None,
-    out_axis: typing.Optional[str] = "freq",
+    axis: str | None = None,
+    out_axis: str | None = "freq",
     window: WindowFunction = WindowFunction.HANNING,
     transform: SpectralTransform = SpectralTransform.REL_DB,
     output: SpectralOutput = SpectralOutput.POSITIVE,
-    norm: typing.Optional[str] = "forward",
+    norm: str | None = "forward",
     do_fftshift: bool = True,
-    nfft: typing.Optional[int] = None,
+    nfft: int | None = None,
 ) -> typing.Generator[AxisArray, AxisArray, None]:
     """
     Calculate a spectrum on a data slice.
@@ -105,10 +105,10 @@ def spectrum(
     apply_window = window != WindowFunction.NONE
     do_fftshift &= output == SpectralOutput.FULL
     f_sl = slice(None)
-    freq_axis: typing.Optional[AxisArray.LinearAxis] = None
-    fftfun: typing.Optional[typing.Callable] = None
-    f_transform: typing.Optional[typing.Callable] = None
-    new_dims: typing.Optional[typing.List[str]] = None
+    freq_axis: AxisArray.LinearAxis | None = None
+    fftfun: typing.Callable | None = None
+    f_transform: typing.Callable | None = None
+    new_dims: list[str] | None = None
 
     # Reset if input changes substantially
     check_input = {
@@ -238,9 +238,9 @@ class SpectrumSettings(ez.Settings):
     See :obj:`spectrum` for a description of the parameters.
     """
 
-    axis: typing.Optional[str] = None
-    # n: typing.Optional[int] = None # n parameter for fft
-    out_axis: typing.Optional[str] = "freq"  # If none; don't change dim name
+    axis: str | None = None
+    # n: int | None = None # n parameter for fft
+    out_axis: str | None = "freq"  # If none; don't change dim name
     window: WindowFunction = WindowFunction.HAMMING
     transform: SpectralTransform = SpectralTransform.REL_DB
     output: SpectralOutput = SpectralOutput.POSITIVE

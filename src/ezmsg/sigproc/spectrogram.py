@@ -12,12 +12,12 @@ from .base import GenAxisArray
 
 @consumer
 def spectrogram(
-    window_dur: typing.Optional[float] = None,
-    window_shift: typing.Optional[float] = None,
+    window_dur: float | None = None,
+    window_shift: float | None = None,
     window: WindowFunction = WindowFunction.HANNING,
     transform: SpectralTransform = SpectralTransform.REL_DB,
     output: SpectralOutput = SpectralOutput.POSITIVE,
-) -> typing.Generator[typing.Optional[AxisArray], AxisArray, None]:
+) -> typing.Generator[AxisArray | None, AxisArray, None]:
     """
     Calculate a spectrogram on streaming data.
 
@@ -50,7 +50,7 @@ def spectrogram(
     )
 
     # State variables
-    msg_out: typing.Optional[AxisArray] = None
+    msg_out: AxisArray | None = None
 
     while True:
         msg_in: AxisArray = yield msg_out
@@ -63,8 +63,8 @@ class SpectrogramSettings(ez.Settings):
     See :obj:`spectrogram` for a description of the parameters.
     """
 
-    window_dur: typing.Optional[float] = None  # window duration in seconds
-    window_shift: typing.Optional[float] = None
+    window_dur: float | None = None  # window duration in seconds
+    window_shift: float | None = None
     """"window step in seconds. If None, window_shift == window_dur"""
 
     # See SpectrumSettings for details of following settings:

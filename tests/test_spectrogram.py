@@ -1,5 +1,4 @@
 import copy
-import typing
 
 import numpy as np
 
@@ -10,9 +9,7 @@ from ezmsg.sigproc.spectrogram import spectrogram
 from util import create_messages_with_periodic_signal, assert_messages_equal
 
 
-def _debug_plot(
-    ax_arr: AxisArray, sin_params: typing.List[typing.Dict[str, float]] = None
-):
+def _debug_plot(ax_arr: AxisArray, sin_params: list[dict[str, float]] = None):
     import matplotlib.pyplot as plt
 
     t_ix = ax_arr.get_axis_idx("time")

@@ -36,7 +36,7 @@ class MinPhaseMode(OptionsEnum):
 
 @consumer
 def filterbank(
-    kernels: typing.Union[list[npt.NDArray], tuple[npt.NDArray, ...]],
+    kernels: list[npt.NDArray] | tuple[npt.NDArray, ...],
     mode: FilterbankMode = FilterbankMode.CONV,
     min_phase: MinPhaseMode = MinPhaseMode.NONE,
     axis: str = "time",
@@ -63,10 +63,10 @@ def filterbank(
      with the data payload containing the absolute value of the input :obj:`AxisArray` data.
 
     """
-    msg_out: typing.Optional[AxisArray] = None
+    msg_out: AxisArray | None = None
 
     # State variables
-    template: typing.Optional[AxisArray] = None
+    template: AxisArray | None = None
 
     # Reset if these change
     check_input = {
@@ -258,7 +258,7 @@ def filterbank(
 
 
 class FilterbankSettings(ez.Settings):
-    kernels: typing.Union[list[npt.NDArray], tuple[npt.NDArray, ...]]
+    kernels: list[npt.NDArray] | tuple[npt.NDArray, ...]
     mode: FilterbankMode = FilterbankMode.CONV
     min_phase: MinPhaseMode = MinPhaseMode.NONE
     axis: str = "time"
