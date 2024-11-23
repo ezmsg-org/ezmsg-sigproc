@@ -1,6 +1,5 @@
 import warnings
 import time
-import typing
 
 import numpy.typing as npt
 from ezmsg.util.messages.axisarray import AxisArray
@@ -20,7 +19,7 @@ def TSMessage(
     data: npt.NDArray,
     fs: float = 1.0,
     time_dim: int = 0,
-    timestamp: typing.Optional[float] = None,
+    timestamp: float | None = None,
 ) -> AxisArray:
     dims = [f"dim_{i}" for i in range(data.ndim)]
     dims[time_dim] = "time"

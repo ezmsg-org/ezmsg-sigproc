@@ -1,7 +1,6 @@
 import os
 import tempfile
 from pathlib import Path
-import typing
 
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
@@ -9,7 +8,7 @@ from frozendict import frozendict
 from ezmsg.util.messages.axisarray import AxisArray
 
 
-def get_test_fn(test_name: typing.Optional[str] = None, extension: str = "txt") -> Path:
+def get_test_fn(test_name: str | None = None, extension: str = "txt") -> Path:
     """PYTEST compatible temporary test file creator"""
 
     # Get current test name if we can..
@@ -31,7 +30,7 @@ def get_test_fn(test_name: typing.Optional[str] = None, extension: str = "txt") 
 
 
 def create_messages_with_periodic_signal(
-    sin_params: typing.List[typing.Dict[str, float]] = [
+    sin_params: list[dict[str, float]] = [
         {"f": 10.0, "dur": 5.0, "offset": 0.0},
         {"f": 20.0, "dur": 5.0, "offset": 0.0},
         {"f": 70.0, "dur": 5.0, "offset": 0.0},
@@ -41,8 +40,8 @@ def create_messages_with_periodic_signal(
     ],
     fs: float = 1000.0,
     msg_dur: float = 1.0,
-    win_step_dur: typing.Optional[float] = None,
-) -> typing.List[AxisArray]:
+    win_step_dur: float | None = None,
+) -> list[AxisArray]:
     """
     Create a continuous signal with periodic components. The signal will be divided into n segments,
     where n is the number of lists in f_sets. Each segment will have sinusoids (of equal amplitude)

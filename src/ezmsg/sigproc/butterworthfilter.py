@@ -21,14 +21,14 @@ class ButterworthFilterSettings(FilterBaseSettings):
     Filter order
     """
 
-    cuton: typing.Optional[float] = None
+    cuton: float | None = None
     """
     Cuton frequency (Hz). If `cutoff` is not specified then this is the highpass corner. Otherwise,
     if this is lower than `cutoff` then this is the beginning of the bandpass
     or if this is greater than `cutoff` then this is the end of the bandstop. 
     """
 
-    cutoff: typing.Optional[float] = None
+    cutoff: float | None = None
     """
     Cutoff frequency (Hz). If `cuton` is not specified then this is the lowpass corner. Otherwise,
     if this is greater than `cuton` then this is the end of the bandpass,
@@ -42,9 +42,7 @@ class ButterworthFilterSettings(FilterBaseSettings):
 
     def filter_specs(
         self,
-    ) -> typing.Optional[
-        typing.Tuple[str, typing.Union[float, typing.Tuple[float, float]]]
-    ]:
+    ) -> tuple[str, float | tuple[float, float]] | None:
         """
         Determine the filter type given the corner frequencies.
 
@@ -70,11 +68,11 @@ class ButterworthFilterSettings(FilterBaseSettings):
 def butter_design_fun(
     fs: float,
     order: int = 0,
-    cuton: typing.Optional[float] = None,
-    cutoff: typing.Optional[float] = None,
+    cuton: float | None = None,
+    cutoff: float | None = None,
     coef_type: str = "ba",
     wn_hz: bool = True,
-) -> typing.Optional[FilterCoefsMultiType]:
+) -> FilterCoefsMultiType | None:
     """
     See :obj:`ButterworthFilterSettings.filter_specs` for an explanation of specifying different
     filter types (lowpass, highpass, bandpass, bandstop) from the parameters.
@@ -116,7 +114,7 @@ class ButterworthFilter(FilterBase):
 
     def design_filter(
         self,
-    ) -> typing.Callable[[float], typing.Optional[FilterCoefsMultiType]]:
+    ) -> typing.Callable[[float], FilterCoefsMultiType | None]:
         return functools.partial(
             butter_design_fun,
             order=self.SETTINGS.order,
@@ -127,10 +125,10 @@ class ButterworthFilter(FilterBase):
 
 
 def butter(
-    axis: typing.Optional[str],
+    axis: str | None,
     order: int = 0,
-    cuton: typing.Optional[float] = None,
-    cutoff: typing.Optional[float] = None,
+    cuton: float | None = None,
+    cutoff: float | None = None,
     coef_type: str = "ba",
 ) -> typing.Generator[AxisArray, AxisArray, None]:
     """

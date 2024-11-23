@@ -2,7 +2,6 @@ import asyncio  # noqa: F401
 from dataclasses import field
 import os
 import time
-import typing
 
 import numpy as np
 import pytest
@@ -29,7 +28,7 @@ from ezmsg.sigproc.synth import (
 
 # TEST CLOCK
 @pytest.mark.parametrize("dispatch_rate", [None, 2.0, 20.0])
-def test_clock_gen(dispatch_rate: typing.Optional[float]):
+def test_clock_gen(dispatch_rate: float | None):
     run_time = 1.0
     n_target = int(np.ceil(dispatch_rate * run_time)) if dispatch_rate else 100
     gen = clock(dispatch_rate=dispatch_rate)
@@ -48,7 +47,7 @@ def test_clock_gen(dispatch_rate: typing.Optional[float]):
 
 @pytest.mark.parametrize("dispatch_rate", [None, 2.0, 20.0])
 @pytest.mark.asyncio
-async def test_aclock_agen(dispatch_rate: typing.Optional[float]):
+async def test_aclock_agen(dispatch_rate: float | None):
     run_time = 1.0
     n_target = int(np.ceil(dispatch_rate * run_time)) if dispatch_rate else 100
     agen = aclock(dispatch_rate=dispatch_rate)
@@ -95,8 +94,8 @@ class ClockTestSystem(ez.Collection):
 
 @pytest.mark.parametrize("dispatch_rate", [None, 2.0, 20.0])
 def test_clock_system(
-    dispatch_rate: typing.Optional[float],
-    test_name: typing.Optional[str] = None,
+    dispatch_rate: float | None,
+    test_name: str | None = None,
 ):
     run_time = 1.0
     n_target = int(np.ceil(dispatch_rate * run_time)) if dispatch_rate else 100
@@ -111,7 +110,7 @@ def test_clock_system(
     ez.run(SYSTEM=system)
 
     # Collect result
-    messages: typing.List[AxisArray] = [_ for _ in message_log(test_filename)]
+    messages: list[AxisArray] = [_ for _ in message_log(test_filename)]
     os.remove(test_filename)
 
     assert all([_ == ez.Flag() for _ in messages])
@@ -130,8 +129,8 @@ async def test_acounter(
     block_size: int,
     fs: float,
     n_ch: int,
-    dispatch_rate: typing.Optional[typing.Union[float, str]],
-    mod: typing.Optional[int],
+    dispatch_rate: float | str | None,
+    mod: int | None,
 ):
     target_dur = 2.6  # 2.6 seconds per test
     if dispatch_rate is None:
@@ -225,9 +224,9 @@ class CounterTestSystem(ez.Collection):
 def test_counter_system(
     block_size: int,
     fs: float,
-    dispatch_rate: typing.Optional[typing.Union[float, str]],
-    mod: typing.Optional[int],
-    test_name: typing.Optional[str] = None,
+    dispatch_rate: float | str | None,
+    mod: int | None,
+    test_name: str | None = None,
 ):
     n_ch = 3
     target_dur = 2.6  # 2.6 seconds per test
@@ -263,7 +262,7 @@ def test_counter_system(
     ez.run(SYSTEM=system)
 
     # Collect result
-    messages: typing.List[AxisArray] = [_ for _ in message_log(test_filename)]
+    messages: list[AxisArray] = [_ for _ in message_log(test_filename)]
     os.remove(test_filename)
 
     if dispatch_rate is None:
@@ -287,7 +286,7 @@ def test_counter_system(
 
 # TEST SIN #
 def test_sin_gen(freq: float = 1.0, amp: float = 1.0, phase: float = 0.0):
-    axis: typing.Optional[str] = "time"
+    axis: str | None = "time"
     srate = max(4.0 * freq, 1000.0)
     sim_dur = 30.0
     n_samples = int(srate * sim_dur)
@@ -349,7 +348,7 @@ class EEGSynthIntegrationTest(ez.Collection):
 
 
 def test_eegsynth_system(
-    test_name: typing.Optional[str] = None,
+    test_name: str | None = None,
 ):
     # Just a quick test to make sure the system runs. We aren't checking validity of values or anything.
     fs = 500.0
@@ -378,7 +377,7 @@ def test_eegsynth_system(
     system = EEGSynthIntegrationTest(settings)
     ez.run(SYSTEM=system)
 
-    messages: typing.List[AxisArray] = [_ for _ in message_log(test_filename)]
+    messages: list[AxisArray] = [_ for _ in message_log(test_filename)]
     os.remove(test_filename)
     agg = AxisArray.concatenate(*messages, dim="time")
     assert agg.axes["time"].gain == 1 / fs

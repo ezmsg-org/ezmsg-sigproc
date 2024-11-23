@@ -9,14 +9,14 @@ import numpy.typing as npt
 
 class SignalInjectorSettings(ez.Settings):
     time_dim: str = "time"  # Input signal needs a time dimension with units in sec.
-    frequency: typing.Optional[float] = None  # Hz
+    frequency: float | None = None  # Hz
     amplitude: float = 1.0
-    mixing_seed: typing.Optional[int] = None
+    mixing_seed: int | None = None
 
 
 class SignalInjectorState(ez.State):
-    cur_shape: typing.Optional[typing.Tuple[int, ...]] = None
-    cur_frequency: typing.Optional[float] = None
+    cur_shape: tuple[int, ...] | None = None
+    cur_frequency: float | None = None
     cur_amplitude: float
     mixing: npt.NDArray
 
@@ -30,7 +30,7 @@ class SignalInjector(ez.Unit):
     SETTINGS = SignalInjectorSettings
     STATE = SignalInjectorState
 
-    INPUT_FREQUENCY = ez.InputStream(typing.Optional[float])
+    INPUT_FREQUENCY = ez.InputStream(float | None)
     INPUT_AMPLITUDE = ez.InputStream(float)
     INPUT_SIGNAL = ez.InputStream(AxisArray)
     OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
@@ -41,7 +41,7 @@ class SignalInjector(ez.Unit):
         self.STATE.mixing = np.array([])
 
     @ez.subscriber(INPUT_FREQUENCY)
-    async def on_frequency(self, msg: typing.Optional[float]) -> None:
+    async def on_frequency(self, msg: float | None) -> None:
         self.STATE.cur_frequency = msg
 
     @ez.subscriber(INPUT_AMPLITUDE)

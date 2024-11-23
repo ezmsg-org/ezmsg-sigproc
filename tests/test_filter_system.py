@@ -1,5 +1,3 @@
-import typing
-
 import pytest
 import numpy as np
 import scipy.signal
@@ -64,7 +62,7 @@ def test_filter_system(filter_type: str, coef_type: str, order: int):
     )
     ez.run(components=comps, connections=conns)
 
-    messages: typing.List[AxisArray] = [_ for _ in message_log(test_filename)]
+    messages: list[AxisArray] = [_ for _ in message_log(test_filename)]
     assert len(messages) >= n_total
     inputs = AxisArray.concatenate(
         *[_ for _ in message_log(test_filename_raw)], dim="time"

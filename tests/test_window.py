@@ -1,10 +1,10 @@
 import copy
 from dataclasses import field, replace
 import os
-import typing
 
 import pytest
 import numpy as np
+import numpy.typing as npt
 from numpy.lib.stride_tricks import sliding_window_view
 from frozendict import frozendict
 import ezmsg.core as ez
@@ -114,9 +114,9 @@ def test_window_gen_nodur():
 @pytest.mark.parametrize("time_ax", [0, 1])
 def test_window_generator(
     msg_block_size: int,
-    newaxis: typing.Optional[str],
+    newaxis: str | None,
     win_dur: float,
-    win_shift: typing.Optional[float],
+    win_shift: float | None,
     zero_pad: str,
     fs: float,
     time_ax: int,
@@ -286,12 +286,12 @@ class WindowSystem(ez.Collection):
 )
 def test_window_system(
     msg_block_size: int,
-    newaxis: typing.Optional[str],
+    newaxis: str | None,
     win_dur: float,
-    win_shift: typing.Optional[float],
+    win_shift: float | None,
     zero_pad: str,
     fs: float,
-    test_name: typing.Optional[str] = None,
+    test_name: str | None = None,
 ):
     # Calculate expected dimensions.
     win_len = int((win_dur or 1.0) * fs)
@@ -324,7 +324,7 @@ def test_window_system(
     system = WindowSystem(settings)
     ez.run(SYSTEM=system)
 
-    messages: typing.List[AxisArray] = [_ for _ in message_log(test_filename)]
+    messages: list[AxisArray] = [_ for _ in message_log(test_filename)]
     os.remove(test_filename)
     ez.logger.info(f"Analyzing recording of { len( messages ) } messages...")
 
@@ -344,7 +344,7 @@ def test_window_system(
     ez.logger.info("Consistent metadata!")
 
     # Collect the outputs we want to test
-    data: typing.List[np.ndarray] = [msg.data for msg in messages]
+    data: list[npt.NDArray] = [msg.data for msg in messages]
     if newaxis is None:
         offsets = np.array([_.axes["time"].offset for _ in messages])
     else:

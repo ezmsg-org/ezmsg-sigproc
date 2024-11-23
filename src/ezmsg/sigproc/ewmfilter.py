@@ -10,7 +10,7 @@ from .window import Window, WindowSettings
 
 
 class EWMSettings(ez.Settings):
-    axis: typing.Optional[str] = None
+    axis: str | None = None
     """Name of the axis to accumulate."""
 
     zero_offset: bool = True
@@ -104,7 +104,7 @@ class EWMFilterSettings(ez.Settings):
     history_dur: float
     """Previous data to accumulate for standardization."""
 
-    axis: typing.Optional[str] = None
+    axis: str | None = None
     """Name of the axis to accumulate."""
 
     zero_offset: bool = True

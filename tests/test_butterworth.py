@@ -1,6 +1,5 @@
 import os
 import pytest
-import typing
 
 import numpy as np
 import ezmsg.core as ez
@@ -58,9 +57,7 @@ class ButterworthSystem(ez.Collection):
         (30.0, 45.0),  # bandstop
     ],
 )
-def test_butterworth_system(
-    cutoff: float, cuton: float, test_name: typing.Optional[str] = None
-):
+def test_butterworth_system(cutoff: float, cuton: float, test_name: str | None = None):
     in_fs = 128.0
     block_size = 128
 
@@ -89,7 +86,7 @@ def test_butterworth_system(
 
     ez.run(SYSTEM=system)
 
-    messages: typing.List[AxisArray] = []
+    messages: list[AxisArray] = []
     for msg in message_log(test_filename):
         messages.append(msg)
 

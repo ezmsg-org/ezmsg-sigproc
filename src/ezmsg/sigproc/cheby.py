@@ -19,12 +19,12 @@ class ChebyshevFilterSettings(FilterBaseSettings):
     Filter order
     """
 
-    ripple_tol: typing.Optional[float] = None
+    ripple_tol: float | None = None
     """
     The maximum ripple allowed below unity gain in the passband. Specified in decibels, as a positive number.
     """
 
-    Wn: typing.Optional[typing.Union[float, typing.Tuple[float, float]]] = None
+    Wn: float | tuple[float, float] | None = None
     """
     A scalar or length-2 sequence giving the critical frequencies.
     For Type I filters, this is the point in the transition band at which the gain first drops below -rp.
@@ -56,14 +56,14 @@ class ChebyshevFilterSettings(FilterBaseSettings):
 def cheby_design_fun(
     fs: float,
     order: int = 0,
-    ripple_tol: typing.Optional[float] = None,
-    Wn: typing.Optional[typing.Union[float, typing.Tuple[float, float]]] = None,
+    ripple_tol: float | None = None,
+    Wn: float | tuple[float, float] | None = None,
     btype: str = "lowpass",
     analog: bool = False,
     coef_type: str = "ba",
     cheby_type: str = "cheby1",
     wn_hz: bool = True,
-) -> typing.Optional[FilterCoefsMultiType]:
+) -> FilterCoefsMultiType:
     """
     Chebyshev type I and type II digital and analog filter design.
     Design an `order`th-order digital or analog Chebyshev type I or type II filter and return the filter coefficients.
@@ -105,7 +105,7 @@ class ChebyshevFilter(FilterBase):
 
     def design_filter(
         self,
-    ) -> typing.Callable[[float], typing.Optional[FilterCoefsMultiType]]:
+    ) -> typing.Callable[[float], FilterCoefsMultiType | None]:
         return functools.partial(
             cheby_design_fun,
             order=self.SETTINGS.order,

@@ -14,7 +14,7 @@ from .base import GenAxisArray
 @consumer
 def bandpower(
     spectrogram_settings: SpectrogramSettings,
-    bands: typing.Optional[typing.List[typing.Tuple[float, float]]] = [
+    bands: list[tuple[float, float]] | None = [
         (17, 30),
         (70, 170),
     ],
@@ -58,7 +58,7 @@ class BandPowerSettings(ez.Settings):
     spectrogram_settings: SpectrogramSettings = field(
         default_factory=SpectrogramSettings
     )
-    bands: typing.Optional[typing.List[typing.Tuple[float, float]]] = field(
+    bands: list[tuple[float, float]] | None = field(
         default_factory=lambda: [(17, 30), (70, 170)]
     )
 

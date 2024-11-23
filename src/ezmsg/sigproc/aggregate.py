@@ -56,8 +56,8 @@ AGGREGATORS = {
 
 @consumer
 def ranged_aggregate(
-    axis: typing.Optional[str] = None,
-    bands: typing.Optional[typing.List[typing.Tuple[float, float]]] = None,
+    axis: str | None = None,
+    bands: list[tuple[float, float]] | None = None,
     operation: AggregationFunction = AggregationFunction.MEAN,
 ):
     """
@@ -75,9 +75,9 @@ def ranged_aggregate(
     msg_out = AxisArray(np.array([]), dims=[""])
 
     # State variables
-    slices: typing.Optional[typing.List[typing.Tuple[typing.Any, ...]]] = None
-    out_axis: typing.Optional[AxisBase] = None
-    ax_vec: typing.Optional[npt.NDArray] = None
+    slices: list[tuple[typing.Any, ...]] | None = None
+    out_axis: AxisBase | None = None
+    ax_vec: npt.NDArray | None = None
 
     # Reset if any of these changes. Key not checked because continuity between chunks not required.
     check_inputs = {"gain": None, "offset": None, "len": None, "key": None}
@@ -163,8 +163,8 @@ class RangedAggregateSettings(ez.Settings):
     See :obj:`ranged_aggregate` for details.
     """
 
-    axis: typing.Optional[str] = None
-    bands: typing.Optional[typing.List[typing.Tuple[float, float]]] = None
+    axis: str | None = None
+    bands: list[tuple[float, float]] | None = None
     operation: AggregationFunction = AggregationFunction.MEAN
 
 

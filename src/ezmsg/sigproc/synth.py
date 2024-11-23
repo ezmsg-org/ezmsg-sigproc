@@ -1,7 +1,7 @@
 import asyncio
 from dataclasses import field
 import time
-from typing import Optional, Generator, AsyncGenerator, Union
+import typing
 
 import numpy as np
 import ezmsg.core as ez
@@ -13,7 +13,7 @@ from .butterworthfilter import ButterworthFilter, ButterworthFilterSettings
 from .base import GenAxisArray
 
 
-def clock(dispatch_rate: Optional[float]) -> Generator[ez.Flag, None, None]:
+def clock(dispatch_rate: float | None) -> typing.Generator[ez.Flag, None, None]:
     """
     Construct a generator that yields events at a specified rate.
 
@@ -33,7 +33,7 @@ def clock(dispatch_rate: Optional[float]) -> Generator[ez.Flag, None, None]:
         yield ez.Flag()
 
 
-async def aclock(dispatch_rate: Optional[float]) -> AsyncGenerator[ez.Flag, None]:
+async def aclock(dispatch_rate: float | None) -> typing.AsyncGenerator[ez.Flag, None]:
     """
     ``asyncio`` version of :obj:`clock`.
 
@@ -54,12 +54,12 @@ class ClockSettings(ez.Settings):
     """Settings for :obj:`Clock`. See :obj:`clock` for parameter description."""
 
     # Message dispatch rate (Hz), or None (fast as possible)
-    dispatch_rate: Optional[float]
+    dispatch_rate: float | None
 
 
 class ClockState(ez.State):
     cur_settings: ClockSettings
-    gen: AsyncGenerator
+    gen: typing.AsyncGenerator
 
 
 class Clock(ez.Unit):
@@ -84,7 +84,7 @@ class Clock(ez.Unit):
         self.construct_generator()
 
     @ez.publisher(OUTPUT_CLOCK)
-    async def generate(self) -> AsyncGenerator:
+    async def generate(self) -> typing.AsyncGenerator:
         while True:
             out = await self.STATE.gen.__anext__()
             if out:
@@ -94,11 +94,11 @@ class Clock(ez.Unit):
 # COUNTER - Generate incrementing integer. fs and dispatch_rate parameters combine to give many options. #
 async def acounter(
     n_time: int,
-    fs: Optional[float],
+    fs: float | None,
     n_ch: int = 1,
-    dispatch_rate: Optional[Union[float, str]] = None,
-    mod: Optional[int] = None,
-) -> AsyncGenerator[AxisArray, None]:
+    dispatch_rate: float | str | None = None,
+    mod: int | None = None,
+) -> typing.AsyncGenerator[AxisArray, None]:
     """
     Construct an asynchronous generator to generate AxisArray objects at a specified rate
     and with the specified sampling rate.
@@ -207,14 +207,14 @@ class CounterSettings(ez.Settings):
     # Message dispatch rate (Hz), 'realtime', 'ext_clock', or None (fast as possible)
     #  Note: if dispatch_rate is a float then time offsets will be synthetic and the
     #  system will run faster or slower than wall clock time.
-    dispatch_rate: Optional[Union[float, str]] = None
+    dispatch_rate: float | str | None = None
 
     # If set to an integer, counter will rollover
-    mod: Optional[int] = None
+    mod: int | None = None
 
 
 class CounterState(ez.State):
-    gen: AsyncGenerator[AxisArray, Optional[ez.Flag]]
+    gen: typing.AsyncGenerator[AxisArray, ez.Flag | None]
     cur_settings: CounterSettings
     new_generator: asyncio.Event
 
@@ -263,7 +263,7 @@ class Counter(ez.Unit):
             yield self.OUTPUT_SIGNAL, out
 
     @ez.publisher(OUTPUT_SIGNAL)
-    async def run_generator(self) -> AsyncGenerator:
+    async def run_generator(self) -> typing.AsyncGenerator:
         while True:
             await self.STATE.new_generator.wait()
             self.STATE.new_generator.clear()
@@ -278,11 +278,11 @@ class Counter(ez.Unit):
 
 @consumer
 def sin(
-    axis: Optional[str] = "time",
+    axis: str | None = "time",
     freq: float = 1.0,
     amp: float = 1.0,
     phase: float = 0.0,
-) -> Generator[AxisArray, AxisArray, None]:
+) -> typing.Generator[AxisArray, AxisArray, None]:
     """
     Construct a generator of sinusoidal waveforms in AxisArray objects.
 
@@ -320,7 +320,7 @@ class SinGeneratorSettings(ez.Settings):
     See :obj:`sin` for parameter descriptions.
     """
 
-    time_axis: Optional[str] = "time"
+    time_axis: str | None = "time"
     freq: float = 1.0  # Oscillation frequency in Hz
     amp: float = 1.0  # Amplitude
     phase: float = 0.0  # Phase offset (in radians)
@@ -354,7 +354,7 @@ class OscillatorSettings(ez.Settings):
     n_ch: int = 1
     """Number of channels to output per block"""
 
-    dispatch_rate: Optional[Union[float, str]] = None
+    dispatch_rate: float | str | None = None
     """(Hz) | 'realtime' | 'ext_clock'"""
 
     freq: float = 1.0
@@ -436,7 +436,7 @@ class RandomGenerator(ez.Unit):
 
     @ez.subscriber(INPUT_SIGNAL)
     @ez.publisher(OUTPUT_SIGNAL)
-    async def generate(self, msg: AxisArray) -> AsyncGenerator:
+    async def generate(self, msg: AxisArray) -> typing.AsyncGenerator:
         random_data = np.random.normal(
             size=msg.shape, loc=self.SETTINGS.loc, scale=self.SETTINGS.scale
         )
@@ -452,7 +452,7 @@ class NoiseSettings(ez.Settings):
     n_time: int  # Number of samples to output per block
     fs: float  # Sampling rate of signal output in Hz
     n_ch: int = 1  # Number of channels to output
-    dispatch_rate: Optional[Union[float, str]] = None
+    dispatch_rate: float | str | None = None
     """(Hz), 'realtime', or 'ext_clock'"""
     loc: float = 0.0  # DC offset
     scale: float = 1.0  # Scale (in standard deviations)
@@ -554,12 +554,12 @@ class Add(ez.Unit):
         self.STATE.queue_b.put_nowait(msg)
 
     @ez.publisher(OUTPUT_SIGNAL)
-    async def output(self) -> AsyncGenerator:
+    async def output(self) -> typing.AsyncGenerator:
         while True:
             a = await self.STATE.queue_a.get()
             b = await self.STATE.queue_b.get()
 
-            yield (self.OUTPUT_SIGNAL, replace(a, data=a.data + b.data))
+            yield self.OUTPUT_SIGNAL, replace(a, data=a.data + b.data)
 
 
 class EEGSynthSettings(ez.Settings):

@@ -14,11 +14,11 @@ from .filterbank import filterbank, FilterbankMode, MinPhaseMode
 
 @consumer
 def cwt(
-    frequencies: typing.Optional[typing.Union[list, tuple, npt.NDArray]],
-    wavelet: typing.Union[str, pywt.ContinuousWavelet, pywt.Wavelet],
+    frequencies: list | tuple | npt.NDArray | None,
+    wavelet: str | pywt.ContinuousWavelet | pywt.Wavelet,
     min_phase: MinPhaseMode = MinPhaseMode.NONE,
     axis: str = "time",
-    scales: typing.Optional[typing.Union[list, tuple, npt.NDArray]] = None,
+    scales: list | tuple | npt.NDArray | None = None,
 ) -> typing.Generator[AxisArray, AxisArray, None]:
     """
     Perform a continuous wavelet transform.
@@ -42,7 +42,7 @@ def cwt(
         and yields an :obj:`AxisArray` with a continuous wavelet transform in its data.
     """
     precision = 10
-    msg_out: typing.Optional[AxisArray] = None
+    msg_out: AxisArray | None = None
 
     # Check parameters
     if frequencies is None and scales is None:
@@ -63,12 +63,12 @@ def cwt(
         assert frequencies.ndim == 1, "frequencies must be a 1D list, tuple, or array."
 
     # State variables
-    neg_rt_scales: typing.Optional[npt.NDArray] = None
+    neg_rt_scales: npt.NDArray | None = None
     int_psi, wave_xvec = pywt.integrate_wavelet(wavelet, precision=precision)
     int_psi = np.conj(int_psi) if wavelet.complex_cwt else int_psi
-    template: typing.Optional[AxisArray] = None
-    fbgen: typing.Optional[typing.Generator[AxisArray, AxisArray, None]] = None
-    last_conv_samp: typing.Optional[npt.NDArray] = None
+    template: AxisArray | None = None
+    fbgen: typing.Generator[AxisArray, AxisArray, None] | None = None
+    last_conv_samp: npt.NDArray | None = None
 
     # Reset if input changed
     check_input = {
@@ -172,8 +172,8 @@ class CWTSettings(ez.Settings):
     See :obj:`cwt` for argument details.
     """
 
-    scales: typing.Union[list, tuple, npt.NDArray]
-    wavelet: typing.Union[str, pywt.ContinuousWavelet, pywt.Wavelet]
+    scales: list | tuple | npt.NDArray
+    wavelet: str | pywt.ContinuousWavelet | pywt.Wavelet
     min_phase: MinPhaseMode = MinPhaseMode.NONE
     axis: str = "time"
 
