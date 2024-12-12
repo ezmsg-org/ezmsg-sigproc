@@ -20,8 +20,8 @@ from ezmsg.util.debuglog import DebugLog
 
 
 @pytest.mark.parametrize("block_size", [1, 5, 10, 20])
-@pytest.mark.parametrize("factor", [1, 2, 3])
-def test_downsample_core(block_size: int, factor: int):
+@pytest.mark.parametrize("target_rate", [19.0, 9.5, 6.3])
+def test_downsample_core(block_size: int, target_rate: float):
     in_fs = 19.0
     test_dur = 4.0
     n_channels = 2
@@ -60,7 +60,7 @@ def test_downsample_core(block_size: int, factor: int):
     in_msgs = list(msg_generator())
     backup = [copy.deepcopy(msg) for msg in in_msgs]
 
-    proc = downsample(axis="time", factor=factor)
+    proc = downsample(axis="time", target_rate=target_rate)
     out_msgs = []
     for msg in in_msgs:
         res = proc.send(msg)
@@ -70,18 +70,19 @@ def test_downsample_core(block_size: int, factor: int):
     assert_messages_equal(in_msgs, backup)
 
     # Assert correctness of gain
-    assert all(msg.axes["time"].gain == factor / in_fs for msg in out_msgs)
+    expected_factor: int = int(in_fs // target_rate)
+    assert all(msg.axes["time"].gain == expected_factor / in_fs for msg in out_msgs)
 
     # Assert messages have the correct timestamps
     expected_offsets = (
-        np.cumsum([0] + [_.data.shape[0] for _ in out_msgs]) * factor / in_fs
+        np.cumsum([0] + [_.data.shape[0] for _ in out_msgs]) * expected_factor / in_fs
     )
     actual_offsets = np.array([_.axes["time"].offset for _ in out_msgs])
     assert np.allclose(actual_offsets, expected_offsets[:-1])
 
     # Compare returned values to expected values.
     allres_msg = AxisArray.concatenate(*out_msgs, dim="time")
-    assert np.array_equal(allres_msg.data, sig[::factor])
+    assert np.array_equal(allres_msg.data, sig[::expected_factor])
 
 
 class DownsampleSystemSettings(ez.Settings):
@@ -130,8 +131,8 @@ class DownsampleSystem(ez.Collection):
 
 
 @pytest.mark.parametrize("block_size", [10])
-@pytest.mark.parametrize("factor", [3])
-def test_downsample_system(block_size: int, factor: int, test_name: str | None = None):
+@pytest.mark.parametrize("target_rate", [6.3])
+def test_downsample_system(block_size: int, target_rate: float, test_name: str | None = None):
     in_fs = 19.0
     num_msgs = int(4.0 / (block_size / in_fs))  # Ensure 4 seconds of data
 
@@ -145,7 +146,7 @@ def test_downsample_system(block_size: int, factor: int, test_name: str | None =
             fs=in_fs,
             dispatch_rate=20.0,
         ),
-        down_settings=DownsampleSettings(factor=factor),
+        down_settings=DownsampleSettings(target_rate=target_rate),
         log_settings=MessageLoggerSettings(output=test_filename),
         term_settings=TerminateTestSettings(time=1.0),
     )
@@ -159,7 +160,8 @@ def test_downsample_system(block_size: int, factor: int, test_name: str | None =
     ez.logger.info(f"Analyzing recording of { len( messages ) } messages...")
 
     # Check fs
-    out_fs = in_fs / factor
+    expected_factor: int = int(in_fs // target_rate)
+    out_fs = in_fs / expected_factor
     assert np.allclose(
         np.array([1 / msg.axes["time"].gain for msg in messages]),
         np.ones(
@@ -173,7 +175,7 @@ def test_downsample_system(block_size: int, factor: int, test_name: str | None =
     # Check data
     time_ax_idx = messages[0].get_axis_idx("time")
     data = np.concatenate([_.data for _ in messages], axis=time_ax_idx)
-    expected_data = np.arange(data.shape[time_ax_idx]) * factor
+    expected_data = np.arange(data.shape[time_ax_idx]) * expected_factor
     assert np.array_equal(data, expected_data[:, None])
 
     # Grab first sample from each message. We will use their values to get the offsets.
@@ -185,7 +187,7 @@ def test_downsample_system(block_size: int, factor: int, test_name: str | None =
 
     # Check offsets
     first_samps = np.concatenate(first_samps, axis=time_ax_idx)
-    expected_offsets = first_samps.squeeze() / out_fs / factor
+    expected_offsets = first_samps.squeeze() / out_fs / expected_factor
     assert np.allclose(
         np.array([msg.axes["time"].offset for msg in messages]), expected_offsets
     )
