@@ -13,8 +13,8 @@ from ezmsg.sigproc.synth import EEGSynth
 from util import get_test_fn
 
 
-@pytest.mark.parametrize("factor", [5.0, 1.0])
-def test_decimate_system(factor: float):
+@pytest.mark.parametrize("target_rate", [100.0, 500.0])
+def test_decimate_system(target_rate: float):
     test_filename = get_test_fn()
     test_filename_raw = test_filename.parent / (
         test_filename.stem + "raw" + test_filename.suffix
@@ -27,7 +27,7 @@ def test_decimate_system(factor: float):
 
     comps = {
         "SRC": EEGSynth(n_time=n_time, fs=fs, n_ch=n_ch, alpha_freq=10.5),
-        "DECIMATE": Decimate(axis="time", factor=factor),
+        "DECIMATE": Decimate(axis="time", target_rate=target_rate),
         "LOGRAW": MessageLogger(output=test_filename_raw),
         "LOGFILT": MessageLogger(output=test_filename),
         "TERM": TerminateOnTotal(n_total),
@@ -47,13 +47,14 @@ def test_decimate_system(factor: float):
     inputs = AxisArray.concatenate(*inputs, dim="time")
     outputs = AxisArray.concatenate(*messages, dim="time")
 
-    if factor == 1:
+    expected_factor: int = int(fs // target_rate)
+    if expected_factor == 1:
         expected = inputs.data
     else:
-        b, a = scipy.signal.cheby1(8, 0.05, 0.8 / factor)
+        b, a = scipy.signal.cheby1(8, 0.05, 0.8 / expected_factor)
         b, a = scipy.signal.normalize(b, a)
         zi = scipy.signal.lfilter_zi(b, a)[:, None]
         antialiased, _ = scipy.signal.lfilter(b, a, inputs.data, axis=0, zi=zi)
-        expected = antialiased[:: int(factor)]
+        expected = antialiased[:: int(expected_factor)]
 
     assert np.allclose(outputs.data, expected)
