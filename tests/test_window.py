@@ -7,6 +7,7 @@ import numpy as np
 import numpy.typing as npt
 from numpy.lib.stride_tricks import sliding_window_view
 from frozendict import frozendict
+import sparse
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messagegate import MessageGate, MessageGateSettings
@@ -223,6 +224,62 @@ def test_window_generator(
     # Compare results to expected
     assert np.array_equal(result, expected)
     assert np.allclose(offsets, tvec)
+
+
+@pytest.mark.parametrize("win_dur", [0.3, 1.0])
+@pytest.mark.parametrize("win_shift", [0.2, 1.0, None])
+@pytest.mark.parametrize("zero_pad", ["input", "shift", "none"])
+def test_sparse_window(
+    win_dur: float,
+    win_shift: float | None,
+    zero_pad: str,
+):
+    fs = 100.0
+    n_ch = 5
+    n_samps = 1_000
+    msg_len = 100
+    win_len = int(win_dur * fs)
+    rng = np.random.default_rng()
+    s = sparse.random((n_samps, n_ch), density=0.1, random_state=rng) > 0
+    in_msgs = [
+        AxisArray(
+            data=s[msg_ix * msg_len : (msg_ix + 1) * msg_len],
+            dims=["time", "ch"],
+            axes={
+                "time": AxisArray.Axis.TimeAxis(fs=fs, offset=msg_ix / fs),
+            },
+            key="test_sparse_window",
+        )
+        for msg_ix in range(10)
+    ]
+
+    proc = windowing(
+        axis="time",
+        newaxis="win",
+        window_dur=win_dur,
+        window_shift=win_shift,
+        zero_pad_until=zero_pad,
+    )
+    out_msgs = [proc.send(_) for _ in in_msgs]
+    nwins = 0
+    for om in out_msgs:
+        assert om.dims == ["win", "time", "ch"]
+        assert om.data.shape[1] == win_len
+        assert om.data.shape[2] == n_ch
+        nwins += om.data.shape[0]
+    if win_shift is None:
+        # 1:1 mode
+        assert nwins == len(out_msgs)
+    else:
+        shift_len = int(win_shift * fs)
+        prepended = 0
+        if zero_pad == "input":
+            prepended = max(0, win_len - msg_len)
+        elif zero_pad == "shift":
+            prepended = max(0, win_len - shift_len)
+        win_offsets = np.arange(n_samps + prepended)[::shift_len]
+        expected_nwins = np.sum(win_offsets <= (n_samps + prepended - win_len))
+        assert nwins == expected_nwins
 
 
 class WindowSystemSettings(ez.Settings):
