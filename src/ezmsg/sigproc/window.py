@@ -156,18 +156,18 @@ def windowing(
         buffer = concat_fun((buffer, msg_in.data), axis=axis_idx)
 
         # Create a vector of buffer timestamps to track axis `offset` in output(s)
-        buffer_offset = np.arange(buffer.shape[axis_idx]).astype(float)
-        # Adjust so first _new_ sample at index 0
-        buffer_offset -= buffer_offset[-msg_in.data.shape[axis_idx]]
+        buffer_tvec = np.arange(buffer.shape[axis_idx]).astype(float)
+        # Adjust so first _new_ sample at index 0. TODO: anchor?
+        buffer_tvec -= buffer_tvec[-msg_in.data.shape[axis_idx]]
         # Convert form indices to 'units' (probably seconds).
-        buffer_offset *= axis_info.gain
-        buffer_offset += axis_info.offset
+        buffer_tvec *= axis_info.gain
+        buffer_tvec += axis_info.offset
 
         if not b_1to1 and shift_deficit > 0:
             n_skip = min(buffer.shape[axis_idx], shift_deficit)
             if n_skip > 0:
                 buffer = slice_along_axis(buffer, slice(n_skip, None), axis_idx)
-                buffer_offset = buffer_offset[n_skip:]
+                buffer_tvec = buffer_tvec[n_skip:]
                 shift_deficit -= n_skip
 
         # Prepare reusable parts of output
