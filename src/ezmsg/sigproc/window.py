@@ -254,6 +254,7 @@ class WindowSettings(ez.Settings):
     window_dur: float | None = None  # Sec. passthrough if None
     window_shift: float | None = None  # Sec. Use "1:1 mode" if None
     zero_pad_until: str = "full"  # "full", "shift", "input", "none"
+    anchor: str | Anchor = Anchor.BEGINNING
 
 
 class WindowState(ez.State):
@@ -276,6 +277,7 @@ class Window(GenAxisArray):
             window_dur=self.SETTINGS.window_dur,
             window_shift=self.SETTINGS.window_shift,
             zero_pad_until=self.SETTINGS.zero_pad_until,
+            anchor=self.SETTINGS.anchor,
         )
 
     @ez.subscriber(INPUT_SIGNAL, zero_copy=True)
@@ -294,10 +296,7 @@ class Window(GenAxisArray):
                     # We need to split out_msg into multiple yields, dropping newaxis.
                     axis_idx = out_msg.get_axis_idx("win")
                     win_axis = out_msg.axes["win"]
-                    offsets = (
-                        np.arange(out_msg.data.shape[axis_idx]) * win_axis.gain
-                        + win_axis.offset
-                    )
+                    offsets = win_axis.value(np.arange(out_msg.data.shape[axis_idx]))
                     for msg_ix in range(out_msg.data.shape[axis_idx]):
                         # Need to drop 'win' and replace self.SETTINGS.axis from axes.
                         _out_axes = {
