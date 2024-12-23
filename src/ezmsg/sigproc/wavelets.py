@@ -171,11 +171,11 @@ class CWTSettings(ez.Settings):
     Settings for :obj:`CWT`
     See :obj:`cwt` for argument details.
     """
-
-    scales: list | tuple | npt.NDArray
+    frequencies: list | tuple | npt.NDArray | None
     wavelet: str | pywt.ContinuousWavelet | pywt.Wavelet
     min_phase: MinPhaseMode = MinPhaseMode.NONE
     axis: str = "time"
+    scales: list | tuple | npt.NDArray | None = None
 
 
 class CWT(GenAxisArray):
@@ -187,8 +187,9 @@ class CWT(GenAxisArray):
 
     def construct_generator(self):
         self.STATE.gen = cwt(
-            scales=self.SETTINGS.scales,
+            frequencies=self.SETTINGS.frequencies,
             wavelet=self.SETTINGS.wavelet,
             min_phase=self.SETTINGS.min_phase,
             axis=self.SETTINGS.axis,
+            scales=self.SETTINGS.scales,
         )
