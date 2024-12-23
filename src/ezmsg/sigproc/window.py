@@ -1,3 +1,4 @@
+import enum
 import traceback
 import typing
 
@@ -17,6 +18,12 @@ from .base import GenAxisArray
 from .util.sparse import sliding_win_oneaxis as sparse_sliding_win_oneaxis
 
 
+class Anchor(enum.Enum):
+    BEGINNING = "beginning"
+    END = "end"
+    MIDDLE = "middle"
+
+
 @consumer
 def windowing(
     axis: str | None = None,
@@ -24,6 +31,7 @@ def windowing(
     window_dur: float | None = None,
     window_shift: float | None = None,
     zero_pad_until: str = "input",
+    anchor: str | Anchor = Anchor.BEGINNING,
 ) -> typing.Generator[AxisArray, AxisArray, None]:
     """
     Apply a sliding window along the specified axis to input streaming data.
@@ -51,6 +59,8 @@ def windowing(
             - "shift" fills the buffer until `window_shift`.
               No outputs will be yielded until at least `window_shift` data has been seen.
             - "none" does not pad the buffer. No outputs will be yielded until at least `window_dur` data has been seen.
+        anchor: Determines the entry in `axis` that gets assigned `0`, which references the
+            value in `newaxis`. Can be of class :obj:`Anchor` or a string representation of an :obj:`Anchor`.
 
     Returns:
         A primed generator that accepts an :obj:`AxisArray` via `.send(axis_array)`
@@ -71,6 +81,11 @@ def windowing(
             "windowing is non-deterministic with `zero_pad_until='input'` as it depends on the size "
             "of the first input. We recommend using 'shift' when `window_shift` is float-valued."
         )
+    try:
+        anchor = Anchor(anchor)
+    except ValueError:
+        raise ValueError(f"Invalid anchor: {anchor}. Valid anchor are: {', '.join([e.value for e in Anchor])}")
+
     msg_out = AxisArray(np.array([]), dims=[""])
 
     # State variables
@@ -157,7 +172,7 @@ def windowing(
 
         # Create a vector of buffer timestamps to track axis `offset` in output(s)
         buffer_tvec = np.arange(buffer.shape[axis_idx]).astype(float)
-        # Adjust so first _new_ sample at index 0. TODO: anchor?
+        # Adjust so first _new_ sample at index 0.
         buffer_tvec -= buffer_tvec[-msg_in.data.shape[axis_idx]]
         # Convert form indices to 'units' (probably seconds).
         buffer_tvec *= axis_info.gain
@@ -184,8 +199,12 @@ def windowing(
         out_axes = {k: v for k, v in msg_in.axes.items() if k not in [newaxis, axis]}
 
         # Update targeted (windowed) axis so that its offset is relative to the new axis
-        # TODO: If we have `anchor_newest=True` then offset should be -win_dur
-        out_axes[axis] = replace(axis_info, offset=0.0)
+        if anchor == Anchor.BEGINNING:
+            out_axes[axis] = replace(axis_info, offset=0.0)
+        elif anchor == Anchor.END:
+            out_axes[axis] = replace(axis_info, offset=-window_dur)
+        elif anchor == Anchor.MIDDLE:
+            out_axes[axis] = replace(axis_info, offset=-window_dur / 2)
 
         # How we update .data and .axes[newaxis] depends on the windowing mode.
         if b_1to1:
@@ -194,14 +213,14 @@ def windowing(
             out_dat = buffer.reshape(
                 buffer.shape[:axis_idx] + (1,) + buffer.shape[axis_idx:]
             )
-            out_newaxis = replace(out_newaxis, offset=buffer_offset[-window_samples])
+            win_offset = buffer_tvec[-window_samples]
         elif buffer.shape[axis_idx] >= window_samples:
             # Deterministic window shifts.
             out_dat = sliding_win_fun(buffer, window_samples, axis_idx, step=window_shift_samples)
-            offset_view = sliding_win_oneaxis(buffer_offset, window_samples, 0)[
+            offset_view = sliding_win_oneaxis(buffer_tvec, window_samples, 0)[
                 ::window_shift_samples
             ]
-            out_newaxis = replace(out_newaxis, offset=offset_view[0, 0])
+            win_offset = offset_view[0, 0]
 
             # Drop expired beginning of buffer and update shift_deficit
             multi_shift = window_shift_samples * out_dat.shape[axis_idx]
@@ -216,7 +235,13 @@ def windowing(
             )
             out_dat = np.zeros(empty_data_shape, dtype=msg_in.data.dtype)
             # out_newaxis will have first timestamp in input... but mostly meaningless because output is size-zero.
-            out_newaxis = replace(out_newaxis, offset=axis_info.offset)
+            win_offset = axis_info.offset
+
+        if anchor == Anchor.END:
+            win_offset += window_dur
+        elif anchor == Anchor.MIDDLE:
+            win_offset += window_dur / 2
+        out_newaxis = replace(out_newaxis, offset=win_offset)
 
         msg_out = replace(
             msg_in, data=out_dat, dims=out_dims, axes={**out_axes, newaxis: out_newaxis}

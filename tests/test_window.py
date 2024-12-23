@@ -28,6 +28,7 @@ def calculate_expected_results(
     fs,
     win_shift,
     zero_pad,
+    anchor,
     msg_block_size,
     shift_len,
     win_len,
@@ -71,6 +72,12 @@ def calculate_expected_results(
     else:
         expected = expected[:, ::shift_len]
         tvec = tvec[::shift_len, 0]
+
+    if anchor == "middle":
+        tvec = tvec + win_len / (2 * fs)
+    elif anchor == "end":
+        tvec = tvec + win_len / fs
+
     # Transpose to put time_ax and win_ax in the correct locations.
     if win_ax == 0:
         expected = np.moveaxis(expected, 0, -1)
@@ -112,6 +119,7 @@ def test_window_gen_nodur():
 @pytest.mark.parametrize("win_shift", [None, 0.2, 1.0])
 @pytest.mark.parametrize("zero_pad", ["input", "shift", "none"])
 @pytest.mark.parametrize("fs", [10.0, 500.0])
+@pytest.mark.parametrize("anchor", ["beginning", "middle", "end"])
 @pytest.mark.parametrize("time_ax", [0, 1])
 def test_window_generator(
     msg_block_size: int,
@@ -120,6 +128,7 @@ def test_window_generator(
     win_shift: float | None,
     zero_pad: str,
     fs: float,
+    anchor: str,
     time_ax: int,
 ):
     nchans = 3
@@ -142,6 +151,7 @@ def test_window_generator(
         window_dur=win_dur,
         window_shift=win_shift,
         zero_pad_until=zero_pad,
+        anchor=anchor
     )
 
     # Create inputs and send them to the generator, collecting the results along the way.
@@ -212,6 +222,7 @@ def test_window_generator(
         fs,
         win_shift,
         zero_pad,
+        anchor,
         msg_block_size,
         shift_len,
         win_len,
@@ -431,6 +442,7 @@ def test_window_system(
         fs,
         win_shift,
         zero_pad,
+        "beginning",
         msg_block_size,
         shift_len,
         win_len,
