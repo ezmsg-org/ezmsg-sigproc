@@ -4,6 +4,7 @@ import typing
 import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
+import sparse
 from ezmsg.util.messages.axisarray import (
     AxisArray,
     slice_along_axis,
@@ -13,6 +14,7 @@ from ezmsg.util.messages.axisarray import (
 from ezmsg.util.generator import consumer
 
 from .base import GenAxisArray
+from .util.sparse import sliding_win_oneaxis as sparse_sliding_win_oneaxis
 
 
 @consumer
@@ -72,7 +74,7 @@ def windowing(
     msg_out = AxisArray(np.array([]), dims=[""])
 
     # State variables
-    buffer: npt.NDArray | None = None
+    buffer: npt.NDArray | sparse.SparseArray | None = None
     window_samples: int | None = None
     window_shift_samples: int | None = None
     # Number of incoming samples to ignore. Only relevant when shift > window.:
@@ -83,6 +85,8 @@ def windowing(
     out_dims: list[str] | None = None
 
     check_inputs = {"samp_shape": None, "fs": None, "key": None}
+    concat_fun = np.concatenate
+    sliding_win_fun = sliding_win_oneaxis
 
     while True:
         msg_in: AxisArray = yield msg_out
@@ -116,6 +120,15 @@ def windowing(
             check_inputs["fs"] = fs
             check_inputs["key"] = msg_in.key
 
+            if isinstance(msg_in.data, sparse.SparseArray):
+                concat_fun = sparse.concatenate
+                sliding_win_fun = sparse_sliding_win_oneaxis
+                zero_fun = sparse.zeros
+            else:
+                concat_fun = np.concatenate
+                sliding_win_fun = sliding_win_oneaxis  # Requires updated signature in ezmsg dev.
+                zero_fun = np.zeros
+
             window_samples = int(window_dur * fs)
             if not b_1to1:
                 window_shift_samples = int(window_shift * fs)
@@ -131,7 +144,7 @@ def windowing(
                 + (n_zero,)
                 + msg_in.data.shape[axis_idx + 1 :]
             )
-            buffer = np.zeros(init_buffer_shape, dtype=msg_in.data.dtype)
+            buffer = zero_fun(init_buffer_shape, dtype=msg_in.data.dtype)
 
         # Add new data to buffer.
         # Currently, we concatenate the new time samples and clip the output.
@@ -140,7 +153,7 @@ def windowing(
         # is generally faster than np.roll and slicing anyway, but this could still
         # be a performance bottleneck for large memory arrays.
         # A circular buffer might be faster.
-        buffer = np.concatenate((buffer, msg_in.data), axis=axis_idx)
+        buffer = concat_fun((buffer, msg_in.data), axis=axis_idx)
 
         # Create a vector of buffer timestamps to track axis `offset` in output(s)
         buffer_offset = np.arange(buffer.shape[axis_idx]).astype(float)
@@ -184,12 +197,7 @@ def windowing(
             out_newaxis = replace(out_newaxis, offset=buffer_offset[-window_samples])
         elif buffer.shape[axis_idx] >= window_samples:
             # Deterministic window shifts.
-            # Note: After https://github.com/ezmsg-org/ezmsg/pull/152, add `window_shift_samples` as the last arg
-            #  to `sliding_win_oneaxis` and remove the call to `slice_along_axis`.
-            out_dat = sliding_win_oneaxis(buffer, window_samples, axis_idx)
-            out_dat = slice_along_axis(
-                out_dat, slice(None, None, window_shift_samples), axis_idx
-            )
+            out_dat = sliding_win_fun(buffer, window_samples, axis_idx, step=window_shift_samples)
             offset_view = sliding_win_oneaxis(buffer_offset, window_samples, 0)[
                 ::window_shift_samples
             ]
