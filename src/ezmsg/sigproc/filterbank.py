@@ -214,7 +214,8 @@ def filterbank(
                 pad = np.zeros(dest_arr.shape[:-1] + (n_dest - dest_arr.shape[-1],))
                 dest_arr = np.concatenate(dest_arr, pad, axis=-1)
             dest_arr.fill(0)
-            # TODO: Parallelize this loop.
+            # Note: I tried several alternatives to this loop; all were slower than this.
+            #  numba.jit; stride_tricks + np.einsum; threading. Latter might be better with Python 3.13.
             for k_ix, k in enumerate(kernels):
                 n_out = in_dat.shape[-1] + k.shape[-1] - 1
                 dest_arr[..., k_ix, :n_out] = np.apply_along_axis(
