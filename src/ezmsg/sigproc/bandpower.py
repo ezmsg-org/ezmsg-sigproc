@@ -35,6 +35,7 @@ def bandpower(
     f_spec = spectrogram(
         window_dur=spectrogram_settings.window_dur,
         window_shift=spectrogram_settings.window_shift,
+        window_anchor=spectrogram_settings.window_anchor,
         window=spectrogram_settings.window,
         transform=spectrogram_settings.transform,
         output=spectrogram_settings.output,
