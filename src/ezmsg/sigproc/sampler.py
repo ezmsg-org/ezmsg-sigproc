@@ -14,6 +14,8 @@ from ezmsg.util.messages.axisarray import (
 from ezmsg.util.messages.util import replace
 from ezmsg.util.generator import consumer
 
+from .util.profile import profile_subpub
+
 
 @dataclass(unsafe_hash=True)
 class SampleTriggerMessage:
@@ -284,6 +286,7 @@ class Sampler(ez.Unit):
 
     @ez.subscriber(INPUT_SIGNAL, zero_copy=True)
     @ez.publisher(OUTPUT_SAMPLE)
+    @profile_subpub(trace_oldest=False)
     async def on_signal(self, msg: AxisArray) -> typing.AsyncGenerator:
         pub_samples = self.STATE.gen.send(msg)
         for sample in pub_samples:
