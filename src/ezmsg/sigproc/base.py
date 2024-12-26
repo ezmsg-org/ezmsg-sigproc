@@ -6,6 +6,8 @@ import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.generator import GenState
 
+from .util.profile import profile_subpub
+
 
 class GenAxisArray(ez.Unit):
     STATE = GenState
@@ -28,6 +30,7 @@ class GenAxisArray(ez.Unit):
 
     @ez.subscriber(INPUT_SIGNAL, zero_copy=True)
     @ez.publisher(OUTPUT_SIGNAL)
+    @profile_subpub(trace_oldest=False)
     async def on_signal(self, message: AxisArray) -> typing.AsyncGenerator:
         try:
             ret = self.STATE.gen.send(message)
