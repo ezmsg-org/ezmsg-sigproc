@@ -6,6 +6,8 @@ from ezmsg.util.messages.util import replace
 import numpy as np
 import numpy.typing as npt
 
+from .util.profile import profile_subpub
+
 
 class SignalInjectorSettings(ez.Settings):
     time_dim: str = "time"  # Input signal needs a time dimension with units in sec.
@@ -50,6 +52,7 @@ class SignalInjector(ez.Unit):
 
     @ez.subscriber(INPUT_SIGNAL)
     @ez.publisher(OUTPUT_SIGNAL)
+    @profile_subpub(trace_oldest=False)
     async def inject(self, msg: AxisArray) -> typing.AsyncGenerator:
         if self.STATE.cur_shape != msg.shape:
             self.STATE.cur_shape = msg.shape
