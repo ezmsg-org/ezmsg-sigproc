@@ -8,7 +8,7 @@ import typing
 import ezmsg.core as ez
 
 
-def _setup_logger() -> logging.Logger:
+def get_logger_path() -> Path:
     # Retrieve the logfile name from the environment variable
     logfile = os.environ.get("EZMSG_PROFILE", None)
 
@@ -19,7 +19,16 @@ def _setup_logger() -> logging.Logger:
     if not logpath.is_absolute():
         logpath = Path.home() / ".ezmsg" / "profile" / logpath
 
+    return logpath
+
+
+def _setup_logger(append: bool = False) -> logging.Logger:
+    logpath = get_logger_path()
     logpath.parent.mkdir(parents=True, exist_ok=True)
+
+    if not append:
+        # Remove the file if it exists
+        logpath.unlink(missing_ok=True)
 
     # Create a logger with the name "ezprofile"
     _logger = logging.getLogger("ezprofile")
