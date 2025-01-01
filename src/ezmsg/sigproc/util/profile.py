@@ -33,22 +33,30 @@ def _setup_logger(append: bool = False) -> logging.Logger:
     # Create a logger with the name "ezprofile"
     _logger = logging.getLogger("ezprofile")
 
+    # Set the logger's level to EZMSG_LOGLEVEL env var value if it exists, otherwise INFO
+    _logger.setLevel(os.environ.get("EZMSG_LOGLEVEL", "INFO").upper())
+
     # Create a file handler to write log messages to the log file
     fh = logging.FileHandler(logpath)
     fh.setLevel(logging.DEBUG)  # Set the file handler log level to DEBUG
-    fh.setFormatter(logging.Formatter("%(message)s"))  # Set the log message format
 
     # Add the file handler to the logger
     _logger.addHandler(fh)
 
-    # Set the logger's level to EZMSG_LOGLEVEL env var value if it exists, otherwise INFO
-    _logger.setLevel(os.environ.get("EZMSG_LOGLEVEL", "INFO").upper())
+    # Add the first row without formatting.
+    _logger.debug(",".join(["Time", "Source", "Topic", "SampleTime", "PerfCounter", "Elapsed"]))
+
+    # Set the log message format
+    formatter = logging.Formatter(
+        "%(asctime)s,%(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S%z"
+    )
+    fh.setFormatter(formatter)
 
     return _logger
 
 
-logger = _setup_logger()
-logger.debug(",".join(["Source", "Topic", "SampleTime", "PerfCounter", "Elapsed"]))
+logger = _setup_logger(append=True)
 
 
 def _process_obj(obj, trace_oldest: bool = True):
