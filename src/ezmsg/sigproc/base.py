@@ -16,7 +16,7 @@ MessageType = typing.TypeVar("MessageType")
 StateType = typing.TypeVar("StateType", bound=ez.State)
 
 
-class SignalTransformer(typing.Protocol[StateType, MessageType, SettingsType]):
+class SignalTransformer(typing.Protocol[StateType, SettingsType, MessageType]):
     def check_metadata(self, message: MessageType) -> bool: ...
 
     def reset(self, message: MessageType) -> None: ...
@@ -35,7 +35,7 @@ class SignalTransformer(typing.Protocol[StateType, MessageType, SettingsType]):
     def stateful_op(state: StateType, message: MessageType) -> tuple[StateType, MessageType]: ...
 
 
-class BaseSignalTransformer(ABC, typing.Generic[StateType, MessageType, SettingsType]):
+class BaseSignalTransformer(ABC, typing.Generic[StateType, SettingsType, MessageType]):
     """
     Abstract base class implementing common transformer functionality.
 
@@ -83,7 +83,7 @@ class BaseSignalTransformer(ABC, typing.Generic[StateType, MessageType, Settings
         return self.state, result
 
 
-class BaseSignalTransformerUnit(ez.Unit, typing.Generic[StateType, MessageType, SettingsType]):
+class BaseSignalTransformerUnit(ez.Unit, typing.Generic[StateType, SettingsType, MessageType]):
     """
     Implement a new Unit as follows:
 
@@ -105,12 +105,12 @@ class BaseSignalTransformerUnit(ez.Unit, typing.Generic[StateType, MessageType, 
     INPUT_SETTINGS = ez.InputStream(SettingsType)
 
     # Class variable that concrete classes will override
-    transformer_type: typing.Type[SignalTransformer[StateType, MessageType, SettingsType]]
+    transformer_type: typing.Type[SignalTransformer[StateType, SettingsType, MessageType]]
 
     async def initialize(self) -> None:
         self.transformer = self.create_transformer()
 
-    def create_transformer(self) -> SignalTransformer[StateType, MessageType, SettingsType]:
+    def create_transformer(self) -> SignalTransformer[StateType, SettingsType, MessageType]:
         """Create the transformer instance from settings."""
         # return self.transformer_type(**dataclasses.asdict(self.SETTINGS))
         return self.transformer_type(settings=self.SETTINGS)
