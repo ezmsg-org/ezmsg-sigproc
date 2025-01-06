@@ -8,6 +8,7 @@ from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.generator import GenState
 
 from .util.profile import profile_subpub
+from .sampler import SampleMessage
 
 
 # Type variables
@@ -136,6 +137,37 @@ class BaseSignalTransformerUnit(ez.Unit, typing.Generic[StateType, SettingsType,
                 yield self.OUTPUT_SIGNAL, ret
         except Exception:
             ez.logger.info(traceback.format_exc())
+
+
+class AdaptiveSignalTransformer(SignalTransformer, typing.Protocol):
+    def partial_fit(self, message: SampleMessage) -> None:
+        """Update transformer state using labeled training data.
+
+        This method should update the internal state/parameters of the transformer
+        based on the provided labeled samples, without performing any transformation.
+        """
+        ...
+
+
+class BaseAdaptiveSignalTransformer(BaseSignalTransformer, ABC, typing.Generic[StateType, SettingsType, MessageType]):
+    def send(self, message: MessageType | SampleMessage) -> MessageType:
+        if hasattr(message, "trigger"):  # SampleMessage
+            # y = message.trigger.value.data
+            # X = message.sample.data
+            self.partial_fit(message)
+            message = message.sample
+            # TODO: Slice message so it is empty.
+        return self.transform(message)
+
+
+class BaseAdaptiveSignalTransformerUnit(BaseSignalTransformerUnit, typing.Generic[StateType, SettingsType, MessageType]):
+    INPUT_SAMPLE = ez.InputStream(SampleMessage)
+
+    transformer_type: typing.Type[AdaptiveSignalTransformer[StateType, SettingsType, MessageType]]
+
+    @ez.subscriber(INPUT_SAMPLE)
+    async def on_sample(self, msg: SampleMessage) -> None:
+        self.transformer.partial_fit(msg)
 
 
 class GenAxisArray(ez.Unit):
