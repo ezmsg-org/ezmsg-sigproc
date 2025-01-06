@@ -9,6 +9,7 @@ T = TypeVar("T")
 
 class CoroutineExecutionError(Exception):
     """Custom exception for coroutine execution failures"""
+
     pass
 
 
@@ -46,7 +47,9 @@ def run_coroutine_sync(coroutine: Coroutine[Any, Any, T], timeout: float = 30) -
                 pending = asyncio.all_tasks(new_loop)
                 for task in pending:
                     task.cancel()
-                new_loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                new_loop.run_until_complete(
+                    asyncio.gather(*pending, return_exceptions=True)
+                )
             new_loop.close()
 
     try:
@@ -55,7 +58,9 @@ def run_coroutine_sync(coroutine: Coroutine[Any, Any, T], timeout: float = 30) -
         try:
             return asyncio.run(asyncio.wait_for(coroutine, timeout=timeout))
         except Exception as e:
-            raise CoroutineExecutionError(f"Failed to execute coroutine: {str(e)}") from e
+            raise CoroutineExecutionError(
+                f"Failed to execute coroutine: {str(e)}"
+            ) from e
 
     if threading.current_thread() is threading.main_thread():
         if not loop.is_running():
@@ -64,17 +69,23 @@ def run_coroutine_sync(coroutine: Coroutine[Any, Any, T], timeout: float = 30) -
                     asyncio.wait_for(coroutine, timeout=timeout)
                 )
             except Exception as e:
-                raise CoroutineExecutionError(f"Failed to execute coroutine in main loop: {str(e)}") from e
+                raise CoroutineExecutionError(
+                    f"Failed to execute coroutine in main loop: {str(e)}"
+                ) from e
         else:
             with ThreadPoolExecutor() as pool:
                 try:
                     future = pool.submit(run_in_new_loop)
                     return future.result(timeout=timeout)
                 except Exception as e:
-                    raise CoroutineExecutionError(f"Failed to execute coroutine in thread: {str(e)}") from e
+                    raise CoroutineExecutionError(
+                        f"Failed to execute coroutine in thread: {str(e)}"
+                    ) from e
     else:
         try:
             future = asyncio.run_coroutine_threadsafe(coroutine, loop)
             return future.result(timeout=timeout)
         except Exception as e:
-            raise CoroutineExecutionError(f"Failed to execute coroutine threadsafe: {str(e)}") from e
+            raise CoroutineExecutionError(
+                f"Failed to execute coroutine threadsafe: {str(e)}"
+            ) from e

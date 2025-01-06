@@ -35,17 +35,22 @@ class DownsampleState(ez.State):
     hash: int = 0
 
 
-class DownsampleTransformer(BaseSignalTransformer[DownsampleState, DownsampleSettings, AxisArray]):
+class DownsampleTransformer(
+    BaseSignalTransformer[DownsampleState, DownsampleSettings, AxisArray]
+):
     """
     Downsampled data simply comprise every `factor`th sample.
     This should only be used following appropriate lowpass filtering.
     If your pipeline does not already have lowpass filtering then consider
     using the :obj:`Decimate` collection instead.
     """
+
     state_type = DownsampleState
 
     def check_metadata(self, message: AxisArray) -> bool:
-        return self.state.hash != hash((message.axes[self.settings.axis].gain, message.key))
+        return self.state.hash != hash(
+            (message.axes[self.settings.axis].gain, message.key)
+        )
 
     def reset(self, message: AxisArray) -> None:
         axis_info = message.get_axis(self.settings.axis)
@@ -72,7 +77,9 @@ class DownsampleTransformer(BaseSignalTransformer[DownsampleState, DownsampleSet
         axis_idx = message.get_axis_idx(axis)
 
         n_samples = message.data.shape[axis_idx]
-        samples = np.arange(self._state.s_idx, self.state.s_idx + n_samples) % self._state.q
+        samples = (
+                np.arange(self.state.s_idx, self.state.s_idx + n_samples)
+                % self._state.q)
         if n_samples > 0:
             # Update state for next iteration.
             self._state.s_idx = samples[-1] + 1
@@ -99,7 +106,9 @@ class DownsampleTransformer(BaseSignalTransformer[DownsampleState, DownsampleSet
         return msg_out
 
 
-class Downsample(BaseSignalTransformerUnit[DownsampleState, DownsampleSettings, AxisArray]):
+class Downsample(
+    BaseSignalTransformerUnit[DownsampleState, DownsampleSettings, AxisArray]
+):
     SETTINGS = DownsampleSettings
     transformer_type = DownsampleTransformer
 
