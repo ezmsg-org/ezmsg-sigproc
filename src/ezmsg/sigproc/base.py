@@ -34,7 +34,9 @@ class SignalTransformer(typing.Protocol[StateType, SettingsType, MessageType]):
     def transform(self, message: MessageType) -> MessageType: ...
 
     @staticmethod
-    def stateful_op(state: StateType, message: MessageType) -> tuple[StateType, MessageType]: ...
+    def stateful_op(
+        state: StateType, message: MessageType
+    ) -> tuple[StateType, MessageType]: ...
 
 
 class BaseSignalTransformer(ABC, typing.Generic[StateType, SettingsType, MessageType]):
@@ -53,12 +55,10 @@ class BaseSignalTransformer(ABC, typing.Generic[StateType, SettingsType, Message
         self._state: StateType = self.state_type()
 
     @abstractmethod
-    def check_metadata(self, message: MessageType) -> bool:
-        ...
+    def check_metadata(self, message: MessageType) -> bool: ...
 
     @abstractmethod
-    def reset(self, message: MessageType) -> None:
-        ...
+    def reset(self, message: MessageType) -> None: ...
 
     @property
     def state(self) -> StateType:
@@ -70,8 +70,7 @@ class BaseSignalTransformer(ABC, typing.Generic[StateType, SettingsType, Message
             self._state = state
 
     @abstractmethod
-    def _process(self, message: MessageType) -> MessageType:
-        ...
+    def _process(self, message: MessageType) -> MessageType: ...
 
     def transform(self, message: MessageType) -> MessageType:
         if self.check_metadata(message):
@@ -79,7 +78,9 @@ class BaseSignalTransformer(ABC, typing.Generic[StateType, SettingsType, Message
 
         return self._process(message)
 
-    def stateful_op(self, state: StateType, message: MessageType) -> tuple[StateType, MessageType]:
+    def stateful_op(
+        self, state: StateType, message: MessageType
+    ) -> tuple[StateType, MessageType]:
         self.state = state
         result = self.transform(message)
         return self.state, result
@@ -92,7 +93,9 @@ class BaseSignalTransformer(ABC, typing.Generic[StateType, SettingsType, Message
         return self.transform(message)
 
 
-class BaseSignalTransformerUnit(ez.Unit, typing.Generic[StateType, SettingsType, MessageType]):
+class BaseSignalTransformerUnit(
+    ez.Unit, typing.Generic[StateType, SettingsType, MessageType]
+):
     """
     Implement a new Unit as follows:
 
@@ -109,17 +112,22 @@ class BaseSignalTransformerUnit(ez.Unit, typing.Generic[StateType, SettingsType,
     Where CustomTransformerState, CustomTransformerSettings, and CustomTransformer
     are custom implementations of ez.State, ez.Settings, and BaseSignalTransformer, respectively.
     """
+
     INPUT_SIGNAL = ez.InputStream(MessageType)
     OUTPUT_SIGNAL = ez.OutputStream(MessageType)
     INPUT_SETTINGS = ez.InputStream(SettingsType)
 
     # Class variable that concrete classes will override
-    transformer_type: typing.Type[SignalTransformer[StateType, SettingsType, MessageType]]
+    transformer_type: typing.Type[
+        SignalTransformer[StateType, SettingsType, MessageType]
+    ]
 
     async def initialize(self) -> None:
         self.transformer = self.create_transformer()
 
-    def create_transformer(self) -> SignalTransformer[StateType, SettingsType, MessageType]:
+    def create_transformer(
+        self,
+    ) -> SignalTransformer[StateType, SettingsType, MessageType]:
         """Create the transformer instance from settings."""
         # return self.transformer_type(**dataclasses.asdict(self.SETTINGS))
         return self.transformer_type(settings=self.SETTINGS)
@@ -150,7 +158,9 @@ class AdaptiveSignalTransformer(SignalTransformer, typing.Protocol):
         ...
 
 
-class BaseAdaptiveSignalTransformer(BaseSignalTransformer, ABC, typing.Generic[StateType, SettingsType, MessageType]):
+class BaseAdaptiveSignalTransformer(
+    BaseSignalTransformer, ABC, typing.Generic[StateType, SettingsType, MessageType]
+):
     def send(self, message: MessageType | SampleMessage) -> MessageType:
         if hasattr(message, "trigger"):  # SampleMessage
             # y = message.trigger.value.data
@@ -161,10 +171,14 @@ class BaseAdaptiveSignalTransformer(BaseSignalTransformer, ABC, typing.Generic[S
         return self.transform(message)
 
 
-class BaseAdaptiveSignalTransformerUnit(BaseSignalTransformerUnit, typing.Generic[StateType, SettingsType, MessageType]):
+class BaseAdaptiveSignalTransformerUnit(
+    BaseSignalTransformerUnit, typing.Generic[StateType, SettingsType, MessageType]
+):
     INPUT_SAMPLE = ez.InputStream(SampleMessage)
 
-    transformer_type: typing.Type[AdaptiveSignalTransformer[StateType, SettingsType, MessageType]]
+    transformer_type: typing.Type[
+        AdaptiveSignalTransformer[StateType, SettingsType, MessageType]
+    ]
 
     @ez.subscriber(INPUT_SAMPLE)
     async def on_sample(self, msg: SampleMessage) -> None:
@@ -172,14 +186,14 @@ class BaseAdaptiveSignalTransformerUnit(BaseSignalTransformerUnit, typing.Generi
 
 
 class AsyncSignalTransformer(SignalTransformer, typing.Protocol):
-
     async def _aprocess(self, message: MessageType) -> MessageType: ...
 
     async def atransform(self, message: MessageType) -> MessageType: ...
 
 
-class BaseAsyncSignalTransformer(BaseSignalTransformer, ABC, typing.Generic[StateType, SettingsType, MessageType]):
-
+class BaseAsyncSignalTransformer(
+    BaseSignalTransformer, ABC, typing.Generic[StateType, SettingsType, MessageType]
+):
     def process(self, message: MessageType) -> MessageType:
         return run_coroutine_sync(self._aprocess(message))
 
@@ -195,10 +209,14 @@ class BaseAsyncSignalTransformer(BaseSignalTransformer, ABC, typing.Generic[Stat
         return await self.atransform(message)
 
 
-class BaseAsyncSignalTransformerUnit(BaseSignalTransformerUnit, typing.Generic[StateType, SettingsType, MessageType]):
+class BaseAsyncSignalTransformerUnit(
+    BaseSignalTransformerUnit, typing.Generic[StateType, SettingsType, MessageType]
+):
     INPUT_SIGNAL = ez.InputStream(MessageType)
     OUTPUT_SIGNAL = ez.OutputStream(MessageType)
-    transformer_type: typing.Type[AsyncSignalTransformer[StateType, SettingsType, MessageType]]
+    transformer_type: typing.Type[
+        AsyncSignalTransformer[StateType, SettingsType, MessageType]
+    ]
 
     @ez.subscriber(INPUT_SIGNAL, zero_copy=True)
     @ez.publisher(OUTPUT_SIGNAL)
