@@ -82,6 +82,13 @@ class BaseSignalTransformer(ABC, typing.Generic[StateType, SettingsType, Message
         result = self.transform(message)
         return self.state, result
 
+    def __iter__(self):
+        self._state: StateType = self.state_type()
+        return self
+
+    def send(self, message: MessageType) -> MessageType:
+        return self.transform(message)
+
 
 class BaseSignalTransformerUnit(ez.Unit, typing.Generic[StateType, SettingsType, MessageType]):
     """

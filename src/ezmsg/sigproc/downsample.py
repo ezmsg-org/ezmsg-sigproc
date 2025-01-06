@@ -1,12 +1,9 @@
-import typing
-
 import numpy as np
 from ezmsg.util.messages.axisarray import (
     AxisArray,
     slice_along_axis,
     replace,
 )
-from ezmsg.util.generator import consumer
 import ezmsg.core as ez
 
 from .base import BaseSignalTransformer, BaseSignalTransformerUnit
@@ -15,7 +12,12 @@ from .base import BaseSignalTransformer, BaseSignalTransformerUnit
 class DownsampleSettings(ez.Settings):
     """
     Settings for :obj:`Downsample` node.
-    See :obj:`downsample` documentation for a description of the parameters.
+
+    Fields:
+        axis: The name of the axis along which to downsample.
+            Note: The axis must exist in the message .axes and be of type AxisArray.LinearAxis.
+        target_rate: Desired rate after downsampling. The actual rate will be the nearest integer factor of the
+            input rate that is the same or higher than the target rate.
     """
     axis: str = "time"
     target_rate: float | None = None
@@ -33,23 +35,10 @@ class DownsampleState(ez.State):
 
 class DownsampleTransformer(BaseSignalTransformer[DownsampleState, DownsampleSettings, AxisArray]):
     """
-    Construct a generator that yields a downsampled version of the data .send() to it.
     Downsampled data simply comprise every `factor`th sample.
     This should only be used following appropriate lowpass filtering.
     If your pipeline does not already have lowpass filtering then consider
     using the :obj:`Decimate` collection instead.
-
-    Args:
-        axis: The name of the axis along which to downsample.
-            Note: The axis must exist in the message .axes and be of type AxisArray.LinearAxis.
-        target_rate: Desired rate after downsampling. The actual rate will be the nearest integer factor of the
-            input rate that is the same or higher than the target rate.
-
-    Returns:
-        A primed generator object ready to receive an :obj:`AxisArray` via `.send(axis_array)`
-        and yields an :obj:`AxisArray` with its data downsampled.
-        Note that if a send chunk does not have sufficient samples to reach the
-        next downsample interval then an :obj:`AxisArray` with size-zero data is yielded.
     """
     state_type = DownsampleState
 
@@ -111,37 +100,7 @@ class Downsample(BaseSignalTransformerUnit[DownsampleState, DownsampleSettings, 
     transformer_type = DownsampleTransformer
 
 
-# TODO: downsample = lambda axis=None, target_rate=None: iter(DownsampleTransformer(DownsampleSettings(axis=axis, target_rate=target_rate)))
-#  This will require __iter__ and send methods on BaseSignalTransformer
-
-@consumer
 def downsample(
-    axis: str | None = None, target_rate: float | None = None
-) -> typing.Generator[AxisArray, AxisArray, None]:
-    """
-    Construct a generator that yields a downsampled version of the data .send() to it.
-    Downsampled data simply comprise every `factor`th sample.
-    This should only be used following appropriate lowpass filtering.
-    If your pipeline does not already have lowpass filtering then consider
-    using the :obj:`Decimate` collection instead.
-
-    Args:
-        axis: The name of the axis along which to downsample.
-            Note: The axis must exist in the message .axes and be of type AxisArray.LinearAxis.
-        target_rate: Desired rate after downsampling. The actual rate will be the nearest integer factor of the
-            input rate that is the same or higher than the target rate.
-
-    Returns:
-        A primed generator object ready to receive an :obj:`AxisArray` via `.send(axis_array)`
-        and yields an :obj:`AxisArray` with its data downsampled.
-        Note that if a send chunk does not have sufficient samples to reach the
-        next downsample interval then an :obj:`AxisArray` with size-zero data is yielded.
-
-    """
-    msg_out = AxisArray(np.array([]), dims=[""])
-
-    _tx = DownsampleTransformer(DownsampleSettings(axis=axis, target_rate=target_rate))
-
-    while True:
-        msg_in: AxisArray = yield msg_out
-        msg_out = _tx.transform(msg_in)
+    axis: str = "time", target_rate: float | None = None
+) -> DownsampleTransformer:
+    return DownsampleTransformer(DownsampleSettings(axis=axis, target_rate=target_rate))
