@@ -9,6 +9,7 @@ from ezmsg.util.generator import GenState
 
 from .util.profile import profile_subpub
 from .sampler import SampleMessage
+from .util.asio import run_coroutine_sync
 
 
 # Type variables
@@ -168,6 +169,46 @@ class BaseAdaptiveSignalTransformerUnit(BaseSignalTransformerUnit, typing.Generi
     @ez.subscriber(INPUT_SAMPLE)
     async def on_sample(self, msg: SampleMessage) -> None:
         self.transformer.partial_fit(msg)
+
+
+class AsyncSignalTransformer(SignalTransformer, typing.Protocol):
+
+    async def _aprocess(self, message: MessageType) -> MessageType: ...
+
+    async def atransform(self, message: MessageType) -> MessageType: ...
+
+
+class BaseAsyncSignalTransformer(BaseSignalTransformer, ABC, typing.Generic[StateType, SettingsType, MessageType]):
+
+    def process(self, message: MessageType) -> MessageType:
+        return run_coroutine_sync(self._aprocess(message))
+
+    @abstractmethod
+    async def _aprocess(self, message: MessageType) -> MessageType: ...
+
+    async def atransform(self, message: MessageType) -> MessageType:
+        if self.check_metadata(message):
+            self.reset(message)
+        return await self._aprocess(message)
+
+    async def asend(self, message: MessageType) -> MessageType:
+        return await self.atransform(message)
+
+
+class BaseAsyncSignalTransformerUnit(BaseSignalTransformerUnit, typing.Generic[StateType, SettingsType, MessageType]):
+    INPUT_SIGNAL = ez.InputStream(MessageType)
+    OUTPUT_SIGNAL = ez.OutputStream(MessageType)
+    transformer_type: typing.Type[AsyncSignalTransformer[StateType, SettingsType, MessageType]]
+
+    @ez.subscriber(INPUT_SIGNAL, zero_copy=True)
+    @ez.publisher(OUTPUT_SIGNAL)
+    async def on_signal(self, message: MessageType) -> typing.AsyncGenerator:
+        try:
+            ret = await self.transformer.atransform(message)
+            if math.prod(ret.data.shape) > 0:
+                yield self.OUTPUT_SIGNAL, ret
+        except Exception:
+            ez.logger.info(traceback.format_exc())
 
 
 class GenAxisArray(ez.Unit):
