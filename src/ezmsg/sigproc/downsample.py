@@ -31,7 +31,7 @@ class DownsampleState(ez.State):
     hash: int = 0
 
 
-class DownsampleTransformer(BaseSignalTransformer[DownsampleState, AxisArray, DownsampleSettings]):
+class DownsampleTransformer(BaseSignalTransformer[DownsampleState, DownsampleSettings, AxisArray]):
     """
     Construct a generator that yields a downsampled version of the data .send() to it.
     Downsampled data simply comprise every `factor`th sample.
