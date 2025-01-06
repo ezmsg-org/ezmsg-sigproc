@@ -148,7 +148,9 @@ class BaseSignalTransformerUnit(
             ez.logger.info(traceback.format_exc())
 
 
-class AdaptiveSignalTransformer(SignalTransformer, typing.Protocol):
+class AdaptiveSignalTransformer(
+    SignalTransformer, typing.Protocol[StateType, SettingsType, MessageType]
+):
     def partial_fit(self, message: SampleMessage) -> None:
         """Update transformer state using labeled training data.
 
@@ -185,7 +187,9 @@ class BaseAdaptiveSignalTransformerUnit(
         self.transformer.partial_fit(msg)
 
 
-class AsyncSignalTransformer(SignalTransformer, typing.Protocol):
+class AsyncSignalTransformer(
+    SignalTransformer, typing.Protocol[StateType, SettingsType, MessageType]
+):
     async def _aprocess(self, message: MessageType) -> MessageType: ...
 
     async def atransform(self, message: MessageType) -> MessageType: ...
