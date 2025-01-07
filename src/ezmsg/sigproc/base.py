@@ -18,7 +18,7 @@ MessageType = typing.TypeVar("MessageType")
 StateType = typing.TypeVar("StateType", bound=ez.State)
 
 
-class SignalTransformer(typing.Protocol[StateType, SettingsType, MessageType]):
+class StatefulProcessor(typing.Protocol[StateType, SettingsType, MessageType]):
     def check_metadata(self, message: MessageType) -> bool: ...
 
     def reset(self, message: MessageType) -> None: ...
@@ -29,17 +29,15 @@ class SignalTransformer(typing.Protocol[StateType, SettingsType, MessageType]):
     @state.setter
     def state(self, state: StateType) -> None: ...
 
-    def _process(self, message: MessageType) -> MessageType: ...
-
-    def transform(self, message: MessageType) -> MessageType: ...
+    def process(self, message: MessageType): ...
 
     @staticmethod
     def stateful_op(
         state: StateType, message: MessageType
-    ) -> tuple[StateType, MessageType]: ...
+    ) -> tuple[StateType]: ...
 
 
-class BaseSignalTransformer(ABC, typing.Generic[StateType, SettingsType, MessageType]):
+class BaseStatefulProcessor(ABC, typing.Generic[StateType, SettingsType, MessageType]):
     """
     Abstract base class implementing common transformer functionality.
 
@@ -74,35 +72,113 @@ class BaseSignalTransformer(ABC, typing.Generic[StateType, SettingsType, Message
             self._state = state
 
     @abstractmethod
-    def _process(self, message: MessageType) -> MessageType: ...
+    def _process(self, message: MessageType): ...
 
-    def transform(self, message: MessageType) -> MessageType:
+    def process(self, message: MessageType):
         if self.check_metadata(message):
             self.reset(message)
-
         return self._process(message)
 
     def stateful_op(
         self, state: StateType, message: MessageType
-    ) -> tuple[StateType, MessageType]:
+    ) -> tuple[StateType]:
         self.state = state
-        result = self.transform(message)
-        return self.state, result
+        self.process(message)
+        return self.state
 
     def __iter__(self):
         state_type = typing.get_args(self.__orig_bases__[0])[0]
         self._state: StateType = state_type()
         return self
 
-    def send(self, message: MessageType) -> MessageType:
-        return self.transform(message)
+    send = process  # Alias method name
+    # def send(self, message: MessageType):
+    #     return self.process(message)
+
+
+ProcessorType = typing.TypeVar("ProcessorType", bound=BaseStatefulProcessor)
+
+
+class BaseProcessorUnit(
+    ez.Unit, typing.Generic[StateType, SettingsType, MessageType, ProcessorType]
+):
+    """
+    Implement a new Unit as follows:
+
+    class CustomUnit(BaseProcessorUnit[
+        CustomTransformerState        # StateType
+        CustomTransformerSettings,    # SettingsType
+        AxisArray,                    # MessageType
+    ]):
+        SETTINGS = CustomTransformerSettings
+
+    ... that's all!
+
+    Where CustomTransformerState, CustomTransformerSettings, and CustomTransformer
+    are custom implementations of ez.State, ez.Settings, and BaseStatefulProcessor, respectively.
+    """
+    INPUT_SIGNAL = ez.InputStream(MessageType)
+    INPUT_SETTINGS = ez.InputStream(SettingsType)
+
+    async def initialize(self) -> None:
+        self.create_processor()
+
+    def create_processor(
+        self,
+    ) -> StatefulProcessor[StateType, SettingsType, MessageType]:
+        """Create the transformer instance from settings."""
+        processor_type = typing.get_args(self.__orig_bases__[0])[3]
+        # return transformer_type(**dataclasses.asdict(self.SETTINGS))
+        self.processor = processor_type(settings=self.SETTINGS)
+
+    @ez.subscriber(INPUT_SETTINGS)
+    async def on_settings(self, msg: SettingsType) -> None:
+        self.apply_settings(msg)
+        self.create_transformer()
+
+    @ez.subscriber(INPUT_SIGNAL, zero_copy=True)
+    async def on_signal(self, message: MessageType) -> typing.AsyncGenerator:
+        try:
+            self.processor.process(message)
+        except Exception:
+            ez.logger.info(traceback.format_exc())
+
+
+class SignalTransformer(StatefulProcessor, typing.Protocol[StateType, SettingsType, MessageType]):
+    # Override process from parent protocol to return a message.
+    def process(self, message: MessageType) -> MessageType: ...
+
+    # Override stateful_op from parent protocol to return a message.
+    @staticmethod
+    def stateful_op(
+        state: StateType, message: MessageType
+    ) -> tuple[StateType, MessageType]: ...
+
+
+class BaseSignalTransformer(
+    BaseStatefulProcessor, ABC, typing.Generic[StateType, SettingsType, MessageType]
+):
+    """
+    Abstract base class implementing common transformer functionality.
+
+    Create a concrete transformer by subclassing this class and implementing the abstract methods.
+    """
+    @abstractmethod
+    def _process(self, message: MessageType) -> MessageType: ...
+
+    def stateful_op(
+        self, state: StateType, message: MessageType
+    ) -> tuple[StateType, MessageType]:
+        self.state = state
+        result = self.process(message)
+        return self.state, result
 
 
 TransformerType = typing.TypeVar("TransformerType", bound=BaseSignalTransformer)
 
 
 class BaseSignalTransformerUnit(
-    ez.Unit, typing.Generic[StateType, SettingsType, MessageType, TransformerType]
+    BaseProcessorUnit, typing.Generic[StateType, SettingsType, MessageType, TransformerType]
 ):
     """
     Implement a new Unit as follows:
@@ -119,32 +195,14 @@ class BaseSignalTransformerUnit(
     Where CustomTransformerState, CustomTransformerSettings, and CustomTransformer
     are custom implementations of ez.State, ez.Settings, and BaseSignalTransformer, respectively.
     """
-
     INPUT_SIGNAL = ez.InputStream(MessageType)
     OUTPUT_SIGNAL = ez.OutputStream(MessageType)
-    INPUT_SETTINGS = ez.InputStream(SettingsType)
-
-    async def initialize(self) -> None:
-        self.transformer = self.create_transformer()
-
-    def create_transformer(
-        self,
-    ) -> SignalTransformer[StateType, SettingsType, MessageType]:
-        """Create the transformer instance from settings."""
-        transformer_type = typing.get_args(self.__orig_bases__[0])[3]
-        # return transformer_type(**dataclasses.asdict(self.SETTINGS))
-        return transformer_type(settings=self.SETTINGS)
-
-    @ez.subscriber(INPUT_SETTINGS)
-    async def on_settings(self, msg: SettingsType) -> None:
-        self.apply_settings(msg)
-        self.create_transformer()
 
     @ez.subscriber(INPUT_SIGNAL, zero_copy=True)
     @ez.publisher(OUTPUT_SIGNAL)
     async def on_signal(self, message: MessageType) -> typing.AsyncGenerator:
         try:
-            ret = self.transformer.transform(message)
+            ret = self.processor.process(message)
             if math.prod(ret.data.shape) > 0:
                 yield self.OUTPUT_SIGNAL, ret
         except Exception:
@@ -166,6 +224,7 @@ class AdaptiveSignalTransformer(
 class BaseAdaptiveSignalTransformer(
     BaseSignalTransformer, ABC, typing.Generic[StateType, SettingsType, MessageType]
 ):
+    # `send` is no longer an alias because it needs unique functionality to cheque incoming message type.
     def send(self, message: MessageType | SampleMessage) -> MessageType:
         if hasattr(message, "trigger"):  # SampleMessage
             # y = message.trigger.value.data
@@ -173,7 +232,7 @@ class BaseAdaptiveSignalTransformer(
             self.partial_fit(message)
             message = message.sample
             # TODO: Slice message so it is empty.
-        return self.transform(message)
+        return self.process(message)
 
 
 class BaseAdaptiveSignalTransformerUnit(
@@ -183,7 +242,7 @@ class BaseAdaptiveSignalTransformerUnit(
 
     @ez.subscriber(INPUT_SAMPLE)
     async def on_sample(self, msg: SampleMessage) -> None:
-        self.transformer.partial_fit(msg)
+        self.processor.partial_fit(msg)
 
 
 class AsyncSignalTransformer(
@@ -203,13 +262,13 @@ class BaseAsyncSignalTransformer(
     @abstractmethod
     async def _aprocess(self, message: MessageType) -> MessageType: ...
 
-    async def atransform(self, message: MessageType) -> MessageType:
+    async def aprocess(self, message: MessageType) -> MessageType:
         if self.check_metadata(message):
             self.reset(message)
         return await self._aprocess(message)
 
     async def asend(self, message: MessageType) -> MessageType:
-        return await self.atransform(message)
+        return await self.aprocess(message)
 
 
 class BaseAsyncSignalTransformerUnit(
@@ -222,7 +281,7 @@ class BaseAsyncSignalTransformerUnit(
     @ez.publisher(OUTPUT_SIGNAL)
     async def on_signal(self, message: MessageType) -> typing.AsyncGenerator:
         try:
-            ret = await self.transformer.atransform(message)
+            ret = await self.processor.atransform(message)
             if math.prod(ret.data.shape) > 0:
                 yield self.OUTPUT_SIGNAL, ret
         except Exception:
