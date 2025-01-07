@@ -46,9 +46,16 @@ class BaseSignalTransformer(ABC, typing.Generic[StateType, SettingsType, Message
     Create a concrete transformer by subclassing this class and implementing the abstract methods.
     """
 
-    def __init__(self, settings: SettingsType):
+    def __init__(self, *args, settings: typing.Optional[SettingsType] = None, **kwargs):
+        state_type, settings_type, _ = typing.get_args(self.__orig_bases__[0])
+        if settings is None:
+            if len(args) > 0 and isinstance(args[0], settings_type):
+                settings = args[0]
+            elif len(args) > 0 or len(kwargs) > 0:
+                settings = settings_type(*args, **kwargs)
+            else:
+                settings = settings_type()
         self.settings = settings
-        state_type = typing.get_args(self.__orig_bases__[0])[0]
         self._state: StateType = state_type()
 
     @abstractmethod
