@@ -103,10 +103,9 @@ class DownsampleTransformer(
 
 
 class Downsample(
-    BaseSignalTransformerUnit[DownsampleState, DownsampleSettings, AxisArray]
+    BaseSignalTransformerUnit[DownsampleState, DownsampleSettings, AxisArray, DownsampleTransformer]
 ):
     SETTINGS = DownsampleSettings
-    transformer_type = DownsampleTransformer
 
 
 def downsample(
