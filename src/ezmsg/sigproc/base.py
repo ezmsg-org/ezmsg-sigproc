@@ -44,15 +44,12 @@ class BaseSignalTransformer(ABC, typing.Generic[StateType, SettingsType, Message
     Abstract base class implementing common transformer functionality.
 
     Create a concrete transformer by subclassing this class and implementing the abstract methods.
-    Additionally, set the class variable `state_type` to the State class that the transformer will use.
-    e.g. `state_type = MyStateClass`
     """
-
-    state_type: typing.Type[StateType]
 
     def __init__(self, settings: SettingsType):
         self.settings = settings
-        self._state: StateType = self.state_type()
+        state_type = typing.get_args(self.__orig_bases__[0])[0]
+        self._state: StateType = state_type()
 
     @abstractmethod
     def check_metadata(self, message: MessageType) -> bool: ...
@@ -86,7 +83,8 @@ class BaseSignalTransformer(ABC, typing.Generic[StateType, SettingsType, Message
         return self.state, result
 
     def __iter__(self):
-        self._state: StateType = self.state_type()
+        state_type = typing.get_args(self.__orig_bases__[0])[0]
+        self._state: StateType = state_type()
         return self
 
     def send(self, message: MessageType) -> MessageType:
