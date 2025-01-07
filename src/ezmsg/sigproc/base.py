@@ -91,8 +91,11 @@ class BaseSignalTransformer(ABC, typing.Generic[StateType, SettingsType, Message
         return self.transform(message)
 
 
+TransformerType = typing.TypeVar("TransformerType", bound=BaseSignalTransformer)
+
+
 class BaseSignalTransformerUnit(
-    ez.Unit, typing.Generic[StateType, SettingsType, MessageType]
+    ez.Unit, typing.Generic[StateType, SettingsType, MessageType, TransformerType]
 ):
     """
     Implement a new Unit as follows:
@@ -103,7 +106,6 @@ class BaseSignalTransformerUnit(
         AxisArray,                    # MessageType
     ]):
         SETTINGS = CustomTransformerSettings
-        transformer_type = CustomTransformer
 
     ... that's all!
 
@@ -115,11 +117,6 @@ class BaseSignalTransformerUnit(
     OUTPUT_SIGNAL = ez.OutputStream(MessageType)
     INPUT_SETTINGS = ez.InputStream(SettingsType)
 
-    # Class variable that concrete classes will override
-    transformer_type: typing.Type[
-        SignalTransformer[StateType, SettingsType, MessageType]
-    ]
-
     async def initialize(self) -> None:
         self.transformer = self.create_transformer()
 
@@ -127,8 +124,9 @@ class BaseSignalTransformerUnit(
         self,
     ) -> SignalTransformer[StateType, SettingsType, MessageType]:
         """Create the transformer instance from settings."""
-        # return self.transformer_type(**dataclasses.asdict(self.SETTINGS))
-        return self.transformer_type(settings=self.SETTINGS)
+        transformer_type = typing.get_args(self.__orig_bases__[0])[3]
+        # return transformer_type(**dataclasses.asdict(self.SETTINGS))
+        return transformer_type(settings=self.SETTINGS)
 
     @ez.subscriber(INPUT_SETTINGS)
     async def on_settings(self, msg: SettingsType) -> None:
@@ -172,13 +170,9 @@ class BaseAdaptiveSignalTransformer(
 
 
 class BaseAdaptiveSignalTransformerUnit(
-    BaseSignalTransformerUnit, typing.Generic[StateType, SettingsType, MessageType]
+    BaseSignalTransformerUnit, typing.Generic[StateType, SettingsType, MessageType, TransformerType]
 ):
     INPUT_SAMPLE = ez.InputStream(SampleMessage)
-
-    transformer_type: typing.Type[
-        AdaptiveSignalTransformer[StateType, SettingsType, MessageType]
-    ]
 
     @ez.subscriber(INPUT_SAMPLE)
     async def on_sample(self, msg: SampleMessage) -> None:
@@ -212,13 +206,10 @@ class BaseAsyncSignalTransformer(
 
 
 class BaseAsyncSignalTransformerUnit(
-    BaseSignalTransformerUnit, typing.Generic[StateType, SettingsType, MessageType]
+    BaseSignalTransformerUnit, typing.Generic[StateType, SettingsType, MessageType, TransformerType]
 ):
     INPUT_SIGNAL = ez.InputStream(MessageType)
     OUTPUT_SIGNAL = ez.OutputStream(MessageType)
-    transformer_type: typing.Type[
-        AsyncSignalTransformer[StateType, SettingsType, MessageType]
-    ]
 
     @ez.subscriber(INPUT_SIGNAL, zero_copy=True)
     @ez.publisher(OUTPUT_SIGNAL)
