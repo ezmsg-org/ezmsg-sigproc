@@ -45,8 +45,6 @@ class DownsampleTransformer(
     using the :obj:`Decimate` collection instead.
     """
 
-    state_type = DownsampleState
-
     def check_metadata(self, message: AxisArray) -> bool:
         return self.state.hash != hash(
             (message.axes[self.settings.axis].gain, message.key)
