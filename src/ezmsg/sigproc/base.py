@@ -304,6 +304,14 @@ class GenAxisArray(ez.Unit):
 
     @ez.subscriber(INPUT_SETTINGS)
     async def on_settings(self, msg: ez.Settings) -> None:
+        """
+        Update unit settings and reset generator.
+        Note: Not all units will require a full reset with new settings.
+        Override this method to implement a selective reset.
+
+        Args:
+            msg: Instance of SETTINGS object.
+        """
         self.apply_settings(msg)
         self.construct_generator()
 
