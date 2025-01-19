@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 import math
 import traceback
 import typing
+from functools import singledispatchmethod
 
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
@@ -29,7 +30,7 @@ class StatefulProcessor(typing.Protocol[StateType, SettingsType, MessageType]):
     @state.setter
     def state(self, state: StateType) -> None: ...
 
-    def process(self, message: MessageType): ...
+    def __call__(self, message: MessageType): ...
 
     @staticmethod
     def stateful_op(
@@ -74,7 +75,12 @@ class BaseStatefulProcessor(ABC, typing.Generic[StateType, SettingsType, Message
     @abstractmethod
     def _process(self, message: MessageType): ...
 
-    def process(self, message: MessageType):
+    @singledispatchmethod
+    def __call__(self, message):
+        raise ValueError(f"Unsupported message type: {type(message)}")
+
+    @__call__.register
+    def _(self, message: MessageType):
         if self.check_metadata(message):
             self.reset(message)
         return self._process(message)
@@ -91,9 +97,9 @@ class BaseStatefulProcessor(ABC, typing.Generic[StateType, SettingsType, Message
         self._state: StateType = state_type()
         return self
 
-    send = process  # Alias method name
+    send = __call__  # Alias method name
     # def send(self, message: MessageType):
-    #     return self.process(message)
+    #     return self(message)
 
 
 ProcessorType = typing.TypeVar("ProcessorType", bound=BaseStatefulProcessor)
@@ -139,14 +145,14 @@ class BaseProcessorUnit(
     @ez.subscriber(INPUT_SIGNAL, zero_copy=True)
     async def on_signal(self, message: MessageType) -> typing.AsyncGenerator:
         try:
-            self.processor.process(message)
+            self.processor(message)
         except Exception:
             ez.logger.info(traceback.format_exc())
 
 
 class SignalTransformer(StatefulProcessor, typing.Protocol[StateType, SettingsType, MessageType]):
-    # Override process from parent protocol to return a message.
-    def process(self, message: MessageType) -> MessageType: ...
+    # Override __call__ annotation because _process now returns a message.
+    def __call__(self, message: MessageType) -> MessageType: ...
 
     # Override stateful_op from parent protocol to return a message.
     @staticmethod
@@ -170,7 +176,7 @@ class BaseSignalTransformer(
         self, state: StateType, message: MessageType
     ) -> tuple[StateType, MessageType]:
         self.state = state
-        result = self.process(message)
+        result = self(message)
         return self.state, result
 
 
@@ -202,7 +208,7 @@ class BaseSignalTransformerUnit(
     @ez.publisher(OUTPUT_SIGNAL)
     async def on_signal(self, message: MessageType) -> typing.AsyncGenerator:
         try:
-            ret = self.processor.process(message)
+            ret = self.processor(message)
             if math.prod(ret.data.shape) > 0:
                 yield self.OUTPUT_SIGNAL, ret
         except Exception:
@@ -224,15 +230,20 @@ class AdaptiveSignalTransformer(
 class BaseAdaptiveSignalTransformer(
     BaseSignalTransformer, ABC, typing.Generic[StateType, SettingsType, MessageType]
 ):
-    # `send` is no longer an alias because it needs unique functionality to cheque incoming message type.
-    def send(self, message: MessageType | SampleMessage) -> MessageType:
-        if hasattr(message, "trigger"):  # SampleMessage
-            # y = message.trigger.value.data
-            # X = message.sample.data
-            self.partial_fit(message)
-            message = message.sample
-            # TODO: Slice message so it is empty.
-        return self.process(message)
+    @BaseSignalTransformer.__call__.register
+    def _(self, message: SampleMessage) -> None:
+        """"
+        Adapt transformer with training data (and optionally labels)
+        in SampleMessage
+
+        Args:
+            message: An instance of SampleMessage with optional
+             labels (y) in message.trigger.value.data and
+             data (X) in message.sample.data
+
+        Returns: None
+        """
+        return self.partial_fit(message)
 
 
 class BaseAdaptiveSignalTransformerUnit(
@@ -242,7 +253,7 @@ class BaseAdaptiveSignalTransformerUnit(
 
     @ez.subscriber(INPUT_SAMPLE)
     async def on_sample(self, msg: SampleMessage) -> None:
-        self.processor.partial_fit(msg)
+        self.processor(msg)
 
 
 class AsyncSignalTransformer(
@@ -250,25 +261,28 @@ class AsyncSignalTransformer(
 ):
     async def _aprocess(self, message: MessageType) -> MessageType: ...
 
-    async def atransform(self, message: MessageType) -> MessageType: ...
-
 
 class BaseAsyncSignalTransformer(
     BaseSignalTransformer, ABC, typing.Generic[StateType, SettingsType, MessageType]
 ):
-    def process(self, message: MessageType) -> MessageType:
-        return run_coroutine_sync(self._aprocess(message))
-
-    @abstractmethod
-    async def _aprocess(self, message: MessageType) -> MessageType: ...
-
-    async def aprocess(self, message: MessageType) -> MessageType:
+    async def __acall__(self, message: MessageType) -> MessageType:
+        # Note: In Python 3.12, we can invoke this with `await obj(message)`
+        # Earlier versions must be explicit: `await obj.__acall__(message)`
         if self.check_metadata(message):
             self.reset(message)
         return await self._aprocess(message)
 
+    @BaseSignalTransformer.__call__.register
+    def _(self, message: MessageType) -> MessageType:
+        # Override (synchronous) __call__ to run coroutine `aprocess`.
+        return run_coroutine_sync(self.__acall__(message))
+
+    @abstractmethod
+    async def _aprocess(self, message: MessageType) -> MessageType: ...
+
+    # Alias asend = __acall__
     async def asend(self, message: MessageType) -> MessageType:
-        return await self.aprocess(message)
+        return await self.__acall__(message)
 
 
 class BaseAsyncSignalTransformerUnit(
@@ -281,7 +295,8 @@ class BaseAsyncSignalTransformerUnit(
     @ez.publisher(OUTPUT_SIGNAL)
     async def on_signal(self, message: MessageType) -> typing.AsyncGenerator:
         try:
-            ret = await self.processor.atransform(message)
+            # Python >= 3.12: ret = await self.processor(message)
+            ret = await self.processor.__acall__(message)
             if math.prod(ret.data.shape) > 0:
                 yield self.OUTPUT_SIGNAL, ret
         except Exception:
