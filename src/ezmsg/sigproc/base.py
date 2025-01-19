@@ -87,7 +87,7 @@ class BaseStatefulProcessor(ABC, typing.Generic[StateType, SettingsType, Message
 
     def stateful_op(
         self, state: StateType, message: MessageType
-    ) -> tuple[StateType]:
+    ) -> StateType:
         self.state = state
         self.process(message)
         return self.state
@@ -129,9 +129,8 @@ class BaseProcessorUnit(
     async def initialize(self) -> None:
         self.create_processor()
 
-    def create_processor(
-        self,
-    ) -> StatefulProcessor[StateType, SettingsType, MessageType]:
+    def create_processor(self):
+        #  -> StatefulProcessor[StateType, SettingsType, MessageType]
         """Create the transformer instance from settings."""
         processor_type = typing.get_args(self.__orig_bases__[0])[3]
         # return transformer_type(**dataclasses.asdict(self.SETTINGS))
