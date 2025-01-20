@@ -2,8 +2,8 @@ from abc import ABC, abstractmethod
 import math
 import traceback
 import typing
-from functools import singledispatchmethod
 
+from multimethod import multimethod as singledispatchmethod
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.generator import GenState
