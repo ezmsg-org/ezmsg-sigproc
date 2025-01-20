@@ -3,7 +3,6 @@ import math
 import traceback
 import typing
 
-from multimethod import multimethod as singledispatchmethod
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.generator import GenState
@@ -75,12 +74,7 @@ class BaseStatefulProcessor(ABC, typing.Generic[StateType, SettingsType, Message
     @abstractmethod
     def _process(self, message: MessageType): ...
 
-    @singledispatchmethod
-    def __call__(self, message):
-        raise ValueError(f"Unsupported message type: {type(message)}")
-
-    @__call__.register
-    def _(self, message: MessageType):
+    def __call__(self, message: MessageType):
         if self.check_metadata(message):
             self.reset(message)
         return self._process(message)
@@ -229,8 +223,7 @@ class AdaptiveSignalTransformer(
 class BaseAdaptiveSignalTransformer(
     BaseSignalTransformer, ABC, typing.Generic[StateType, SettingsType, MessageType]
 ):
-    @BaseSignalTransformer.__call__.register
-    def _(self, message: SampleMessage) -> None:
+    def __call__(self, message: typing.Union[MessageType, SampleMessage]) -> None:
         """"
         Adapt transformer with training data (and optionally labels)
         in SampleMessage
@@ -242,7 +235,9 @@ class BaseAdaptiveSignalTransformer(
 
         Returns: None
         """
-        return self.partial_fit(message)
+        if hasattr(message, "trigger"):
+            return self.partial_fit(message)
+        return super().__call__(message)
 
 
 class BaseAdaptiveSignalTransformerUnit(
@@ -271,8 +266,7 @@ class BaseAsyncSignalTransformer(
             self.reset(message)
         return await self._aprocess(message)
 
-    @BaseSignalTransformer.__call__.register
-    def _(self, message: MessageType) -> MessageType:
+    def __call__(self, message: MessageType) -> MessageType:
         # Override (synchronous) __call__ to run coroutine `aprocess`.
         return run_coroutine_sync(self.__acall__(message))
 
