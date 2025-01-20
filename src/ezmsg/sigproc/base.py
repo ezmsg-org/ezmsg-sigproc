@@ -199,6 +199,7 @@ class BaseSignalTransformerUnit(
 
     @ez.subscriber(INPUT_SIGNAL, zero_copy=True)
     @ez.publisher(OUTPUT_SIGNAL)
+    @profile_subpub(trace_oldest=False)
     async def on_signal(self, message: MessageType) -> typing.AsyncGenerator:
         try:
             ret = self.processor(message)
@@ -286,6 +287,7 @@ class BaseAsyncSignalTransformerUnit(
 
     @ez.subscriber(INPUT_SIGNAL, zero_copy=True)
     @ez.publisher(OUTPUT_SIGNAL)
+    @profile_subpub(trace_oldest=False)
     async def on_signal(self, message: MessageType) -> typing.AsyncGenerator:
         try:
             # Python >= 3.12: ret = await self.processor(message)
