@@ -91,9 +91,9 @@ class BaseStatefulProcessor(ABC, typing.Generic[StateType, SettingsType, Message
         self._state: StateType = state_type()
         return self
 
-    send = __call__  # Alias method name
-    # def send(self, message: MessageType):
-    #     return self(message)
+    def send(self, message: MessageType):
+        # Alias method name
+        return self(message)
 
 
 ProcessorType = typing.TypeVar("ProcessorType", bound=BaseStatefulProcessor)
