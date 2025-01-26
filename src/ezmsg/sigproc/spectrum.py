@@ -3,6 +3,7 @@ from functools import partial
 import typing
 
 import numpy as np
+import numpy.typing as npt
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import (
     AxisArray,
@@ -11,7 +12,7 @@ from ezmsg.util.messages.axisarray import (
 )
 from ezmsg.util.generator import consumer
 
-from .base import GenAxisArray
+from .base import BaseSignalTransformer, BaseSignalTransformerUnit
 
 
 class OptionsEnum(enum.Enum):
@@ -66,7 +67,154 @@ class SpectralOutput(OptionsEnum):
     NEGATIVE = "Negative Frequencies"
 
 
-@consumer
+class SpectrumSettings(ez.Settings):
+    """
+    Settings for :obj:`Spectrum.
+    See :obj:`spectrum` for a description of the parameters.
+    """
+
+    axis: str | None = None
+    # n: int | None = None # n parameter for fft
+    out_axis: str | None = "freq"  # If none; don't change dim name
+    window: WindowFunction = WindowFunction.HAMMING
+    transform: SpectralTransform = SpectralTransform.REL_DB
+    output: SpectralOutput = SpectralOutput.POSITIVE
+    norm: str | None = "forward"
+    do_fftshift: bool = True
+    nfft: int | None = None
+
+
+class SpectrumState(ez.State):
+    hash: int = 0
+    f_sl: slice = slice(None)
+    freq_axis: AxisArray.LinearAxis | None = None
+    fftfun: typing.Callable | None = None
+    f_transform: typing.Callable | None = None
+    new_dims: list[str] | None = None
+    window: npt.NDArray | None = None
+
+class SpectrumTransformer(
+    BaseSignalTransformer[SpectrumState, SpectrumSettings, AxisArray]
+):
+
+    def _hash_message(self, message: AxisArray) -> int:
+        axis = self.settings.axis or message.dims[0]
+        ax_idx = message.get_axis_idx(axis)
+        ax_info = message.axes[axis]
+        targ_len = message.data.shape[ax_idx]
+        return hash((targ_len, message.data.ndim, message.data.dtype.kind, ax_idx, ax_info.gain))
+
+    def check_metadata(self, message: AxisArray) -> bool:
+        return self.state.hash != self._hash_message(message)
+
+    def reset(self, message: AxisArray) -> None:
+        self._state.hash = self._hash_message(message)
+
+        do_fftshift = self.settings.do_fftshift and self.settings.output == SpectralOutput.FULL
+
+        axis = self.settings.axis or message.dims[0]
+        ax_idx = message.get_axis_idx(axis)
+        ax_info = message.axes[axis]
+        targ_len = message.data.shape[ax_idx]
+        nfft = self.settings.nfft or targ_len
+
+        # Pre-calculate windowing
+        window = WINDOWS[self.settings.window](targ_len)
+        window = window.reshape(
+            [1] * ax_idx
+            + [
+                len(window),
+            ]
+            + [1] * (message.data.ndim - 1 - ax_idx)
+        )
+        if self.settings.transform != SpectralTransform.RAW_COMPLEX and not (
+                self.settings.transform == SpectralTransform.REAL
+                or self.settings.transform == SpectralTransform.IMAG
+        ):
+            scale = np.sum(window ** 2.0) * ax_info.gain
+
+        if self.settings.window != WindowFunction.NONE:
+            self.state.window = window
+
+        # Pre-calculate frequencies and select our fft function.
+        b_complex = message.data.dtype.kind == "c"
+        if (not b_complex) and self.settings.output == SpectralOutput.POSITIVE:
+            # If input is not complex and desired output is SpectralOutput.POSITIVE, we can save some computation
+            #  by using rfft and rfftfreq.
+            self.state.fftfun = partial(np.fft.rfft, n=nfft, axis=ax_idx, norm=self.settings.norm)
+            freqs = np.fft.rfftfreq(nfft, d=ax_info.gain * targ_len / nfft)
+        else:
+            self.state.fftfun = partial(np.fft.fft, n=nfft, axis=ax_idx, norm=self.settings.norm)
+            freqs = np.fft.fftfreq(nfft, d=ax_info.gain * targ_len / nfft)
+            if self.settings.output == SpectralOutput.POSITIVE:
+                self.state.f_sl = slice(None, nfft // 2 + 1 - (nfft % 2))
+            elif self.settings.output == SpectralOutput.NEGATIVE:
+                freqs = np.fft.fftshift(freqs, axes=-1)
+                self.state.f_sl = slice(None, nfft // 2 + 1)
+            elif self.settings.do_fftshift:  # and FULL
+                freqs = np.fft.fftshift(freqs, axes=-1)
+            freqs = freqs[self.state.f_sl]
+        freqs = freqs.tolist()  # To please type checking
+        self.state.freq_axis = AxisArray.LinearAxis(
+            unit="Hz", gain=freqs[1] - freqs[0], offset=freqs[0]
+        )
+        self.state.new_dims = (
+                message.dims[:ax_idx]
+                + [
+                    self.settings.out_axis or axis,
+                ]
+                + message.dims[ax_idx + 1:]
+        )
+
+        def f_transform(x):
+            return x
+
+        if self.settings.transform != SpectralTransform.RAW_COMPLEX:
+            if self.settings.transform == SpectralTransform.REAL:
+
+                def f_transform(x):
+                    return x.real
+            elif self.settings.transform == SpectralTransform.IMAG:
+
+                def f_transform(x):
+                    return x.imag
+            else:
+
+                def f1(x):
+                    return (np.abs(x) ** 2.0) / scale
+
+                if self.settings.transform == SpectralTransform.REL_DB:
+
+                    def f_transform(x):
+                        return 10 * np.log10(f1(x))
+                else:
+                    f_transform = f1
+        self.state.f_transform = f_transform
+
+    def _process(self, message: AxisArray) -> AxisArray:
+        axis = self.settings.axis or message.dims[0]
+        ax_idx = message.get_axis_idx(axis)
+        ax_info = message.axes[axis]
+        targ_len = message.data.shape[ax_idx]
+
+        new_axes = {k: v for k, v in message.axes.items() if k not in [self.settings.out_axis, axis]}
+        new_axes[self.settings.out_axis or axis] = self.state.freq_axis
+
+        if self.state.window is not None:
+            win_dat = message.data * self.state.window
+        else:
+            win_dat = message.data
+        spec = self.state.fftfun(win_dat, n=self.settings.nfft or targ_len, axis=ax_idx, norm=self.settings.norm)
+        # Note: norm="forward" equivalent to `/ nfft`
+        if (self.settings.do_fftshift and self.settings.output == SpectralOutput.FULL) or self.settings.output == SpectralOutput.NEGATIVE:
+            spec = np.fft.fftshift(spec, axes=ax_idx)
+        spec = self.state.f_transform(spec)
+        spec = slice_along_axis(spec, self.state.f_sl, ax_idx)
+
+        msg_out = replace(message, data=spec, dims=self.state.new_dims, axes=new_axes)
+        return msg_out
+
+
 def spectrum(
     axis: str | None = None,
     out_axis: str | None = "freq",
@@ -76,7 +224,7 @@ def spectrum(
     norm: str | None = "forward",
     do_fftshift: bool = True,
     nfft: int | None = None,
-) -> typing.Generator[AxisArray, AxisArray, None]:
+) -> SpectrumTransformer:
     """
     Calculate a spectrum on a data slice.
 
@@ -96,168 +244,21 @@ def spectrum(
         nfft: The number of points to use for the FFT. If None, the length of the input data is used.
 
     Returns:
-        A primed generator object that expects an :obj:`AxisArray` via `.send(axis_array)` containing continuous data
-        and yields an :obj:`AxisArray` with data of spectral magnitudes or powers.
+        A :obj:`SpectrumTransformer` object that expects an :obj:`AxisArray` via `.(axis_array)` (__call__)
+        containing continuous data and returns an :obj:`AxisArray` with data of spectral magnitudes or powers.
     """
-    msg_out = AxisArray(np.array([]), dims=[""])
-
-    # State variables
-    apply_window = window != WindowFunction.NONE
-    do_fftshift &= output == SpectralOutput.FULL
-    f_sl = slice(None)
-    freq_axis: AxisArray.LinearAxis | None = None
-    fftfun: typing.Callable | None = None
-    f_transform: typing.Callable | None = None
-    new_dims: list[str] | None = None
-
-    # Reset if input changes substantially
-    check_input = {
-        "n_time": None,  # Need to recalc windows
-        "ndim": None,  # Input ndim changed: Need to recalc windows
-        "kind": None,  # Input dtype changed: Need to re-init fft funcs
-        "ax_idx": None,  # Axis index changed: Need to re-init fft funcs
-        "gain": None,  # Gain changed: Need to re-calc freqs
-        # "key": None  # There's no temporal continuity; we can ignore key changes
-    }
-
-    while True:
-        msg_in: AxisArray = yield msg_out
-
-        # Get signal properties
-        axis = axis or msg_in.dims[0]
-        ax_idx = msg_in.get_axis_idx(axis)
-        ax_info = msg_in.axes[axis]
-        targ_len = msg_in.data.shape[ax_idx]
-
-        # Check signal properties for change
-        b_reset = targ_len != check_input["n_time"]
-        b_reset = b_reset or msg_in.data.ndim != check_input["ndim"]
-        b_reset = b_reset or msg_in.data.dtype.kind != check_input["kind"]
-        b_reset = b_reset or ax_idx != check_input["ax_idx"]
-        b_reset = b_reset or ax_info.gain != check_input["gain"]
-        if b_reset:
-            check_input["n_time"] = targ_len
-            check_input["ndim"] = msg_in.data.ndim
-            check_input["kind"] = msg_in.data.dtype.kind
-            check_input["ax_idx"] = ax_idx
-            check_input["gain"] = ax_info.gain
-
-            nfft = nfft or targ_len
-
-            # Pre-calculate windowing
-            window = WINDOWS[window](targ_len)
-            window = window.reshape(
-                [1] * ax_idx
-                + [
-                    len(window),
-                ]
-                + [1] * (msg_in.data.ndim - 1 - ax_idx)
-            )
-            if transform != SpectralTransform.RAW_COMPLEX and not (
-                transform == SpectralTransform.REAL
-                or transform == SpectralTransform.IMAG
-            ):
-                scale = np.sum(window**2.0) * ax_info.gain
-
-            # Pre-calculate frequencies and select our fft function.
-            b_complex = msg_in.data.dtype.kind == "c"
-            if (not b_complex) and output == SpectralOutput.POSITIVE:
-                # If input is not complex and desired output is SpectralOutput.POSITIVE, we can save some computation
-                #  by using rfft and rfftfreq.
-                fftfun = partial(np.fft.rfft, n=nfft, axis=ax_idx, norm=norm)
-                freqs = np.fft.rfftfreq(nfft, d=ax_info.gain * targ_len / nfft)
-            else:
-                fftfun = partial(np.fft.fft, n=nfft, axis=ax_idx, norm=norm)
-                freqs = np.fft.fftfreq(nfft, d=ax_info.gain * targ_len / nfft)
-                if output == SpectralOutput.POSITIVE:
-                    f_sl = slice(None, nfft // 2 + 1 - (nfft % 2))
-                elif output == SpectralOutput.NEGATIVE:
-                    freqs = np.fft.fftshift(freqs, axes=-1)
-                    f_sl = slice(None, nfft // 2 + 1)
-                elif do_fftshift:  # and FULL
-                    freqs = np.fft.fftshift(freqs, axes=-1)
-                freqs = freqs[f_sl]
-            freqs = freqs.tolist()  # To please type checking
-            freq_axis = AxisArray.LinearAxis(
-                unit="Hz", gain=freqs[1] - freqs[0], offset=freqs[0]
-            )
-            if out_axis is None:
-                out_axis = axis
-            new_dims = (
-                msg_in.dims[:ax_idx]
-                + [
-                    out_axis,
-                ]
-                + msg_in.dims[ax_idx + 1 :]
-            )
-
-            def f_transform(x):
-                return x
-
-            if transform != SpectralTransform.RAW_COMPLEX:
-                if transform == SpectralTransform.REAL:
-
-                    def f_transform(x):
-                        return x.real
-                elif transform == SpectralTransform.IMAG:
-
-                    def f_transform(x):
-                        return x.imag
-                else:
-
-                    def f1(x):
-                        return (np.abs(x) ** 2.0) / scale
-
-                    if transform == SpectralTransform.REL_DB:
-
-                        def f_transform(x):
-                            return 10 * np.log10(f1(x))
-                    else:
-                        f_transform = f1
-
-        new_axes = {k: v for k, v in msg_in.axes.items() if k not in [out_axis, axis]}
-        new_axes[out_axis] = freq_axis
-
-        if apply_window:
-            win_dat = msg_in.data * window
-        else:
-            win_dat = msg_in.data
-        spec = fftfun(win_dat, n=nfft, axis=ax_idx, norm=norm)
-        # Note: norm="forward" equivalent to `/ nfft`
-        if do_fftshift or output == SpectralOutput.NEGATIVE:
-            spec = np.fft.fftshift(spec, axes=ax_idx)
-        spec = f_transform(spec)
-        spec = slice_along_axis(spec, f_sl, ax_idx)
-
-        msg_out = replace(msg_in, data=spec, dims=new_dims, axes=new_axes)
-
-
-class SpectrumSettings(ez.Settings):
-    """
-    Settings for :obj:`Spectrum.
-    See :obj:`spectrum` for a description of the parameters.
-    """
-
-    axis: str | None = None
-    # n: int | None = None # n parameter for fft
-    out_axis: str | None = "freq"  # If none; don't change dim name
-    window: WindowFunction = WindowFunction.HAMMING
-    transform: SpectralTransform = SpectralTransform.REL_DB
-    output: SpectralOutput = SpectralOutput.POSITIVE
-
-
-class Spectrum(GenAxisArray):
-    """Unit for :obj:`spectrum`"""
-
-    SETTINGS = SpectrumSettings
-
-    INPUT_SETTINGS = ez.InputStream(SpectrumSettings)
-
-    def construct_generator(self):
-        self.STATE.gen = spectrum(
-            axis=self.SETTINGS.axis,
-            out_axis=self.SETTINGS.out_axis,
-            window=self.SETTINGS.window,
-            transform=self.SETTINGS.transform,
-            output=self.SETTINGS.output,
+    return SpectrumTransformer(
+        SpectrumSettings(
+            axis=axis,
+            out_axis=out_axis,
+            window=window,
+            transform=transform,
+            output=output
         )
+    )
+
+
+class Spectrum(
+    BaseSignalTransformerUnit[SpectrumState, SpectrumSettings, AxisArray, SpectrumTransformer]
+):
+    SETTINGS = SpectrumSettings
