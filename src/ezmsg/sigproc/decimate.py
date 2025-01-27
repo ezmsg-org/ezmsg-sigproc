@@ -25,6 +25,7 @@ class ChebyForDecimate(ChebyshevFilter):
                 return None
             partial_fun = super(ChebyForDecimate, self).design_filter()
             return partial_fun(fs)
+
         return cheby_opt_design_fun
 
 
@@ -43,7 +44,6 @@ class Decimate(ez.Collection):
     DOWNSAMPLE = Downsample()
 
     def configure(self) -> None:
-
         cheby_settings = ChebyshevFilterSettings(
             order=8,
             ripple_tol=0.05,

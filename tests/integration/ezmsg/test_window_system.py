@@ -23,8 +23,6 @@ from ezmsg.sigproc.window import Window, WindowSettings, windowing
 from util import get_test_fn, assert_messages_equal, calculate_expected_windows
 
 
-
-
 class WindowSystemSettings(ez.Settings):
     num_msgs: int
     counter_settings: CounterSettings
