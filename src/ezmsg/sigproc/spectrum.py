@@ -156,7 +156,10 @@ class SpectrumTransformer(
             elif self.settings.output == SpectralOutput.NEGATIVE:
                 freqs = np.fft.fftshift(freqs, axes=-1)
                 self.state.f_sl = slice(None, nfft // 2 + 1)
-            elif (self.settings.do_fftshift and self.settings.output == SpectralOutput.FULL):
+            elif (
+                self.settings.do_fftshift
+                and self.settings.output == SpectralOutput.FULL
+            ):
                 freqs = np.fft.fftshift(freqs, axes=-1)
             freqs = freqs[self.state.f_sl]
         freqs = freqs.tolist()  # To please type checking
