@@ -53,14 +53,13 @@ class WindowState(ez.State):
     hash: int = 0
 
 
-class WindowTransformer(
-    BaseSignalTransformer[WindowState, WindowSettings, AxisArray]
-):
+class WindowTransformer(BaseSignalTransformer[WindowState, WindowSettings, AxisArray]):
     """
     Apply a sliding window along the specified axis to input streaming data.
     The `windowing` method is perhaps the most useful and versatile method in ezmsg.sigproc, but its parameterization
     can be difficult. Please read the argument descriptions carefully.
     """
+
     def __init__(self, *args, **kwargs):
         """
 
@@ -96,13 +95,19 @@ class WindowTransformer(
         # if self.settings.newaxis is None:
         #     ez.logger.warning("`newaxis=None` will be replaced with `newaxis='win'`.")
         #     object.__setattr__(self.settings, "newaxis", "win")
-        if self.settings.window_shift is None and self.settings.zero_pad_until != "input":
+        if (
+            self.settings.window_shift is None
+            and self.settings.zero_pad_until != "input"
+        ):
             ez.logger.warning(
                 "`zero_pad_until` must be 'input' if `window_shift` is None. "
                 f"Ignoring received argument value: {self.settings.zero_pad_until}"
             )
             object.__setattr__(self.settings, "zero_pad_until", "input")
-        elif self.settings.window_shift is not None and self.settings.zero_pad_until == "input":
+        elif (
+            self.settings.window_shift is not None
+            and self.settings.zero_pad_until == "input"
+        ):
             ez.logger.warning(
                 "windowing is non-deterministic with `zero_pad_until='input'` as it depends on the size "
                 "of the first input. We recommend using `zero_pad_until='shift'` when `window_shift` is float-valued."
@@ -110,7 +115,9 @@ class WindowTransformer(
         try:
             object.__setattr__(self.settings, "anchor", Anchor(self.settings.anchor))
         except ValueError:
-            raise ValueError(f"Invalid anchor: {self.settings.anchor}. Valid anchor are: {', '.join([e.value for e in Anchor])}")
+            raise ValueError(
+                f"Invalid anchor: {self.settings.anchor}. Valid anchor are: {', '.join([e.value for e in Anchor])}"
+            )
 
     def check_metadata(self, message: AxisArray) -> bool:
         b_reset = self.state.buffer is None
@@ -119,7 +126,7 @@ class WindowTransformer(
         axis_idx = message.get_axis_idx(axis)
         axis_info = message.get_axis(axis)
         fs = 1.0 / axis_info.gain
-        samp_shape = message.data.shape[:axis_idx] + message.data.shape[axis_idx + 1:]
+        samp_shape = message.data.shape[:axis_idx] + message.data.shape[axis_idx + 1 :]
 
         in_hash = hash(samp_shape + (fs, message.key))
         b_reset = b_reset or self.state.hash != in_hash
@@ -146,25 +153,34 @@ class WindowTransformer(
             self._state.window_shift_samples = int(self.settings.window_shift * fs)
         if self.settings.zero_pad_until == "none":
             req_samples = self._state.window_samples
-        elif self.settings.zero_pad_until == "shift" and self.settings.window_shift is not None:
+        elif (
+            self.settings.zero_pad_until == "shift"
+            and self.settings.window_shift is not None
+        ):
             req_samples = self._state.window_shift_samples
         else:  # i.e. zero_pad_until == "input"
             req_samples = message.data.shape[axis_idx]
         n_zero = max(0, self._state.window_samples - req_samples)
         init_buffer_shape = (
-                message.data.shape[:axis_idx]
-                + (n_zero,)
-                + message.data.shape[axis_idx + 1:]
+            message.data.shape[:axis_idx]
+            + (n_zero,)
+            + message.data.shape[axis_idx + 1 :]
         )
-        zero_fun = sparse.zeros if isinstance(message.data, sparse.SparseArray) else np.zeros
+        zero_fun = (
+            sparse.zeros if isinstance(message.data, sparse.SparseArray) else np.zeros
+        )
         self._state.buffer = zero_fun(init_buffer_shape, dtype=message.data.dtype)
 
         # Prepare reusable parts of output
         if self._state.out_newaxis is None:
-            self._state.out_dims = message.dims[:axis_idx] + [_newaxis] + message.dims[axis_idx:]
+            self._state.out_dims = (
+                message.dims[:axis_idx] + [_newaxis] + message.dims[axis_idx:]
+            )
             self._state.out_newaxis = replace(
                 axis_info,
-                gain=0.0 if self.settings.window_shift is None else axis_info.gain * self._state.window_shift_samples,
+                gain=0.0
+                if self.settings.window_shift is None
+                else axis_info.gain * self._state.window_shift_samples,
                 offset=0.0,  # offset modified per-msg below
             )
 
@@ -188,7 +204,9 @@ class WindowTransformer(
         # be a performance bottleneck for large memory arrays.
         # A circular buffer might be faster.
         concat_fun = sparse.concatenate if b_sparse else np.concatenate
-        self._state.buffer = concat_fun((self._state.buffer, message.data), axis=axis_idx)
+        self._state.buffer = concat_fun(
+            (self._state.buffer, message.data), axis=axis_idx
+        )
 
         # Create a vector of buffer timestamps to track axis `offset` in output(s)
         buffer_tvec = np.arange(self._state.buffer.shape[axis_idx]).astype(float)
@@ -201,7 +219,9 @@ class WindowTransformer(
         if self.settings.window_shift is not None and self._state.shift_deficit > 0:
             n_skip = min(self._state.buffer.shape[axis_idx], self._state.shift_deficit)
             if n_skip > 0:
-                self._state.buffer = slice_along_axis(self._state.buffer, slice(n_skip, None), axis_idx)
+                self._state.buffer = slice_along_axis(
+                    self._state.buffer, slice(n_skip, None), axis_idx
+                )
                 buffer_tvec = buffer_tvec[n_skip:]
                 self._state.shift_deficit -= n_skip
 
@@ -221,30 +241,45 @@ class WindowTransformer(
         # How we update .data and .axes[newaxis] depends on the windowing mode.
         if self.settings.window_shift is None:
             # one-to-one mode -- Each send yields exactly one window containing only the most recent samples.
-            self._state.buffer = slice_along_axis(self._state.buffer, slice(-self._state.window_samples, None), axis_idx)
+            self._state.buffer = slice_along_axis(
+                self._state.buffer, slice(-self._state.window_samples, None), axis_idx
+            )
             out_dat = self._state.buffer.reshape(
-                self._state.buffer.shape[:axis_idx] + (1,) + self._state.buffer.shape[axis_idx:]
+                self._state.buffer.shape[:axis_idx]
+                + (1,)
+                + self._state.buffer.shape[axis_idx:]
             )
             win_offset = buffer_tvec[-self._state.window_samples]
         elif self._state.buffer.shape[axis_idx] >= self._state.window_samples:
             # Deterministic window shifts.
-            sliding_win_fun = sparse_sliding_win_oneaxis if b_sparse else sliding_win_oneaxis
-            out_dat = sliding_win_fun(self._state.buffer, self._state.window_samples, axis_idx, step=self._state.window_shift_samples)
-            offset_view = sliding_win_oneaxis(buffer_tvec, self._state.window_samples, 0)[
-                          ::self._state.window_shift_samples
-                          ]
+            sliding_win_fun = (
+                sparse_sliding_win_oneaxis if b_sparse else sliding_win_oneaxis
+            )
+            out_dat = sliding_win_fun(
+                self._state.buffer,
+                self._state.window_samples,
+                axis_idx,
+                step=self._state.window_shift_samples,
+            )
+            offset_view = sliding_win_oneaxis(
+                buffer_tvec, self._state.window_samples, 0
+            )[:: self._state.window_shift_samples]
             win_offset = offset_view[0, 0]
 
             # Drop expired beginning of buffer and update shift_deficit
             multi_shift = self._state.window_shift_samples * out_dat.shape[axis_idx]
-            self._state.shift_deficit = max(0, multi_shift - self._state.buffer.shape[axis_idx])
-            self._state.buffer = slice_along_axis(self._state.buffer, slice(multi_shift, None), axis_idx)
+            self._state.shift_deficit = max(
+                0, multi_shift - self._state.buffer.shape[axis_idx]
+            )
+            self._state.buffer = slice_along_axis(
+                self._state.buffer, slice(multi_shift, None), axis_idx
+            )
         else:
             # Not enough data to make a new window. Return empty data.
             empty_data_shape = (
-                    message.data.shape[:axis_idx]
-                    + (0, self._state.window_samples)
-                    + message.data.shape[axis_idx + 1:]
+                message.data.shape[:axis_idx]
+                + (0, self._state.window_samples)
+                + message.data.shape[axis_idx + 1 :]
             )
             out_dat = np.zeros(empty_data_shape, dtype=message.data.dtype)
             # out_newaxis will have first timestamp in input... but mostly meaningless because output is size-zero.
@@ -257,7 +292,10 @@ class WindowTransformer(
         self._state.out_newaxis = replace(self._state.out_newaxis, offset=win_offset)
 
         msg_out = replace(
-            message, data=out_dat, dims=self._state.out_dims, axes={**out_axes, _newaxis: self._state.out_newaxis}
+            message,
+            data=out_dat,
+            dims=self._state.out_dims,
+            axes={**out_axes, _newaxis: self._state.out_newaxis},
         )
         return msg_out
 
@@ -270,7 +308,16 @@ def windowing(
     zero_pad_until: str = "full",
     anchor: str | Anchor = Anchor.BEGINNING,
 ) -> WindowTransformer:
-    return WindowTransformer(WindowSettings(axis=axis, newaxis=newaxis, window_dur=window_dur, window_shift=window_shift, zero_pad_until=zero_pad_until, anchor=anchor))
+    return WindowTransformer(
+        WindowSettings(
+            axis=axis,
+            newaxis=newaxis,
+            window_dur=window_dur,
+            window_shift=window_shift,
+            zero_pad_until=zero_pad_until,
+            anchor=anchor,
+        )
+    )
 
 
 class Window(

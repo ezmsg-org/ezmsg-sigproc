@@ -78,7 +78,7 @@ def test_window_generator(
         window_dur=win_dur,
         window_shift=win_shift,
         zero_pad_until=zero_pad,
-        anchor=anchor
+        anchor=anchor,
     )
 
     # Create inputs and send them to the process, collecting the results along the way.

@@ -113,7 +113,9 @@ async def test_resample(
 @pytest.mark.asyncio
 async def test_resample_project(irregular_messages):
     new_rate = 128.0
-    resample = ResampleProcessor(resample_rate=new_rate, max_chunk_delay=0.1, fill_value="last")
+    resample = ResampleProcessor(
+        resample_rate=new_rate, max_chunk_delay=0.1, fill_value="last"
+    )
     results = []
     n_returned = 0
     for msg_ix, msg in enumerate(irregular_messages[:-1]):
