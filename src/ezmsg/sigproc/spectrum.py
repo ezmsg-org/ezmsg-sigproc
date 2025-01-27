@@ -85,7 +85,8 @@ class SpectrumSettings(ez.Settings):
 
 class SpectrumState(ez.State):
     hash: int = 0
-    f_sl: slice = slice(None)
+    f_sl: slice | None = None
+    # I would prefer `slice(None)` as f_sl default but this fails because it is mutable.
     freq_axis: AxisArray.LinearAxis | None = None
     fftfun: typing.Callable | None = None
     f_transform: typing.Callable | None = None
@@ -137,6 +138,7 @@ class SpectrumTransformer(
 
         # Pre-calculate frequencies and select our fft function.
         b_complex = message.data.dtype.kind == "c"
+        self.state.f_sl = slice(None)
         if (not b_complex) and self.settings.output == SpectralOutput.POSITIVE:
             # If input is not complex and desired output is SpectralOutput.POSITIVE, we can save some computation
             #  by using rfft and rfftfreq.
