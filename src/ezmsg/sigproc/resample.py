@@ -71,12 +71,12 @@ class ResampleProcessor(
 
         ax_idx: int = message.get_axis_idx(self.settings.axis)
         ax = message.axes[self.settings.axis]
+        in_dat = message.data
         in_tvec = (
             ax.data
             if hasattr(ax, "data")
             else ax.value(np.arange(in_dat.shape[ax_idx]))
         )
-        in_dat = message.data
         if ax_idx != 0:
             in_dat = np.moveaxis(in_dat, ax_idx, 0)
 
