@@ -253,7 +253,10 @@ def spectrum(
             out_axis=out_axis,
             window=window,
             transform=transform,
-            output=output
+            output=output,
+            norm=norm,
+            do_fftshift=do_fftshift,
+            nfft=nfft
         )
     )
 
