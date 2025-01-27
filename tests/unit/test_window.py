@@ -43,7 +43,7 @@ def test_window_gen_nodur():
 @pytest.mark.parametrize("msg_block_size", [1, 5, 10, 20, 60])
 @pytest.mark.parametrize("newaxis", [None, "win"])
 @pytest.mark.parametrize("win_dur", [0.3, 1.0])
-@pytest.mark.parametrize("win_shift", [0.2])#[None, 0.2, 1.0])
+@pytest.mark.parametrize("win_shift", [None, 0.2, 1.0])
 @pytest.mark.parametrize("zero_pad", ["input", "shift", "none"])
 @pytest.mark.parametrize("fs", [10.0, 500.0])
 @pytest.mark.parametrize("anchor", ["beginning", "middle", "end"])
