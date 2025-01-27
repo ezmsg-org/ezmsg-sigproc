@@ -10,7 +10,6 @@ from ezmsg.util.messages.axisarray import (
     slice_along_axis,
     replace,
 )
-from ezmsg.util.generator import consumer
 
 from .base import BaseSignalTransformer, BaseSignalTransformerUnit
 
@@ -112,10 +111,6 @@ class SpectrumTransformer(
     def reset(self, message: AxisArray) -> None:
         self._state.hash = self._hash_message(message)
 
-        do_fftshift = (
-            self.settings.do_fftshift and self.settings.output == SpectralOutput.FULL
-        )
-
         axis = self.settings.axis or message.dims[0]
         ax_idx = message.get_axis_idx(axis)
         ax_info = message.axes[axis]
@@ -159,7 +154,7 @@ class SpectrumTransformer(
             elif self.settings.output == SpectralOutput.NEGATIVE:
                 freqs = np.fft.fftshift(freqs, axes=-1)
                 self.state.f_sl = slice(None, nfft // 2 + 1)
-            elif self.settings.do_fftshift:  # and FULL
+            elif (self.settings.do_fftshift and self.settings.output == SpectralOutput.FULL):
                 freqs = np.fft.fftshift(freqs, axes=-1)
             freqs = freqs[self.state.f_sl]
         freqs = freqs.tolist()  # To please type checking
@@ -202,7 +197,6 @@ class SpectrumTransformer(
     def _process(self, message: AxisArray) -> AxisArray:
         axis = self.settings.axis or message.dims[0]
         ax_idx = message.get_axis_idx(axis)
-        ax_info = message.axes[axis]
         targ_len = message.data.shape[ax_idx]
 
         new_axes = {
