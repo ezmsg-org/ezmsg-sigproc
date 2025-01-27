@@ -16,6 +16,7 @@ class TransposeSettings(ez.Settings):
     Fields:
       axes:
     """
+
     axes: tuple[int | str | type(...), ...] | None = None
     order: str | None = None
 
@@ -34,6 +35,7 @@ class TransposeTransformer(
     If your pipeline does not already have lowpass filtering then consider
     using the :obj:`Decimate` collection instead.
     """
+
     def _hash_message(self, message: AxisArray) -> int:
         return hash(tuple(message.dims))
 
@@ -51,7 +53,7 @@ class TransposeTransformer(
                 raise ValueError("Only one Ellipsis is allowed in axes.")
             ell_ix = ell_ix[0] if len(ell_ix) == 1 else len(message.dims)
             prefix = []
-            for ax in self.settings.axes[: ell_ix]:
+            for ax in self.settings.axes[:ell_ix]:
                 if isinstance(ax, int):
                     prefix.append(ax)
                 else:
@@ -66,13 +68,20 @@ class TransposeTransformer(
                     if ax not in message.dims:
                         raise ValueError(f"Axis {ax} not found in message dims.")
                     suffix.append(message.dims.index(ax))
-            ells = [_ for _ in range(message.data.ndim) if _ not in prefix and _ not in suffix]
+            ells = [
+                _
+                for _ in range(message.data.ndim)
+                if _ not in prefix and _ not in suffix
+            ]
             re_ix = tuple(prefix + ells + suffix)
             if re_ix == tuple(range(message.data.ndim)):
                 self._state.axes_ints = None
             else:
                 self._state.axes_ints = re_ix
-        if self.settings.order is not None and self.settings.order.upper()[0] not in ["C", "F"]:
+        if self.settings.order is not None and self.settings.order.upper()[0] not in [
+            "C",
+            "F",
+        ]:
             raise ValueError("order must be 'C' or 'F'.")
 
     def __call__(self, message: AxisArray) -> AxisArray:
@@ -92,13 +101,17 @@ class TransposeTransformer(
                 # If the memory is already contiguous in the correct order, np.require won't do anything.
                 msg_out = replace(
                     message,
-                    data=np.require(message.data, requirements=self.settings.order.upper()[0]),
+                    data=np.require(
+                        message.data, requirements=self.settings.order.upper()[0]
+                    ),
                 )
         else:
             dims_out = [message.dims[ix] for ix in self.state.axes_ints]
             data_out = np.transpose(message.data, axes=self.state.axes_ints)
             if self.settings.order is not None:
-                data_out = np.require(data_out, requirements=self.settings.order.upper()[0])
+                data_out = np.require(
+                    data_out, requirements=self.settings.order.upper()[0]
+                )
             msg_out = replace(
                 message,
                 data=data_out,
@@ -108,13 +121,14 @@ class TransposeTransformer(
 
 
 def transpose(
-    axes: tuple[int | str | type(...), ...] | None = None,
-    order: str | None = None
+    axes: tuple[int | str | type(...), ...] | None = None, order: str | None = None
 ) -> TransposeTransformer:
     return TransposeTransformer(TransposeSettings(axes=axes, order=order))
 
 
 class Transpose(
-    BaseSignalTransformerUnit[TransposeState, TransposeSettings, AxisArray, TransposeTransformer]
+    BaseSignalTransformerUnit[
+        TransposeState, TransposeSettings, AxisArray, TransposeTransformer
+    ]
 ):
     SETTINGS = TransposeSettings

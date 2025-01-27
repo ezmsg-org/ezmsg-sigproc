@@ -93,16 +93,18 @@ class SpectrumState(ez.State):
     new_dims: list[str] | None = None
     window: npt.NDArray | None = None
 
+
 class SpectrumTransformer(
     BaseSignalTransformer[SpectrumState, SpectrumSettings, AxisArray]
 ):
-
     def _hash_message(self, message: AxisArray) -> int:
         axis = self.settings.axis or message.dims[0]
         ax_idx = message.get_axis_idx(axis)
         ax_info = message.axes[axis]
         targ_len = message.data.shape[ax_idx]
-        return hash((targ_len, message.data.ndim, message.data.dtype.kind, ax_idx, ax_info.gain))
+        return hash(
+            (targ_len, message.data.ndim, message.data.dtype.kind, ax_idx, ax_info.gain)
+        )
 
     def check_metadata(self, message: AxisArray) -> bool:
         return self.state.hash != self._hash_message(message)
@@ -110,7 +112,9 @@ class SpectrumTransformer(
     def reset(self, message: AxisArray) -> None:
         self._state.hash = self._hash_message(message)
 
-        do_fftshift = self.settings.do_fftshift and self.settings.output == SpectralOutput.FULL
+        do_fftshift = (
+            self.settings.do_fftshift and self.settings.output == SpectralOutput.FULL
+        )
 
         axis = self.settings.axis or message.dims[0]
         ax_idx = message.get_axis_idx(axis)
@@ -128,10 +132,10 @@ class SpectrumTransformer(
             + [1] * (message.data.ndim - 1 - ax_idx)
         )
         if self.settings.transform != SpectralTransform.RAW_COMPLEX and not (
-                self.settings.transform == SpectralTransform.REAL
-                or self.settings.transform == SpectralTransform.IMAG
+            self.settings.transform == SpectralTransform.REAL
+            or self.settings.transform == SpectralTransform.IMAG
         ):
-            scale = np.sum(window ** 2.0) * ax_info.gain
+            scale = np.sum(window**2.0) * ax_info.gain
 
         if self.settings.window != WindowFunction.NONE:
             self.state.window = window
@@ -141,10 +145,14 @@ class SpectrumTransformer(
         if (not b_complex) and self.settings.output == SpectralOutput.POSITIVE:
             # If input is not complex and desired output is SpectralOutput.POSITIVE, we can save some computation
             #  by using rfft and rfftfreq.
-            self.state.fftfun = partial(np.fft.rfft, n=nfft, axis=ax_idx, norm=self.settings.norm)
+            self.state.fftfun = partial(
+                np.fft.rfft, n=nfft, axis=ax_idx, norm=self.settings.norm
+            )
             freqs = np.fft.rfftfreq(nfft, d=ax_info.gain * targ_len / nfft)
         else:
-            self.state.fftfun = partial(np.fft.fft, n=nfft, axis=ax_idx, norm=self.settings.norm)
+            self.state.fftfun = partial(
+                np.fft.fft, n=nfft, axis=ax_idx, norm=self.settings.norm
+            )
             freqs = np.fft.fftfreq(nfft, d=ax_info.gain * targ_len / nfft)
             if self.settings.output == SpectralOutput.POSITIVE:
                 self.state.f_sl = slice(None, nfft // 2 + 1 - (nfft % 2))
@@ -159,11 +167,11 @@ class SpectrumTransformer(
             unit="Hz", gain=freqs[1] - freqs[0], offset=freqs[0]
         )
         self.state.new_dims = (
-                message.dims[:ax_idx]
-                + [
-                    self.settings.out_axis or axis,
-                ]
-                + message.dims[ax_idx + 1:]
+            message.dims[:ax_idx]
+            + [
+                self.settings.out_axis or axis,
+            ]
+            + message.dims[ax_idx + 1 :]
         )
 
         def f_transform(x):
@@ -197,16 +205,27 @@ class SpectrumTransformer(
         ax_info = message.axes[axis]
         targ_len = message.data.shape[ax_idx]
 
-        new_axes = {k: v for k, v in message.axes.items() if k not in [self.settings.out_axis, axis]}
+        new_axes = {
+            k: v
+            for k, v in message.axes.items()
+            if k not in [self.settings.out_axis, axis]
+        }
         new_axes[self.settings.out_axis or axis] = self.state.freq_axis
 
         if self.state.window is not None:
             win_dat = message.data * self.state.window
         else:
             win_dat = message.data
-        spec = self.state.fftfun(win_dat, n=self.settings.nfft or targ_len, axis=ax_idx, norm=self.settings.norm)
+        spec = self.state.fftfun(
+            win_dat,
+            n=self.settings.nfft or targ_len,
+            axis=ax_idx,
+            norm=self.settings.norm,
+        )
         # Note: norm="forward" equivalent to `/ nfft`
-        if (self.settings.do_fftshift and self.settings.output == SpectralOutput.FULL) or self.settings.output == SpectralOutput.NEGATIVE:
+        if (
+            self.settings.do_fftshift and self.settings.output == SpectralOutput.FULL
+        ) or self.settings.output == SpectralOutput.NEGATIVE:
             spec = np.fft.fftshift(spec, axes=ax_idx)
         spec = self.state.f_transform(spec)
         spec = slice_along_axis(spec, self.state.f_sl, ax_idx)
@@ -256,12 +275,14 @@ def spectrum(
             output=output,
             norm=norm,
             do_fftshift=do_fftshift,
-            nfft=nfft
+            nfft=nfft,
         )
     )
 
 
 class Spectrum(
-    BaseSignalTransformerUnit[SpectrumState, SpectrumSettings, AxisArray, SpectrumTransformer]
+    BaseSignalTransformerUnit[
+        SpectrumState, SpectrumSettings, AxisArray, SpectrumTransformer
+    ]
 ):
     SETTINGS = SpectrumSettings

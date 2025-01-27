@@ -11,13 +11,16 @@ from ezmsg.sigproc.transpose import TransposeTransformer
 from util import get_test_fn, assert_messages_equal
 
 
-@pytest.mark.parametrize("axes", [
-    ["time", "d1", "d2"],  # No-op
-    None,  # No-op
-    ["time", ...],  # No-op
-    [..., "time"],  # Move time to the end
-    ["time", "d2", "d1"],  # Keep time but Swap d1 and d2
-])
+@pytest.mark.parametrize(
+    "axes",
+    [
+        ["time", "d1", "d2"],  # No-op
+        None,  # No-op
+        ["time", ...],  # No-op
+        [..., "time"],  # Move time to the end
+        ["time", "d2", "d1"],  # Keep time but Swap d1 and d2
+    ],
+)
 @pytest.mark.parametrize("order", ["C", "F", None])
 def test_transpose(axes: tuple[int, ...] | None, order: str | None):
     fs = 100.0
@@ -37,7 +40,9 @@ def test_transpose(axes: tuple[int, ...] | None, order: str | None):
     assert_messages_equal(test_input, backup)
 
     # Assert output is transposed
-    if (axes is None or axes in [["time", "d1", "d2"], ["time", ...]]) and (order is None or order is "C"):
+    if (axes is None or axes in [["time", "d1", "d2"], ["time", ...]]) and (
+        order is None or order is "C"
+    ):
         # No-op path.
         assert_messages_equal(results, test_input)
         if order is None:

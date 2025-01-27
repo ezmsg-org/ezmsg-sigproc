@@ -171,6 +171,7 @@ class CWTSettings(ez.Settings):
     Settings for :obj:`CWT`
     See :obj:`cwt` for argument details.
     """
+
     frequencies: list | tuple | npt.NDArray | None
     wavelet: str | pywt.ContinuousWavelet | pywt.Wavelet
     min_phase: MinPhaseMode = MinPhaseMode.NONE

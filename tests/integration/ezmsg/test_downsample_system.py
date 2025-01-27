@@ -66,7 +66,9 @@ class DownsampleSystem(ez.Collection):
 
 @pytest.mark.parametrize("block_size", [10])
 @pytest.mark.parametrize("target_rate", [6.3])
-def test_downsample_system(block_size: int, target_rate: float, test_name: str | None = None):
+def test_downsample_system(
+    block_size: int, target_rate: float, test_name: str | None = None
+):
     in_fs = 19.0
     num_msgs = int(4.0 / (block_size / in_fs))  # Ensure 4 seconds of data
 

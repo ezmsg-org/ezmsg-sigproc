@@ -103,7 +103,9 @@ class DownsampleTransformer(
 
 
 class Downsample(
-    BaseSignalTransformerUnit[DownsampleState, DownsampleSettings, AxisArray, DownsampleTransformer]
+    BaseSignalTransformerUnit[
+        DownsampleState, DownsampleSettings, AxisArray, DownsampleTransformer
+    ]
 ):
     SETTINGS = DownsampleSettings
 
