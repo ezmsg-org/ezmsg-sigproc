@@ -12,7 +12,6 @@ from ezmsg.util.messages.axisarray import (
     sliding_win_oneaxis,
     replace,
 )
-from ezmsg.util.generator import consumer
 
 from .base import BaseSignalTransformer, BaseSignalTransformerUnit
 from .util.sparse import sliding_win_oneaxis as sparse_sliding_win_oneaxis

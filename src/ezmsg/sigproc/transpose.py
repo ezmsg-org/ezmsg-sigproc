@@ -1,7 +1,6 @@
 import numpy as np
 from ezmsg.util.messages.axisarray import (
     AxisArray,
-    slice_along_axis,
     replace,
 )
 import ezmsg.core as ez
