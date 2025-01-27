@@ -109,3 +109,68 @@ def assert_messages_equal(messages1, messages2):
                 assert v == msg2.axes[k]
         else:
             assert msg1.__dict__ == msg2.__dict__
+
+
+def calculate_expected_windows(
+    orig,
+    fs,
+    win_shift,
+    zero_pad,
+    anchor,
+    msg_block_size,
+    shift_len,
+    win_len,
+    nchans,
+    data_len,
+    n_msgs,
+    win_ax,
+):
+    """
+    Used by unit/test_window and integration/ezmsg/test_window to calculate the expected output of a windowing operation.
+    """
+    # For the calculation, we assume time_ax is last then transpose if necessary at the end.
+    expected = orig.copy()
+    tvec = np.arange(orig.shape[1]) / fs
+    # Prepend the data with zero-padding, if necessary.
+    if win_shift is None or zero_pad == "input":
+        n_cut = msg_block_size
+    elif zero_pad == "shift":
+        n_cut = shift_len
+    else:  # "none" -- no buffer needed
+        n_cut = win_len
+    n_keep = win_len - n_cut
+    if n_keep > 0:
+        expected = np.concatenate(
+            (np.zeros((nchans, win_len))[..., -n_keep:], expected), axis=-1
+        )
+        tvec = np.hstack(((np.arange(-win_len, 0) / fs)[-n_keep:], tvec))
+    # Moving window -- assumes step size of 1
+    expected = sliding_window_view(expected, win_len, axis=-1)
+    tvec = sliding_window_view(tvec, win_len)
+    # Mimic win_shift
+    if win_shift is None:
+        # 1:1 mode. Each input (block) yields a new output.
+        # If the window length is smaller than the block size then we only the tail of each block.
+        first = max(min(msg_block_size, data_len) - win_len, 0)
+        if tvec[::msg_block_size].shape[0] < n_msgs:
+            expected = np.concatenate(
+                (expected[:, first::msg_block_size], expected[:, -1:]), axis=1
+            )
+            tvec = np.hstack((tvec[first::msg_block_size, 0], tvec[-1:, 0]))
+        else:
+            expected = expected[:, first::msg_block_size]
+            tvec = tvec[first::msg_block_size, 0]
+    else:
+        expected = expected[:, ::shift_len]
+        tvec = tvec[::shift_len, 0]
+
+    if anchor == "middle":
+        tvec = tvec + win_len / (2 * fs)
+    elif anchor == "end":
+        tvec = tvec + win_len / fs
+
+    # Transpose to put time_ax and win_ax in the correct locations.
+    if win_ax == 0:
+        expected = np.moveaxis(expected, 0, -1)
+
+    return expected, tvec

@@ -37,7 +37,7 @@ def test_affine_generator():
     _ = gen.send(msg_in)
 
     # Test with weights from a CSV file.
-    csv_path = Path(__file__).parent / "resources" / "xform.csv"
+    csv_path = Path(__file__).parents[1] / "resources" / "xform.csv"
     weights = np.loadtxt(csv_path, delimiter=",")
     expected_out = in_dat @ weights.T
     # Same result: expected_out = np.vstack([(step[None, :] * weights).sum(axis=1) for step in in_dat])
