@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 import math
+import pickle
 import traceback
 import typing
 
@@ -33,7 +34,8 @@ class StatefulProcessor(typing.Protocol[StateType, SettingsType, MessageType]):
 
     @staticmethod
     def stateful_op(
-        state: StateType, message: MessageType
+        state: StateType,
+        message: MessageType,
     ) -> tuple[StateType]: ...
 
 
@@ -67,9 +69,20 @@ class BaseStatefulProcessor(ABC, typing.Generic[StateType, SettingsType, Message
         return self._state
 
     @state.setter
-    def state(self, state: StateType) -> None:
+    def state(self, state: StateType | bytes | None) -> None:
+        """
+        Restore state from serialized state or StateType instance.
+
+        Args:
+            state: _description_
+        """
+        # Ignore state if None. This is required for stateful_op calls that do not want to update state.
         if state is not None:
-            self._state = state
+            # state_type = typing.get_args(self.__orig_bases__[0])[0]
+            if isinstance(state, bytes):
+                self._state = pickle.loads(state)
+            else:
+                self._state = state
 
     @abstractmethod
     def _process(self, message: MessageType): ...
@@ -80,7 +93,9 @@ class BaseStatefulProcessor(ABC, typing.Generic[StateType, SettingsType, Message
         return self._process(message)
 
     def stateful_op(
-        self, state: StateType, message: MessageType
+        self,
+        state: StateType,
+        message: MessageType,
     ) -> StateType:
         self.state = state
         self.process(message)
@@ -117,6 +132,7 @@ class BaseProcessorUnit(
     Where CustomTransformerState, CustomTransformerSettings, and CustomTransformer
     are custom implementations of ez.State, ez.Settings, and BaseStatefulProcessor, respectively.
     """
+
     INPUT_SIGNAL = ez.InputStream(MessageType)
     INPUT_SETTINGS = ez.InputStream(SettingsType)
 
@@ -143,14 +159,17 @@ class BaseProcessorUnit(
             ez.logger.info(traceback.format_exc())
 
 
-class SignalTransformer(StatefulProcessor, typing.Protocol[StateType, SettingsType, MessageType]):
+class SignalTransformer(
+    StatefulProcessor, typing.Protocol[StateType, SettingsType, MessageType]
+):
     # Override __call__ annotation because _process now returns a message.
     def __call__(self, message: MessageType) -> MessageType: ...
 
     # Override stateful_op from parent protocol to return a message.
     @staticmethod
     def stateful_op(
-        state: StateType, message: MessageType
+        state: StateType,
+        message: MessageType,
     ) -> tuple[StateType, MessageType]: ...
 
 
@@ -162,11 +181,14 @@ class BaseSignalTransformer(
 
     Create a concrete transformer by subclassing this class and implementing the abstract methods.
     """
+
     @abstractmethod
     def _process(self, message: MessageType) -> MessageType: ...
 
     def stateful_op(
-        self, state: StateType, message: MessageType
+        self,
+        state: StateType,
+        message: MessageType,
     ) -> tuple[StateType, MessageType]:
         self.state = state
         result = self(message)
@@ -177,7 +199,8 @@ TransformerType = typing.TypeVar("TransformerType", bound=BaseSignalTransformer)
 
 
 class BaseSignalTransformerUnit(
-    BaseProcessorUnit, typing.Generic[StateType, SettingsType, MessageType, TransformerType]
+    BaseProcessorUnit,
+    typing.Generic[StateType, SettingsType, MessageType, TransformerType],
 ):
     """
     Implement a new Unit as follows:
@@ -194,6 +217,7 @@ class BaseSignalTransformerUnit(
     Where CustomTransformerState, CustomTransformerSettings, and CustomTransformer
     are custom implementations of ez.State, ez.Settings, and BaseSignalTransformer, respectively.
     """
+
     INPUT_SIGNAL = ez.InputStream(MessageType)
     OUTPUT_SIGNAL = ez.OutputStream(MessageType)
 
@@ -225,7 +249,7 @@ class BaseAdaptiveSignalTransformer(
     BaseSignalTransformer, ABC, typing.Generic[StateType, SettingsType, MessageType]
 ):
     def __call__(self, message: typing.Union[MessageType, SampleMessage]) -> None:
-        """"
+        """
         Adapt transformer with training data (and optionally labels)
         in SampleMessage
 
@@ -242,7 +266,8 @@ class BaseAdaptiveSignalTransformer(
 
 
 class BaseAdaptiveSignalTransformerUnit(
-    BaseSignalTransformerUnit, typing.Generic[StateType, SettingsType, MessageType, TransformerType]
+    BaseSignalTransformerUnit,
+    typing.Generic[StateType, SettingsType, MessageType, TransformerType],
 ):
     INPUT_SAMPLE = ez.InputStream(SampleMessage)
 
@@ -280,7 +305,8 @@ class BaseAsyncSignalTransformer(
 
 
 class BaseAsyncSignalTransformerUnit(
-    BaseSignalTransformerUnit, typing.Generic[StateType, SettingsType, MessageType, TransformerType]
+    BaseSignalTransformerUnit,
+    typing.Generic[StateType, SettingsType, MessageType, TransformerType],
 ):
     INPUT_SIGNAL = ez.InputStream(MessageType)
     OUTPUT_SIGNAL = ez.OutputStream(MessageType)
