@@ -1,95 +1,114 @@
+import pickle
 import typing
 
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.util.generator import consumer, compose
 from ezmsg.util.messages.modify import modify_axis
 
-from .window import windowing, Anchor
-from .spectrum import spectrum, WindowFunction, SpectralTransform, SpectralOutput
-from .base import GenAxisArray
-
-
-@consumer
-def spectrogram(
-    window_dur: float | None = None,
-    window_shift: float | None = None,
-    window_anchor: str | Anchor = Anchor.BEGINNING,
-    window: WindowFunction = WindowFunction.HANNING,
-    transform: SpectralTransform = SpectralTransform.REL_DB,
-    output: SpectralOutput = SpectralOutput.POSITIVE,
-) -> typing.Generator[AxisArray | None, AxisArray, None]:
-    """
-    Calculate a spectrogram on streaming data.
-
-    Chains :obj:`ezmsg.sigproc.window.windowing` to apply a moving window on the data,
-    :obj:`ezmsg.sigproc.spectrum.spectrum` to calculate spectra for each window,
-    and finally :obj:`ezmsg.util.messages.modify.modify_axis` to convert the win axis back to time axis.
-
-    Args:
-        window_dur: See :obj:`ezmsg.sigproc.window.windowing`
-        window_shift: See :obj:`ezmsg.sigproc.window.windowing`
-        window_anchor: See :obj:`ezmsg.sigproc.window.windowing`
-        window: See :obj:`ezmsg.sigproc.spectrum.spectrum`
-        transform: See :obj:`ezmsg.sigproc.spectrum.spectrum`
-        output: See :obj:`ezmsg.sigproc.spectrum.spectrum`
-
-    Returns:
-        A primed generator object that expects an :obj:`AxisArray` via `.send(axis_array)`
-        with continuous data in its .data payload, and yields an :obj:`AxisArray` of time-frequency power values.
-    """
-
-    pipeline = compose(
-        windowing(
-            axis="time",
-            newaxis="win",
-            window_dur=window_dur,
-            window_shift=window_shift,
-            zero_pad_until="shift" if window_shift is not None else "input",
-            anchor=window_anchor,
-        ),
-        spectrum(axis="time", window=window, transform=transform, output=output),
-        modify_axis(name_map={"win": "time"}),
-    )
-
-    # State variables
-    msg_out: AxisArray | None = None
-
-    while True:
-        msg_in: AxisArray = yield msg_out
-        msg_out = pipeline(msg_in)
+from .window import Anchor, WindowTransformer, WindowState
+from .spectrum import WindowFunction, SpectralTransform, SpectralOutput, SpectrumTransformer, SpectrumState
+from .base import BaseSignalTransformer, BaseSignalTransformerUnit
 
 
 class SpectrogramSettings(ez.Settings):
     """
-    Settings for :obj:`Spectrogram`.
-    See :obj:`spectrogram` for a description of the parameters.
+    Settings for :obj:`SpectrogramTransformer`.
     """
 
-    window_dur: float | None = None  # window duration in seconds
+    window_dur: float | None = None
+    """window duration in seconds."""
+
     window_shift: float | None = None
     """"window step in seconds. If None, window_shift == window_dur"""
+
     window_anchor: str | Anchor = Anchor.BEGINNING
+    """See :obj"`WindowTransformer`"""
 
-    # See SpectrumSettings for details of following settings:
     window: WindowFunction = WindowFunction.HAMMING
+    """The :obj:`WindowFunction` to apply to the data slice prior to calculating the spectrum."""
+
     transform: SpectralTransform = SpectralTransform.REL_DB
+    """The :obj:`SpectralTransform` to apply to the spectral magnitude."""
+
     output: SpectralOutput = SpectralOutput.POSITIVE
+    """The :obj:`SpectralOutput` format."""
 
 
-class Spectrogram(GenAxisArray):
+class SpectrogramState(ez.State):
     """
-    Unit for :obj:`spectrogram`.
+    State for :obj:`Spectrogram`.
     """
+    window_state: WindowState | None = None
+    spectrum_state: SpectrumState | None = None
 
+
+class SpectrogramTransformer(
+    BaseSignalTransformer[SpectrogramState, SpectrogramSettings, AxisArray]
+):
+    def __init__(self, *args, settings: typing.Optional[SpectrogramSettings] = None, **kwargs):
+        super().__init__(*args, settings=settings, **kwargs)
+        self._windowing = WindowTransformer(
+            axis="time",
+            newaxis="win",
+            window_dur=self.settings.window_dur,
+            window_shift=self.settings.window_shift,
+            zero_pad_until="shift" if self.settings.window_shift is not None else "input",
+            anchor=self.settings.window_anchor,
+        )
+        self._spectrum = SpectrumTransformer(axis="time", window=self.settings.window, transform=self.settings.transform,
+                 output=self.settings.output)
+        self._modify_axis = modify_axis(name_map={"win": "time"})
+
+    def check_metadata(self, message: AxisArray) -> bool:
+        # Unused because we override __call__
+        return False
+
+    def reset(self, message: AxisArray) -> None:
+        # Unused because we override __call__
+        pass
+
+    def _process(self, message: AxisArray) -> AxisArray:
+        # Unused because we override __call__
+        # TODO: Maybe _process should be removed from the protocol.
+        return message
+
+    def __call__(self, message: AxisArray):
+        message = self._windowing(message)
+        message = self._spectrum(message)
+        message = self._modify_axis.send(message)
+        return message
+
+    @property
+    def state(self) -> SpectrogramState:
+        # Update self._state with the latest state from the sub-transformers
+        self._state.window_state = self._windowing.state
+        self._state.spectrum_state = self._spectrum.state
+        return self._state
+
+    @state.setter
+    def state(self, state: SpectrogramState | bytes | None) -> None:
+        """
+        Restore state from serialized state or SpectrogramState instance.
+
+        Args:
+            state: _description_
+        """
+        # Ignore state if None. This is required for stateful_op calls that do not want to update state.
+        if state is not None:
+            if isinstance(state, bytes):
+                self._state = pickle.loads(state)
+            else:
+                self._state = state
+
+            # Update sub-transformer states with provided state
+            self._windowing.state = self._state.window_state
+            self._spectrum.state = self._state.spectrum_state
+
+
+class Spectrum(
+    BaseSignalTransformerUnit[
+        SpectrogramState, SpectrogramSettings, AxisArray, SpectrogramTransformer
+    ]
+):
     SETTINGS = SpectrogramSettings
 
-    def construct_generator(self):
-        self.STATE.gen = spectrogram(
-            window_dur=self.SETTINGS.window_dur,
-            window_shift=self.SETTINGS.window_shift,
-            window_anchor=self.SETTINGS.window_anchor,
-            window=self.SETTINGS.window,
-            transform=self.SETTINGS.transform,
-            output=self.SETTINGS.output,
-        )
