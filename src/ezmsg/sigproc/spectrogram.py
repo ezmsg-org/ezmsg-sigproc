@@ -105,10 +105,30 @@ class SpectrogramTransformer(
             self._spectrum.state = self._state.spectrum_state
 
 
-class Spectrum(
+class Spectrogram(
     BaseSignalTransformerUnit[
         SpectrogramState, SpectrogramSettings, AxisArray, SpectrogramTransformer
     ]
 ):
     SETTINGS = SpectrogramSettings
 
+
+def spectrogram(
+    window_dur: float | None = None,
+    window_shift: float | None = None,
+    window_anchor: str | Anchor = Anchor.BEGINNING,
+    window: WindowFunction = WindowFunction.HAMMING,
+    transform: SpectralTransform = SpectralTransform.REL_DB,
+    output: SpectralOutput = SpectralOutput.POSITIVE,
+) -> SpectrogramTransformer:
+
+    return SpectrogramTransformer(
+        SpectrogramSettings(
+            window_dur=window_dur,
+            window_shift=window_shift,
+            window_anchor=window_anchor,
+            window=window,
+            transform=transform,
+            output=output,
+        )
+    )
