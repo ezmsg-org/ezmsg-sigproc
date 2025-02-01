@@ -4,7 +4,7 @@ import numpy as np
 
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.sigproc.spectrum import WindowFunction, SpectralTransform, SpectralOutput
-from ezmsg.sigproc.spectrogram import spectrogram
+from ezmsg.sigproc.spectrogram import SpectrogramTransformer
 
 from util import create_messages_with_periodic_signal, assert_messages_equal
 
@@ -62,7 +62,7 @@ def test_spectrogram():
     )
     backup = [copy.deepcopy(_) for _ in messages]
 
-    gen = spectrogram(
+    proc = SpectrogramTransformer(
         window_dur=win_dur,
         window_shift=win_step_dur,
         window=WindowFunction.HANNING,
@@ -70,7 +70,7 @@ def test_spectrogram():
         output=SpectralOutput.POSITIVE,
     )
 
-    results = [gen.send(msg) for msg in messages]
+    results = [proc.send(msg) for msg in messages]
     results = [_ for _ in results if _.data.size]  # Drop empty messages
 
     assert_messages_equal(messages, backup)
