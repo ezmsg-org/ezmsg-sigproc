@@ -1,15 +1,9 @@
-import copy
 from dataclasses import field
 import os
-import pytest
 
-import numpy as np
-import scipy.signal as sps
-import scipy.fft as sp_fft
 import ezmsg.core as ez
-from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
+from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.sigproc.spectrum import (
-    spectrum,
     SpectralTransform,
     SpectralOutput,
     WindowFunction,
@@ -23,8 +17,6 @@ from ezmsg.util.messagecodec import message_log
 from ezmsg.util.terminate import TerminateOnTotal, TerminateOnTotalSettings
 from util import (
     get_test_fn,
-    create_messages_with_periodic_signal,
-    assert_messages_equal,
 )
 
 

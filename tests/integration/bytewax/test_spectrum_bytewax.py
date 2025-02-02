@@ -4,12 +4,18 @@ import scipy.fft as sp_fft
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.chunker import array_chunker
 
-from ezmsg.sigproc.spectrum import SpectrumTransformer, SpectralTransform, SpectralOutput, WindowFunction
+from ezmsg.sigproc.spectrum import (
+    SpectrumTransformer,
+    SpectralTransform,
+    SpectralOutput,
+    WindowFunction,
+)
 
 try:
     import bytewax.operators as op
     from bytewax.dataflow import Dataflow
     from bytewax.testing import TestingSource, TestingSink, run_main
+
     b_bytewax = True
 except ImportError:
     b_bytewax = False
@@ -17,7 +23,7 @@ except ImportError:
 
 @pytest.fixture
 def axarr_list() -> list[AxisArray]:
-    data = np.arange(3000*4*5).reshape(3000, 4, 5)
+    data = np.arange(3000 * 4 * 5).reshape(3000, 4, 5)
     gen = array_chunker(data, chunk_len=1000, axis=0, fs=1000.0, tzero=0.0)
     return list(gen)
 
@@ -42,7 +48,7 @@ def test_spectrum_bytewax(axarr_list):
             do_fftshift=False,
             out_axis="freq",
             nfft=nfft,
-        ).stateful_op
+        ).stateful_op,
     )
     op.output("out", spectrum_stream, TestingSink(result))
     run_main(flow)
@@ -56,7 +62,6 @@ def test_spectrum_bytewax(axarr_list):
 
     # Compare output to expected
     assert np.allclose(out_data, sp_res)
-    
 
 
 if __name__ == "__main__":
