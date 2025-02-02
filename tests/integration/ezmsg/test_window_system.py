@@ -1,13 +1,9 @@
-import copy
-from dataclasses import field, replace
+from dataclasses import field
 import os
 
 import pytest
 import numpy as np
 import numpy.typing as npt
-from numpy.lib.stride_tricks import sliding_window_view
-from frozendict import frozendict
-import sparse
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messagegate import MessageGate, MessageGateSettings
@@ -18,9 +14,9 @@ from ezmsg.util.terminate import TerminateOnTimeoutSettings as TerminateTestSett
 from ezmsg.util.debuglog import DebugLog
 
 from ezmsg.sigproc.synth import Counter, CounterSettings
-from ezmsg.sigproc.window import Window, WindowSettings, windowing
+from ezmsg.sigproc.window import Window, WindowSettings
 
-from util import get_test_fn, assert_messages_equal, calculate_expected_windows
+from util import get_test_fn, calculate_expected_windows
 
 
 class WindowSystemSettings(ez.Settings):

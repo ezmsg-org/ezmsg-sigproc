@@ -1,19 +1,17 @@
-import copy
 import os
 
 import pytest
 import numpy as np
-from frozendict import frozendict
 
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messagegate import MessageGate, MessageGateSettings
 from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
 from ezmsg.util.messagecodec import message_log
-from ezmsg.sigproc.downsample import downsample, Downsample, DownsampleSettings
+from ezmsg.sigproc.downsample import Downsample, DownsampleSettings
 from ezmsg.sigproc.synth import Counter, CounterSettings
 
-from util import get_test_fn, assert_messages_equal
+from util import get_test_fn
 from ezmsg.util.terminate import TerminateOnTimeout as TerminateTest
 from ezmsg.util.terminate import TerminateOnTimeoutSettings as TerminateTestSettings
 from ezmsg.util.debuglog import DebugLog

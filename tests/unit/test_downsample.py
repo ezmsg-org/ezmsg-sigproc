@@ -7,7 +7,7 @@ from frozendict import frozendict
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.sigproc.downsample import downsample
 
-from util import get_test_fn, assert_messages_equal
+from util import assert_messages_equal
 
 
 @pytest.mark.parametrize("block_size", [1, 5, 10, 20])

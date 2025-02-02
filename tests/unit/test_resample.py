@@ -126,8 +126,10 @@ async def test_resample_project(irregular_messages):
     # Sleep for a bit then get the next **projected** result.
     await asyncio.sleep(0.2)
     result = next(resample)
+    print(result)
 
     # Now send the last message, which will overlap with the projected result,
     #  so some of it will be ignored and dropped!
     resample(irregular_messages[-1])
     result = next(resample)
+    print(result)

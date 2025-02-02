@@ -1,12 +1,8 @@
-import copy
 import os
 
-import numpy as np
-from frozendict import frozendict
 
 import ezmsg.core as ez
 from ezmsg.util.messagecodec import message_log
-from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
 from ezmsg.sigproc.sampler import (
     Sampler,
@@ -14,13 +10,12 @@ from ezmsg.sigproc.sampler import (
     TriggerGenerator,
     TriggerGeneratorSettings,
     SampleTriggerMessage,
-    sampler,
 )
 from ezmsg.sigproc.synth import Oscillator, OscillatorSettings
 from ezmsg.util.terminate import TerminateOnTotal, TerminateOnTotalSettings
 from ezmsg.util.debuglog import DebugLog
 
-from util import get_test_fn, assert_messages_equal
+from util import get_test_fn
 
 
 class SamplerSystemSettings(ez.Settings):

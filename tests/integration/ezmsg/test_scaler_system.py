@@ -12,7 +12,7 @@ from ezmsg.sigproc.scaler import scaler_np
 from ezmsg.sigproc.scaler import AdaptiveStandardScalerSettings, AdaptiveStandardScaler
 from ezmsg.sigproc.synth import Counter, CounterSettings
 
-from util import get_test_fn, assert_messages_equal
+from util import get_test_fn
 
 
 def test_scaler_system(

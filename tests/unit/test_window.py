@@ -3,13 +3,12 @@ from dataclasses import replace
 
 import pytest
 import numpy as np
-from numpy.lib.stride_tricks import sliding_window_view
 from frozendict import frozendict
 import sparse
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.sigproc.window import windowing
 
-from util import get_test_fn, assert_messages_equal, calculate_expected_windows
+from util import assert_messages_equal, calculate_expected_windows
 
 
 def test_window_gen_nodur():
