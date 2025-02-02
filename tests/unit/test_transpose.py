@@ -1,14 +1,12 @@
 import copy
-from frozendict import frozendict
 
 import pytest
 import numpy as np
-from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.chunker import array_chunker
 
 from ezmsg.sigproc.transpose import TransposeTransformer
 
-from util import get_test_fn, assert_messages_equal
+from util import assert_messages_equal
 
 
 @pytest.mark.parametrize(
@@ -41,7 +39,7 @@ def test_transpose(axes: tuple[int, ...] | None, order: str | None):
 
     # Assert output is transposed
     if (axes is None or axes in [["time", "d1", "d2"], ["time", ...]]) and (
-        order is None or order is "C"
+        order is None or order == "C"
     ):
         # No-op path.
         assert_messages_equal(results, test_input)

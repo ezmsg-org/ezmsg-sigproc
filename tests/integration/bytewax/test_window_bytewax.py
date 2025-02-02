@@ -10,6 +10,7 @@ try:
     import bytewax.operators as op
     from bytewax.dataflow import Dataflow
     from bytewax.testing import TestingSource, TestingSink, run_main
+
     b_bytewax = True
 except ImportError:
     b_bytewax = False
@@ -17,7 +18,7 @@ except ImportError:
 
 @pytest.fixture
 def axarr_list() -> list[AxisArray]:
-    data = np.arange(3000*4*5).reshape(3000, 4, 5)
+    data = np.arange(3000 * 4 * 5).reshape(3000, 4, 5)
     gen = array_chunker(data, chunk_len=100, axis=0, fs=1000.0, tzero=0.0)
     return list(gen)
 
@@ -36,8 +37,8 @@ def test_window_bytewax(axarr_list):
             newaxis="win",
             window_dur=1.0,
             window_shift=0.1,
-            zero_pad_until="none"
-        ).stateful_op
+            zero_pad_until="none",
+        ).stateful_op,
     )
     op.output("out", windowed_stream, TestingSink(result))
     run_main(flow)
@@ -52,7 +53,7 @@ def test_window_bytewax(axarr_list):
 
     # Compare to collected
     assert np.array_equal(out_data, expected)
-    
+
 
 if __name__ == "__main__":
     pytest.main(["-vv", __file__])

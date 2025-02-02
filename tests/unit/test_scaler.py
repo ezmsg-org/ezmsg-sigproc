@@ -1,22 +1,15 @@
 import copy
-import os
 import importlib.util
 
 import numpy as np
 from ezmsg.util.messages.chunker import array_chunker
 from frozendict import frozendict
 import pytest
-import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.util.terminate import TerminateOnTotalSettings, TerminateOnTotal
-from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
-from ezmsg.util.messagecodec import message_log
 
 from ezmsg.sigproc.scaler import scaler, scaler_np, EWMA, ewma_step
-from ezmsg.sigproc.scaler import AdaptiveStandardScalerSettings, AdaptiveStandardScaler
-from ezmsg.sigproc.synth import Counter, CounterSettings
 
-from util import get_test_fn, assert_messages_equal
+from util import assert_messages_equal
 
 
 def test_ewma():

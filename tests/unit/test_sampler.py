@@ -9,7 +9,7 @@ from ezmsg.sigproc.sampler import (
     sampler,
 )
 
-from util import get_test_fn, assert_messages_equal
+from util import assert_messages_equal
 
 
 def test_sampler_gen():

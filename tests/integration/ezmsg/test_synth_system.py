@@ -1,7 +1,6 @@
 import asyncio  # noqa: F401
 from dataclasses import field
 import os
-import time
 
 import numpy as np
 import pytest
@@ -13,14 +12,10 @@ from ezmsg.util.messagecodec import message_log
 from ezmsg.util.terminate import TerminateOnTotalSettings, TerminateOnTotal
 from util import get_test_fn
 from ezmsg.sigproc.synth import (
-    clock,
-    aclock,
     Clock,
     ClockSettings,
-    acounter,
     Counter,
     CounterSettings,
-    sin,
     EEGSynth,
     EEGSynthSettings,
 )
