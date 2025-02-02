@@ -9,7 +9,7 @@ import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
-from .base import BaseStatefulProcessor, BaseProcessorUnit
+from .base import ProcessorState, BaseStatefulProcessor, BaseConsumerUnit
 
 
 class ResampleSettings(ez.Settings):
@@ -38,18 +38,17 @@ class ResampleBuffer:
     last_update: float
 
 
-class ResampleState(ez.State):
+class ResampleState(ProcessorState):
     signal_buffer: ResampleBuffer | None = None
     ref_axis: tuple[typing.Union[AxisArray.TimeAxis, AxisArray.CoordinateAxis], int] = (
         AxisArray.TimeAxis(fs=1.0),
         0,
     )
     last_t_out: float | None = None
-    hash: int = 0
 
 
 class ResampleProcessor(
-    BaseStatefulProcessor[ResampleState, ResampleSettings, AxisArray]
+    BaseStatefulProcessor[ResampleSettings, AxisArray, ResampleState]
 ):
     def _hash_message(self, message: AxisArray) -> int:
         ax_idx: int = message.get_axis_idx(self.settings.axis)
@@ -58,17 +57,12 @@ class ResampleProcessor(
         in_fs = (1 / ax.gain) if hasattr(ax, "gain") else None
         return hash((message.key, in_fs) + sample_shape)
 
-    def check_metadata(self, message: AxisArray) -> bool:
-        return self.state.hash != self._hash_message(message)
-
-    def reset(self, message: AxisArray) -> None:
+    def _reset_state(self, message: AxisArray) -> None:
         """
         Reset the internal state based on the incoming message.
         If resample_rate is None, the output is driven by the reference signal.
         The input will still determine the template (except the primary axis) and the buffer.
         """
-        self.state.hash = self._hash_message(message)
-
         ax_idx: int = message.get_axis_idx(self.settings.axis)
         ax = message.axes[self.settings.axis]
         in_dat = message.data
@@ -276,9 +270,7 @@ class ResampleProcessor(
         return next(self)
 
 
-class ResampleUnit(
-    BaseProcessorUnit[ResampleState, ResampleSettings, AxisArray, ResampleProcessor]
-):
+class ResampleUnit(BaseConsumerUnit[ResampleSettings, AxisArray, ResampleProcessor]):
     SETTINGS = ResampleSettings
     INPUT_REFERENCE = ez.InputStream(AxisArray)
     OUTPUT_SIGNAL = ez.OutputStream(AxisArray)

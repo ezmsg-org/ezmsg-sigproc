@@ -13,7 +13,7 @@ from ezmsg.util.messages.axisarray import (
     replace,
 )
 
-from .base import BaseSignalTransformer, BaseSignalTransformerUnit
+from .base import ProcessorState, BaseStatefulTransformer, BaseTransformerUnit
 from .util.sparse import sliding_win_oneaxis as sparse_sliding_win_oneaxis
 from .util.profile import profile_subpub
 
@@ -33,7 +33,7 @@ class WindowSettings(ez.Settings):
     anchor: str | Anchor = Anchor.BEGINNING
 
 
-class WindowState(ez.State):
+class WindowState(ProcessorState):
     buffer: npt.NDArray | sparse.SparseArray | None = None
 
     window_samples: int | None = None
@@ -49,10 +49,10 @@ class WindowState(ez.State):
 
     out_dims: list[str] | None = None
 
-    hash: int = 0
 
-
-class WindowTransformer(BaseSignalTransformer[WindowState, WindowSettings, AxisArray]):
+class WindowTransformer(
+    BaseStatefulTransformer[WindowSettings, AxisArray, WindowState]
+):
     """
     Apply a sliding window along the specified axis to input streaming data.
     The `windowing` method is perhaps the most useful and versatile method in ezmsg.sigproc, but its parameterization
@@ -118,22 +118,16 @@ class WindowTransformer(BaseSignalTransformer[WindowState, WindowSettings, AxisA
                 f"Invalid anchor: {self.settings.anchor}. Valid anchor are: {', '.join([e.value for e in Anchor])}"
             )
 
-    def check_metadata(self, message: AxisArray) -> bool:
-        b_reset = self.state.buffer is None
-
+    def _hash_message(self, message: AxisArray) -> int:
         axis = self.settings.axis or message.dims[0]
         axis_idx = message.get_axis_idx(axis)
         axis_info = message.get_axis(axis)
         fs = 1.0 / axis_info.gain
         samp_shape = message.data.shape[:axis_idx] + message.data.shape[axis_idx + 1 :]
 
-        in_hash = hash(samp_shape + (fs, message.key))
-        b_reset = b_reset or self.state.hash != in_hash
-        if b_reset:
-            self._state.hash = in_hash
-        return b_reset
+        return hash(samp_shape + (fs, message.key))
 
-    def reset(self, message: AxisArray) -> None:
+    def _reset_state(self, message: AxisArray) -> None:
         _newaxis = self.settings.newaxis or "win"
         if not self._state.newaxis_warned and _newaxis in message.dims:
             ez.logger.warning(
@@ -319,9 +313,7 @@ def windowing(
     )
 
 
-class Window(
-    BaseSignalTransformerUnit[WindowState, WindowSettings, AxisArray, WindowTransformer]
-):
+class Window(BaseTransformerUnit[WindowSettings, AxisArray, WindowTransformer]):
     SETTINGS = WindowSettings
     INPUT_SIGNAL = ez.InputStream(AxisArray)
     OUTPUT_SIGNAL = ez.OutputStream(AxisArray)

@@ -5,7 +5,7 @@ from ezmsg.util.messages.axisarray import (
 )
 import ezmsg.core as ez
 
-from .base import BaseSignalTransformer, BaseSignalTransformerUnit
+from .base import ProcessorState, BaseStatefulTransformer, BaseTransformerUnit
 
 
 class TransposeSettings(ez.Settings):
@@ -20,13 +20,12 @@ class TransposeSettings(ez.Settings):
     order: str | None = None
 
 
-class TransposeState(ez.State):
+class TransposeState(ProcessorState):
     axes_ints: tuple[int, ...] | None = None
-    hash: int = 0
 
 
 class TransposeTransformer(
-    BaseSignalTransformer[TransposeState, TransposeSettings, AxisArray]
+    BaseStatefulTransformer[TransposeSettings, AxisArray, TransposeState]
 ):
     """
     Downsampled data simply comprise every `factor`th sample.
@@ -38,12 +37,7 @@ class TransposeTransformer(
     def _hash_message(self, message: AxisArray) -> int:
         return hash(tuple(message.dims))
 
-    def check_metadata(self, message: AxisArray) -> bool:
-        return self.state.hash != self._hash_message(message)
-
-    def reset(self, message: AxisArray) -> None:
-        self._state.hash = self._hash_message(message)
-
+    def _reset_state(self, message: AxisArray) -> None:
         if self.settings.axes is None:
             self._state.axes_ints = None
         else:
@@ -126,8 +120,6 @@ def transpose(
 
 
 class Transpose(
-    BaseSignalTransformerUnit[
-        TransposeState, TransposeSettings, AxisArray, TransposeTransformer
-    ]
+    BaseTransformerUnit[TransposeSettings, AxisArray, TransposeTransformer]
 ):
     SETTINGS = TransposeSettings
