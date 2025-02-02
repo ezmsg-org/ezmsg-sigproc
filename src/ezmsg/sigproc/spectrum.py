@@ -11,7 +11,7 @@ from ezmsg.util.messages.axisarray import (
     replace,
 )
 
-from .base import BaseSignalTransformer, BaseSignalTransformerUnit
+from .base import ProcessorState, BaseStatefulTransformer, BaseTransformerUnit
 
 
 class OptionsEnum(enum.Enum):
@@ -83,8 +83,7 @@ class SpectrumSettings(ez.Settings):
     nfft: int | None = None
 
 
-class SpectrumState(ez.State):
-    hash: int = 0
+class SpectrumState(ProcessorState):
     f_sl: slice | None = None
     # I would prefer `slice(None)` as f_sl default but this fails because it is mutable.
     freq_axis: AxisArray.LinearAxis | None = None
@@ -95,7 +94,7 @@ class SpectrumState(ez.State):
 
 
 class SpectrumTransformer(
-    BaseSignalTransformer[SpectrumState, SpectrumSettings, AxisArray]
+    BaseStatefulTransformer[SpectrumSettings, AxisArray, SpectrumState]
 ):
     def _hash_message(self, message: AxisArray) -> int:
         axis = self.settings.axis or message.dims[0]
@@ -106,12 +105,7 @@ class SpectrumTransformer(
             (targ_len, message.data.ndim, message.data.dtype.kind, ax_idx, ax_info.gain)
         )
 
-    def check_metadata(self, message: AxisArray) -> bool:
-        return self.state.hash != self._hash_message(message)
-
-    def reset(self, message: AxisArray) -> None:
-        self._state.hash = self._hash_message(message)
-
+    def _reset_state(self, message: AxisArray) -> None:
         axis = self.settings.axis or message.dims[0]
         ax_idx = message.get_axis_idx(axis)
         ax_info = message.axes[axis]
@@ -279,9 +273,5 @@ def spectrum(
     )
 
 
-class Spectrum(
-    BaseSignalTransformerUnit[
-        SpectrumState, SpectrumSettings, AxisArray, SpectrumTransformer
-    ]
-):
+class Spectrum(BaseTransformerUnit[SpectrumSettings, AxisArray, SpectrumTransformer]):
     SETTINGS = SpectrumSettings

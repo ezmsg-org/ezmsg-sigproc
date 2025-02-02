@@ -6,7 +6,7 @@ from ezmsg.util.messages.axisarray import (
 )
 import ezmsg.core as ez
 
-from .base import BaseSignalTransformer, BaseSignalTransformerUnit
+from .base import ProcessorState, BaseStatefulTransformer, BaseTransformerUnit
 
 
 class DownsampleSettings(ez.Settings):
@@ -25,18 +25,16 @@ class DownsampleSettings(ez.Settings):
     """Explicitly specify downsample factor.  If specified, target_rate is ignored."""
 
 
-class DownsampleState(ez.State):
+class DownsampleState(ProcessorState):
     q: int = 0
     """The integer downsampling factor. It will be determined based on the target rate."""
 
     s_idx: int = 0
     """Index of the next msg's first sample into the virtual rotating ds_factor counter."""
 
-    hash: int = 0
-
 
 class DownsampleTransformer(
-    BaseSignalTransformer[DownsampleState, DownsampleSettings, AxisArray]
+    BaseStatefulTransformer[DownsampleSettings, AxisArray, DownsampleState]
 ):
     """
     Downsampled data simply comprise every `factor`th sample.
@@ -45,12 +43,10 @@ class DownsampleTransformer(
     using the :obj:`Decimate` collection instead.
     """
 
-    def check_metadata(self, message: AxisArray) -> bool:
-        return self.state.hash != hash(
-            (message.axes[self.settings.axis].gain, message.key)
-        )
+    def _hash_message(self, message: AxisArray) -> int:
+        return hash((message.axes[self.settings.axis].gain, message.key))
 
-    def reset(self, message: AxisArray) -> None:
+    def _reset_state(self, message: AxisArray) -> None:
         axis_info = message.get_axis(self.settings.axis)
 
         if self.settings.factor is not None:
@@ -67,7 +63,6 @@ class DownsampleTransformer(
             q = 1
         self._state.q = q
         self._state.s_idx = 0
-        self._state.hash = hash((axis_info.gain, message.key))
 
     def _process(self, message: AxisArray) -> AxisArray:
         axis = self.settings.axis
@@ -105,9 +100,7 @@ class DownsampleTransformer(
 
 
 class Downsample(
-    BaseSignalTransformerUnit[
-        DownsampleState, DownsampleSettings, AxisArray, DownsampleTransformer
-    ]
+    BaseTransformerUnit[DownsampleSettings, AxisArray, DownsampleTransformer]
 ):
     SETTINGS = DownsampleSettings
 
