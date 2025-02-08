@@ -5,7 +5,7 @@ import numpy as np
 from frozendict import frozendict
 
 from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.sigproc.downsample import downsample
+from ezmsg.sigproc.downsample import DownsampleTransformer
 
 from util import assert_messages_equal
 
@@ -51,10 +51,10 @@ def test_downsample_core(block_size: int, target_rate: float):
     in_msgs = list(msg_generator())
     backup = [copy.deepcopy(msg) for msg in in_msgs]
 
-    proc = downsample(axis="time", target_rate=target_rate)
+    proc = DownsampleTransformer(axis="time", target_rate=target_rate)
     out_msgs = []
     for msg in in_msgs:
-        res = proc.send(msg)
+        res = proc(msg)
         if res.data.size:
             out_msgs.append(res)
 
