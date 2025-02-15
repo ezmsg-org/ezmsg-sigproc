@@ -44,7 +44,7 @@ class AffineTransformTransformer(
 ):
     def __call__(self, message: AxisArray) -> AxisArray:
         # Override __call__ so we can shortcut if weights are None.
-        if self.settings.weights is None:
+        if self.settings.weights is None or (isinstance(self.settings.weights, str) and self.settings.weights == "passthrough"):
             return message
         return super().__call__(message)
 
@@ -54,10 +54,7 @@ class AffineTransformTransformer(
     def _reset_state(self, message: AxisArray) -> None:
         weights = self.settings.weights
         if isinstance(weights, str):
-            if weights == "passthrough":
-                weights = None
-            else:
-                weights = Path(os.path.abspath(os.path.expanduser(weights)))
+            weights = Path(os.path.abspath(os.path.expanduser(weights)))
         if isinstance(weights, Path):
             weights = np.loadtxt(weights, delimiter=",")
         if not self.settings.right_multiply:
