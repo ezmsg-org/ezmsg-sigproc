@@ -15,7 +15,7 @@ from .util.asio import run_coroutine_sync
 
 # --- All processor state classes must inherit from this or at least have .hash ---
 class ProcessorState(ez.State):
-    hash: int = 0
+    hash: int = -1
 
 
 # --- Type variables for protocols and processors ---
@@ -231,10 +231,10 @@ class BaseStatefulProcessor(
         but if it e.g. operates elementwise on the input then it doesn't care if the incoming
         data changes shape or sample rate so you don't need to reset again.
 
-        All processors' initial state should have `.hash = 0` then by returning `-1` here
+        All processors' initial state should have `.hash = -1` then by returning `0` here
         we force an update on the first message.
         """
-        return -1
+        return 0
 
     @abstractmethod
     def _reset_state(self, message: MessageType) -> None:
