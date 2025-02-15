@@ -11,7 +11,7 @@ from ezmsg.sigproc.butterworthfilter import ButterworthFilter
 from ezmsg.sigproc.cheby import ChebyshevFilter
 from ezmsg.sigproc.synth import EEGSynth
 
-from util import get_test_fn
+from tests.helpers.util import get_test_fn
 
 
 @pytest.mark.parametrize("filter_type", ["butter", "cheby1", "cheby2"])

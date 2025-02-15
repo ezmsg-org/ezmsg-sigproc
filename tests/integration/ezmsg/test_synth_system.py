@@ -10,7 +10,7 @@ from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
 from ezmsg.util.messagecodec import message_log
 from ezmsg.util.terminate import TerminateOnTotalSettings, TerminateOnTotal
-from util import get_test_fn
+from tests.helpers.util import get_test_fn
 from ezmsg.sigproc.synth import (
     Clock,
     ClockSettings,
