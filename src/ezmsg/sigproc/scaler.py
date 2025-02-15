@@ -9,7 +9,7 @@ from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 from ezmsg.util.generator import consumer
 
-from .base import GenAxisArray
+from .base import ProcessorState, BaseStatefulTransformer, BaseTransformerUnit
 
 
 def _tau_from_alpha(alpha: float, dt: float) -> float:
@@ -208,67 +208,6 @@ def scaler(
         msg_out = replace(msg_in, data=result)
 
 
-@consumer
-def scaler_np(
-    time_constant: float = 1.0, axis: str | None = None
-) -> typing.Generator[AxisArray, AxisArray, None]:
-    """
-    Create a generator function that applies an adaptive standard scaler.
-    This is faster than :obj:`scaler` for multichannel data.
-
-    Args:
-        time_constant: Decay constant `tau` in seconds.
-        axis: The name of the axis to accumulate statistics over.
-            Note: The axis must be in the msg.axes and be of type AxisArray.LinearAxis.
-
-    Returns:
-        A primed generator object that expects to be sent a :obj:`AxisArray` via `.send(axis_array)`
-         and yields an :obj:`AxisArray` with its data being a standardized, or "Z-scored" version of the input data.
-    """
-    msg_out = AxisArray(np.array([]), dims=[""])
-
-    # State variables
-    samps_ewma: EWMA | None = None
-    vars_sq_ewma: EWMA | None = None
-
-    # Reset if input changes
-    check_input = {
-        "gain": None,  # Resets alpha
-        "shape": None,
-        "key": None,  # Key change implies buffered means/vars are invalid.
-    }
-
-    while True:
-        msg_in: AxisArray = yield msg_out
-
-        axis = axis or msg_in.dims[0]
-        axis_idx = msg_in.get_axis_idx(axis)
-
-        data: npt.NDArray = np.moveaxis(msg_in.data, axis_idx, 0)
-        b_reset = data.shape[1:] != check_input["shape"]
-        b_reset = b_reset or msg_in.axes[axis].gain != check_input["gain"]
-        b_reset = b_reset or msg_in.key != check_input["key"]
-        if b_reset:
-            check_input["shape"] = data.shape[1:]
-            check_input["gain"] = msg_in.axes[axis].gain
-            check_input["key"] = msg_in.key
-            alpha = _alpha_from_tau(time_constant, msg_in.axes[axis].gain)
-            samps_ewma = EWMA(alpha=alpha)
-            vars_sq_ewma = EWMA(alpha=alpha)
-
-        # Update step
-        means = samps_ewma.compute(data)
-        vars_sq_means = vars_sq_ewma.compute(data**2)
-
-        # Get step
-        varis = vars_sq_means - means**2
-        with np.errstate(divide="ignore", invalid="ignore"):
-            result = (data - means) / (varis**0.5)
-        result[np.isnan(result)] = 0.0
-        result = np.moveaxis(result, 0, axis_idx)
-        msg_out = replace(msg_in, data=result)
-
-
 class AdaptiveStandardScalerSettings(ez.Settings):
     """
     Settings for :obj:`AdaptiveStandardScaler`.
@@ -279,12 +218,61 @@ class AdaptiveStandardScalerSettings(ez.Settings):
     axis: str | None = None
 
 
-class AdaptiveStandardScaler(GenAxisArray):
-    """Unit for :obj:`scaler_np`"""
+class AdaptiveStandardScalerState(ProcessorState):
+    samps_ewma: EWMA | None = None
+    vars_sq_ewma: EWMA | None = None
+    alpha: float | None = None
 
+
+class AdaptiveStandardScalerTransformer(
+    BaseStatefulTransformer[
+        AdaptiveStandardScalerSettings, AxisArray, AdaptiveStandardScalerState
+    ]
+):
+    def _hash_message(self, message: AxisArray) -> int:
+        axis = self.settings.axis or message.dims[0]
+        axis_idx = message.get_axis_idx(axis)
+        data: npt.NDArray = np.moveaxis(message.data, axis_idx, 0)
+        return hash((data.shape[1:], message.axes[axis].gain, message.key))
+
+    def _reset_state(self, message: AxisArray) -> None:
+        axis = self.settings.axis or message.dims[0]
+        self._state.alpha = _alpha_from_tau(
+            self.settings.time_constant, message.axes[axis].gain
+        )
+        self._state.samps_ewma = EWMA(alpha=self._state.alpha)
+        self._state.vars_sq_ewma = EWMA(alpha=self._state.alpha)
+
+    def _process(self, message: AxisArray) -> AxisArray:
+        axis = self.settings.axis or message.dims[0]
+        axis_idx = message.get_axis_idx(axis)
+        data = np.moveaxis(message.data, axis_idx, 0)
+
+        # Update step
+        means = self._state.samps_ewma.compute(data)
+        vars_sq_means = self._state.vars_sq_ewma.compute(data**2)
+
+        # Get step
+        varis = vars_sq_means - means**2
+        with np.errstate(divide="ignore", invalid="ignore"):
+            result = (data - means) / (varis**0.5)
+        result[np.isnan(result)] = 0.0
+        result = np.moveaxis(result, 0, axis_idx)
+        return replace(message, data=result)
+
+
+class AdaptiveStandardScaler(
+    BaseTransformerUnit[
+        AdaptiveStandardScalerSettings, AxisArray, AdaptiveStandardScalerTransformer
+    ]
+):
     SETTINGS = AdaptiveStandardScalerSettings
 
-    def construct_generator(self):
-        self.STATE.gen = scaler_np(
-            time_constant=self.SETTINGS.time_constant, axis=self.SETTINGS.axis
-        )
+
+# Backwards compatibility...
+def scaler_np(
+    time_constant: float = 1.0, axis: str | None = None
+) -> AdaptiveStandardScalerTransformer:
+    return AdaptiveStandardScalerTransformer(
+        settings=AdaptiveStandardScalerSettings(time_constant=time_constant, axis=axis)
+    )
