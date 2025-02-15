@@ -6,7 +6,7 @@ import pytest
 
 from ezmsg.sigproc.slicer import slicer, parse_slice
 
-from util import assert_messages_equal
+from tests.helpers.util import assert_messages_equal
 
 
 def test_parse_slice():

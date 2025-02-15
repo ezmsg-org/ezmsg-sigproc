@@ -9,7 +9,7 @@ from ezmsg.util.messages.axisarray import AxisArray
 
 from ezmsg.sigproc.scaler import scaler, scaler_np, EWMA, ewma_step
 
-from util import assert_messages_equal
+from tests.helpers.util import assert_messages_equal
 
 
 def test_ewma():

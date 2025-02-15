@@ -15,7 +15,7 @@ from ezmsg.sigproc.synth import EEGSynth, EEGSynthSettings
 from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
 from ezmsg.util.messagecodec import message_log
 from ezmsg.util.terminate import TerminateOnTotal, TerminateOnTotalSettings
-from util import (
+from tests.helpers.util import (
     get_test_fn,
 )
 

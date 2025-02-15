@@ -4,7 +4,10 @@ import numpy as np
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.sigproc.bandpower import bandpower, SpectrogramSettings
 
-from util import create_messages_with_periodic_signal, assert_messages_equal
+from tests.helpers.util import (
+    create_messages_with_periodic_signal,
+    assert_messages_equal,
+)
 
 
 def _debug_plot(result):

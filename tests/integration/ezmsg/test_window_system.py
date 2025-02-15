@@ -16,7 +16,7 @@ from ezmsg.util.debuglog import DebugLog
 from ezmsg.sigproc.synth import Counter, CounterSettings
 from ezmsg.sigproc.window import Window, WindowSettings
 
-from util import get_test_fn, calculate_expected_windows
+from tests.helpers.util import get_test_fn, calculate_expected_windows
 
 
 class WindowSystemSettings(ez.Settings):

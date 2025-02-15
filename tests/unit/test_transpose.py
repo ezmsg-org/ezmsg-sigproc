@@ -6,7 +6,7 @@ from ezmsg.util.messages.chunker import array_chunker
 
 from ezmsg.sigproc.transpose import TransposeTransformer
 
-from util import assert_messages_equal
+from tests.helpers.util import assert_messages_equal
 
 
 @pytest.mark.parametrize(

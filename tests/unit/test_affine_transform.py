@@ -6,7 +6,7 @@ from ezmsg.util.messages.axisarray import AxisArray
 
 from ezmsg.sigproc.affinetransform import affine_transform, common_rereference
 
-from util import assert_messages_equal
+from tests.helpers.util import assert_messages_equal
 
 
 def test_affine_generator():
