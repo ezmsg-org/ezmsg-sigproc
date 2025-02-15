@@ -17,14 +17,12 @@ class LogSettings(ez.Settings):
 class LogTransformer(BaseTransformer[LogSettings, AxisArray]):
     def _process(self, message: AxisArray) -> AxisArray:
         data = message.data
-        if (self.settings.clip_zero
+        if (
+            self.settings.clip_zero
             and np.any(data <= 0)
-            and np.issubdtype(data.dtype, np.floating)):
-            data = np.clip(
-                data,
-                a_min=np.finfo(data.dtype).tiny,
-                a_max=None
-            )
+            and np.issubdtype(data.dtype, np.floating)
+        ):
+            data = np.clip(data, a_min=np.finfo(data.dtype).tiny, a_max=None)
         return replace(message, data=np.log(data) / np.log(self.settings.base))
 
 
