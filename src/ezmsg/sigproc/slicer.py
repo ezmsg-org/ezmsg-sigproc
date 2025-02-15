@@ -1,5 +1,3 @@
-import typing
-
 import numpy as np
 import numpy.typing as npt
 import ezmsg.core as ez
@@ -9,13 +7,17 @@ from ezmsg.util.messages.axisarray import (
     AxisBase,
     replace,
 )
-from ezmsg.util.generator import consumer
 
-from .base import GenAxisArray, ProcessorState, BaseStatefulTransformer, BaseTransformerUnit
+from .base import (
+    ProcessorState,
+    BaseStatefulTransformer,
+    BaseTransformerUnit,
+)
 
 """
 Slicer:Select a subset of data along a particular axis.
 """
+
 
 def parse_slice(
     s: str,
@@ -73,7 +75,9 @@ class SlicerState(ProcessorState):
     b_change_dims: bool = False
 
 
-class SlicerTransformer(BaseStatefulTransformer[SlicerSettings, AxisArray, SlicerState]):
+class SlicerTransformer(
+    BaseStatefulTransformer[SlicerSettings, AxisArray, SlicerState]
+):
     def _hash_message(self, message: AxisArray) -> int:
         axis = self.settings.axis or message.dims[-1]
         axis_idx = message.get_axis_idx(axis)
@@ -117,7 +121,9 @@ class SlicerTransformer(BaseStatefulTransformer[SlicerSettings, AxisArray, Slice
             replace_kwargs["dims"] = [
                 _ for dim_ix, _ in enumerate(message.dims) if dim_ix != axis_idx
             ]
-            replace_kwargs["axes"] = {k: v for k, v in message.axes.items() if k != axis}
+            replace_kwargs["axes"] = {
+                k: v for k, v in message.axes.items() if k != axis
+            }
         elif self._state.new_axis is not None:
             replace_kwargs["axes"] = {
                 k: (v if k != axis else self._state.new_axis)
@@ -135,9 +141,7 @@ class Slicer(BaseTransformerUnit[SlicerSettings, AxisArray, SlicerTransformer]):
     SETTINGS = SlicerSettings
 
 
-def slicer(
-    selection: str = "", axis: str | None = None
-) -> SlicerTransformer:
+def slicer(selection: str = "", axis: str | None = None) -> SlicerTransformer:
     """
     Slice along a particular axis.
 
