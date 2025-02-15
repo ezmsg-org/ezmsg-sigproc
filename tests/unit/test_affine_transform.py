@@ -133,4 +133,4 @@ def test_car_passthrough():
     gen = common_rereference(mode="passthrough")
     msg_out = gen.send(msg_in)
     assert np.array_equal(msg_out.data, in_dat)
-    assert not np.may_share_memory(msg_out.data, in_dat)
+    assert np.may_share_memory(msg_out.data, in_dat)
