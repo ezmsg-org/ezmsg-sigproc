@@ -320,7 +320,9 @@ class BaseAdaptiveTransformer(
     @abstractmethod
     def partial_fit(self, message: SampleMessage) -> None: ...
 
-    def __call__(self, message: typing.Union[MessageType, SampleMessage]) -> typing.Optional[MessageType]:
+    def __call__(
+        self, message: typing.Union[MessageType, SampleMessage]
+    ) -> typing.Optional[MessageType]:
         """
         Adapt transformer with training data (and optionally labels)
         in SampleMessage
