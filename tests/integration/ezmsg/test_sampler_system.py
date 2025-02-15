@@ -15,7 +15,7 @@ from ezmsg.sigproc.synth import Oscillator, OscillatorSettings
 from ezmsg.util.terminate import TerminateOnTotal, TerminateOnTotalSettings
 from ezmsg.util.debuglog import DebugLog
 
-from util import get_test_fn
+from tests.helpers.util import get_test_fn
 
 
 class SamplerSystemSettings(ez.Settings):

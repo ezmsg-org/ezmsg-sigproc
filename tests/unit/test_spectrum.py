@@ -11,7 +11,7 @@ from ezmsg.sigproc.spectrum import (
     SpectralOutput,
     WindowFunction,
 )
-from util import (
+from tests.helpers.util import (
     create_messages_with_periodic_signal,
     assert_messages_equal,
 )

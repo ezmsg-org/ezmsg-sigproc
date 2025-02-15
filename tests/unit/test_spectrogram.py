@@ -6,7 +6,10 @@ from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.sigproc.spectrum import WindowFunction, SpectralTransform, SpectralOutput
 from ezmsg.sigproc.spectrogram import SpectrogramTransformer
 
-from util import create_messages_with_periodic_signal, assert_messages_equal
+from tests.helpers.util import (
+    create_messages_with_periodic_signal,
+    assert_messages_equal,
+)
 
 
 def _debug_plot(ax_arr: AxisArray, sin_params: list[dict[str, float]] = None):
