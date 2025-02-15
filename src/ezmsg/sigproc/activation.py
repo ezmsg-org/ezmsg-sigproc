@@ -61,7 +61,9 @@ class ActivationTransformer(BaseTransformer[ActivationSettings, AxisArray]):
         return replace(message, data=func(message.data))
 
 
-class Activation(BaseTransformerUnit[ActivationSettings, AxisArray, ActivationTransformer]):
+class Activation(
+    BaseTransformerUnit[ActivationSettings, AxisArray, ActivationTransformer]
+):
     SETTINGS = ActivationSettings
 
 

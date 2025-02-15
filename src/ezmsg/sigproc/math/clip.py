@@ -18,7 +18,7 @@ class ClipTransformer(BaseTransformer[ClipSettings, AxisArray]):
     def _process(self, message: AxisArray) -> AxisArray:
         return replace(
             message,
-            data=np.clip(message.data, self.settings.a_min, self.settings.a_max)
+            data=np.clip(message.data, self.settings.a_min, self.settings.a_max),
         )
 
 

@@ -12,10 +12,7 @@ class AbsSettings(ez.Settings):
 
 class AbsTransformer(BaseTransformer[AbsSettings, AxisArray]):
     def _process(self, message: AxisArray) -> AxisArray:
-        return replace(
-            message,
-            data=np.abs(message.data)
-        )
+        return replace(message, data=np.abs(message.data))
 
 
 class Abs(BaseTransformerUnit[AbsSettings, AxisArray, AbsTransformer]):
