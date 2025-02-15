@@ -1,35 +1,27 @@
-import typing
-
-import numpy as np
 import ezmsg.core as ez
-from ezmsg.util.generator import consumer
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
-from ..base import GenAxisArray
-
-
-@consumer
-def invert() -> typing.Generator[AxisArray, AxisArray, None]:
-    """
-    Take the inverse of the data.
-
-    Returns: A primed generator that, when passed an input message via `.send(msg)`, yields an :obj:`AxisArray`
-     with the data payload containing the inversion of the input :obj:`AxisArray` data.
-
-    """
-    msg_out = AxisArray(np.array([]), dims=[""])
-    while True:
-        msg_in: AxisArray = yield msg_out
-        msg_out = replace(msg_in, data=1 / msg_in.data)
+from ..base import BaseTransformer, BaseTransformerUnit
 
 
 class InvertSettings(ez.Settings):
     pass
 
 
-class Invert(GenAxisArray):
+class InvertTransformer(BaseTransformer[InvertSettings, AxisArray]):
+    def _process(self, message: AxisArray) -> AxisArray:
+        return replace(message, data=1 / message.data)
+
+
+class Invert(BaseTransformerUnit[InvertSettings, AxisArray, InvertTransformer]):
     SETTINGS = InvertSettings
 
-    def construct_generator(self):
-        self.STATE.gen = invert()
+
+def invert() -> InvertTransformer:
+    """
+    Take the inverse of the data.
+
+    Returns: :obj:`InvertTransformer`.
+    """
+    return InvertTransformer(InvertSettings())
