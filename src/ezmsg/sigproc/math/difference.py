@@ -19,11 +19,13 @@ class ConstDifferenceTransformer(BaseTransformer[ConstDifferenceSettings, AxisAr
             message,
             data=(message.data - self.settings.value)
             if self.settings.subtrahend
-            else (self.settings.value - message.data)
+            else (self.settings.value - message.data),
         )
 
 
-class ConstDifference(BaseTransformerUnit[ConstDifferenceSettings, AxisArray, ConstDifferenceTransformer]):
+class ConstDifference(
+    BaseTransformerUnit[ConstDifferenceSettings, AxisArray, ConstDifferenceTransformer]
+):
     SETTINGS = ConstDifferenceSettings
 
 
@@ -41,7 +43,9 @@ def const_difference(
 
     Returns: :obj:`ConstDifferenceTransformer`.
     """
-    return ConstDifferenceTransformer(ConstDifferenceSettings(value=value, subtrahend=subtrahend))
+    return ConstDifferenceTransformer(
+        ConstDifferenceSettings(value=value, subtrahend=subtrahend)
+    )
 
 
 # class DifferenceSettings(ez.Settings):
