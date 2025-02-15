@@ -73,14 +73,43 @@ class SpectrumSettings(ez.Settings):
     """
 
     axis: str | None = None
+    """
+    The name of the axis on which to calculate the spectrum.
+      Note: The axis must have an .axes entry of type LinearAxis, not CoordinateAxis.
+    """
+
     # n: int | None = None # n parameter for fft
-    out_axis: str | None = "freq"  # If none; don't change dim name
+
+    out_axis: str | None = "freq"
+    """The name of the new axis. Defaults to "freq". If none; don't change dim name"""
+
     window: WindowFunction = WindowFunction.HAMMING
+    """The :obj:`WindowFunction` to apply to the data slice prior to calculating the spectrum."""
+
     transform: SpectralTransform = SpectralTransform.REL_DB
+    """The :obj:`SpectralTransform` to apply to the spectral magnitude."""
+
     output: SpectralOutput = SpectralOutput.POSITIVE
+    """The :obj:`SpectralOutput` format."""
+
     norm: str | None = "forward"
+    """
+    Normalization mode. Default "forward" is best used when the inverse transform is not needed,
+      for example when the goal is to get spectral power. Use "backward" (equivalent to None) to not
+      scale the spectrum which is useful when the spectra will be manipulated and possibly inverse-transformed.
+      See numpy.fft.fft for details.
+    """
+
     do_fftshift: bool = True
+    """
+    Whether to apply fftshift to the output. Default is True.
+      This value is ignored unless output is SpectralOutput.FULL.
+    """
+
     nfft: int | None = None
+    """
+    The number of points to use for the FFT. If None, the length of the input data is used.
+    """
 
 
 class SpectrumState(ProcessorState):
@@ -239,21 +268,6 @@ def spectrum(
 ) -> SpectrumTransformer:
     """
     Calculate a spectrum on a data slice.
-
-    Args:
-        axis: The name of the axis on which to calculate the spectrum.
-            Note: The axis must have an .axes entry of type LinearAxis, not CoordinateAxis.
-        out_axis: The name of the new axis. Defaults to "freq".
-        window: The :obj:`WindowFunction` to apply to the data slice prior to calculating the spectrum.
-        transform: The :obj:`SpectralTransform` to apply to the spectral magnitude.
-        output: The :obj:`SpectralOutput` format.
-        norm: Normalization mode. Default "forward" is best used when the inverse transform is not needed,
-          for example when the goal is to get spectral power. Use "backward" (equivalent to None) to not
-          scale the spectrum which is useful when the spectra will be manipulated and possibly inverse-transformed.
-          See numpy.fft.fft for details.
-        do_fftshift: Whether to apply fftshift to the output. Default is True. This value is ignored unless
-          output is SpectralOutput.FULL.
-        nfft: The number of points to use for the FFT. If None, the length of the input data is used.
 
     Returns:
         A :obj:`SpectrumTransformer` object that expects an :obj:`AxisArray` via `.(axis_array)` (__call__)
