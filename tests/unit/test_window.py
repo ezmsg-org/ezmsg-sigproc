@@ -8,7 +8,7 @@ import sparse
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.sigproc.window import windowing
 
-from util import assert_messages_equal, calculate_expected_windows
+from tests.helpers.util import assert_messages_equal, calculate_expected_windows
 
 
 def test_window_gen_nodur():

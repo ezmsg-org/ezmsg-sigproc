@@ -11,7 +11,7 @@ from ezmsg.util.messagecodec import message_log
 from ezmsg.sigproc.downsample import Downsample, DownsampleSettings
 from ezmsg.sigproc.synth import Counter, CounterSettings
 
-from util import get_test_fn
+from tests.helpers.util import get_test_fn
 from ezmsg.util.terminate import TerminateOnTimeout as TerminateTest
 from ezmsg.util.terminate import TerminateOnTimeoutSettings as TerminateTestSettings
 from ezmsg.util.debuglog import DebugLog

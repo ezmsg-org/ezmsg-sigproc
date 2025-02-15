@@ -10,7 +10,7 @@ from ezmsg.util.terminate import TerminateOnTotal
 from ezmsg.sigproc.decimate import Decimate
 from ezmsg.sigproc.synth import EEGSynth
 
-from util import get_test_fn
+from tests.helpers.util import get_test_fn
 
 
 @pytest.mark.parametrize("target_rate", [100.0, 500.0])
