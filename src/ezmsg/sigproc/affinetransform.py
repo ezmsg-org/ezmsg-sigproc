@@ -1,20 +1,17 @@
 import os
-from dataclasses import field
 from pathlib import Path
-import typing
 
 import numpy as np
 import numpy.typing as npt
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray, AxisBase
 from ezmsg.util.messages.util import replace
-from ezmsg.util.generator import consumer
 
 from .base import (
-    GenAxisArray,
     ProcessorState,
     BaseStatefulTransformer,
     BaseTransformerUnit,
+    BaseTransformer,
 )
 
 
@@ -44,7 +41,10 @@ class AffineTransformTransformer(
 ):
     def __call__(self, message: AxisArray) -> AxisArray:
         # Override __call__ so we can shortcut if weights are None.
-        if self.settings.weights is None or (isinstance(self.settings.weights, str) and self.settings.weights == "passthrough"):
+        if self.settings.weights is None or (
+            isinstance(self.settings.weights, str)
+            and self.settings.weights == "passthrough"
+        ):
             return message
         return super().__call__(message)
 
@@ -158,41 +158,38 @@ def zeros_for_noop(data: npt.NDArray, **ignore_kwargs) -> npt.NDArray:
     return np.zeros_like(data)
 
 
-@consumer
-def common_rereference(
-    mode: str = "mean", axis: str | None = None, include_current: bool = True
-) -> typing.Generator[AxisArray, AxisArray, None]:
+class CommonRereferenceSettings(ez.Settings):
     """
-    Perform common average referencing (CAR) on streaming data.
-
-    Args:
-        mode: The statistical mode to apply -- either "mean" or "median"
-        axis: The name of hte axis to apply the transformation to.
-        include_current: Set False to exclude each channel from participating in the calculation of its reference.
-
-    Returns:
-        A primed generator object that yields an :obj:`AxisArray` object
-        for every :obj:`AxisArray` it receives via `send`.
+    Settings for :obj:`CommonRereference`
     """
-    msg_out = AxisArray(np.array([]), dims=[""])
 
-    if mode == "passthrough":
-        include_current = True
+    mode: str = "mean"
+    """The statistical mode to apply -- either "mean" or "median"."""
 
-    func = {"mean": np.mean, "median": np.median, "passthrough": zeros_for_noop}[mode]
+    axis: str | None = None
+    """The name of the axis to apply the transformation to."""
 
-    while True:
-        msg_in: AxisArray = yield msg_out
+    include_current: bool = True
+    """Set False to exclude each channel from participating in the calculation of its reference."""
 
-        if axis is None:
-            axis = msg_in.dims[-1]
-            axis_idx = -1
-        else:
-            axis_idx = msg_in.get_axis_idx(axis)
 
-        ref_data = func(msg_in.data, axis=axis_idx, keepdims=True)
+class CommonRereferenceTransformer(
+    BaseTransformer[CommonRereferenceSettings, AxisArray]
+):
+    def _process(self, message: AxisArray) -> AxisArray:
+        if self.settings.mode == "passthrough":
+            return message
 
-        if not include_current:
+        axis = self.settings.axis or message.dims[-1]
+        axis_idx = message.get_axis_idx(axis)
+
+        func = {"mean": np.mean, "median": np.median, "passthrough": zeros_for_noop}[
+            self.settings.mode
+        ]
+
+        ref_data = func(message.data, axis=axis_idx, keepdims=True)
+
+        if not self.settings.include_current:
             # Typical `CAR = x[0]/N + x[1]/N + ... x[i-1]/N + x[i]/N + x[i+1]/N + ... + x[N-1]/N`
             # and is the same for all i, so it is calculated only once in `ref_data`.
             # However, if we had excluded the current channel,
@@ -203,34 +200,35 @@ def common_rereference(
             # from the current channel (i.e., `x[i] / (N-1)`)
             #  i.e., `CAR[i] = (N / (N-1)) * common_CAR - x[i]/(N-1)`
             # We can use broadcasting subtraction instead of looping over channels.
-            N = msg_in.data.shape[axis_idx]
-            ref_data = (N / (N - 1)) * ref_data - msg_in.data / (N - 1)
-            # Side note: I profiled using affine_transform and it's about 30x slower than this implementation.
+            N = message.data.shape[axis_idx]
+            ref_data = (N / (N - 1)) * ref_data - message.data / (N - 1)
+            # Note: I profiled using AffineTransformTransformer; it's ~30x slower than this implementation.
 
-        msg_out = replace(msg_in, data=msg_in.data - ref_data)
-
-
-class CommonRereferenceSettings(ez.Settings):
-    """
-    Settings for :obj:`CommonRereference`
-    See :obj:`common_rereference` for argument details.
-    """
-
-    mode: str = "mean"
-    axis: str | None = None
-    include_current: bool = True
+        return replace(message, data=message.data - ref_data)
 
 
-class CommonRereference(GenAxisArray):
-    """
-    :obj:`Unit` for :obj:`common_rereference`.
-    """
-
+class CommonRereference(
+    BaseTransformerUnit[
+        CommonRereferenceSettings, AxisArray, CommonRereferenceTransformer
+    ]
+):
     SETTINGS = CommonRereferenceSettings
 
-    def construct_generator(self):
-        self.STATE.gen = common_rereference(
-            mode=self.SETTINGS.mode,
-            axis=self.SETTINGS.axis,
-            include_current=self.SETTINGS.include_current,
-        )
+
+def common_rereference(
+    mode: str = "mean", axis: str | None = None, include_current: bool = True
+) -> CommonRereferenceTransformer:
+    """
+    Perform common average referencing (CAR) on streaming data.
+
+    Args:
+        mode: The statistical mode to apply -- either "mean" or "median"
+        axis: The name of hte axis to apply the transformation to.
+        include_current: Set False to exclude each channel from participating in the calculation of its reference.
+
+    Returns:
+        :obj:`CommonRereferenceTransformer`
+    """
+    return CommonRereferenceTransformer(
+        CommonRereferenceSettings(mode=mode, axis=axis, include_current=include_current)
+    )
