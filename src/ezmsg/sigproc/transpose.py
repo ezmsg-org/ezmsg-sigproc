@@ -113,13 +113,13 @@ class TransposeTransformer(
         return msg_out
 
 
-def transpose(
-    axes: tuple[int | str | type(...), ...] | None = None, order: str | None = None
-) -> TransposeTransformer:
-    return TransposeTransformer(TransposeSettings(axes=axes, order=order))
-
-
 class Transpose(
     BaseTransformerUnit[TransposeSettings, AxisArray, TransposeTransformer]
 ):
     SETTINGS = TransposeSettings
+
+
+def transpose(
+    axes: tuple[int | str | type(...), ...] | None = None, order: str | None = None
+) -> TransposeTransformer:
+    return TransposeTransformer(TransposeSettings(axes=axes, order=order))

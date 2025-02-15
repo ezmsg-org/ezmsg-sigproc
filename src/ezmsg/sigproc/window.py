@@ -293,26 +293,6 @@ class WindowTransformer(
         return msg_out
 
 
-def windowing(
-    axis: str | None = None,
-    newaxis: str | None = None,
-    window_dur: float | None = None,
-    window_shift: float | None = None,
-    zero_pad_until: str = "full",
-    anchor: str | Anchor = Anchor.BEGINNING,
-) -> WindowTransformer:
-    return WindowTransformer(
-        WindowSettings(
-            axis=axis,
-            newaxis=newaxis,
-            window_dur=window_dur,
-            window_shift=window_shift,
-            zero_pad_until=zero_pad_until,
-            anchor=anchor,
-        )
-    )
-
-
 class Window(BaseTransformerUnit[WindowSettings, AxisArray, WindowTransformer]):
     SETTINGS = WindowSettings
     INPUT_SIGNAL = ez.InputStream(AxisArray)
@@ -363,3 +343,23 @@ class Window(BaseTransformerUnit[WindowSettings, AxisArray, WindowTransformer]):
 
         except Exception:
             ez.logger.info(traceback.format_exc())
+
+
+def windowing(
+    axis: str | None = None,
+    newaxis: str | None = None,
+    window_dur: float | None = None,
+    window_shift: float | None = None,
+    zero_pad_until: str = "full",
+    anchor: str | Anchor = Anchor.BEGINNING,
+) -> WindowTransformer:
+    return WindowTransformer(
+        WindowSettings(
+            axis=axis,
+            newaxis=newaxis,
+            window_dur=window_dur,
+            window_shift=window_shift,
+            zero_pad_until=zero_pad_until,
+            anchor=anchor,
+        )
+    )

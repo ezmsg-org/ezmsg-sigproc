@@ -256,6 +256,10 @@ class SpectrumTransformer(
         return msg_out
 
 
+class Spectrum(BaseTransformerUnit[SpectrumSettings, AxisArray, SpectrumTransformer]):
+    SETTINGS = SpectrumSettings
+
+
 def spectrum(
     axis: str | None = None,
     out_axis: str | None = "freq",
@@ -285,7 +289,3 @@ def spectrum(
             nfft=nfft,
         )
     )
-
-
-class Spectrum(BaseTransformerUnit[SpectrumSettings, AxisArray, SpectrumTransformer]):
-    SETTINGS = SpectrumSettings
