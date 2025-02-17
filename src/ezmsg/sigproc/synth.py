@@ -10,88 +10,131 @@ from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
 from .butterworthfilter import ButterworthFilter, ButterworthFilterSettings
-from .base import GenAxisArray
-
-
-def clock(dispatch_rate: float | None) -> typing.Generator[ez.Flag, None, None]:
-    """
-    Construct a generator that yields events at a specified rate.
-
-    Args:
-        dispatch_rate: event rate in seconds.
-
-    Returns:
-        A generator object that yields :obj:`ez.Flag` events at a specified rate.
-    """
-    n_dispatch = -1
-    t_0 = time.time()
-    while True:
-        if dispatch_rate is not None:
-            n_dispatch += 1
-            t_next = t_0 + n_dispatch / dispatch_rate
-            time.sleep(max(0, t_next - time.time()))
-        yield ez.Flag()
-
-
-async def aclock(dispatch_rate: float | None) -> typing.AsyncGenerator[ez.Flag, None]:
-    """
-    ``asyncio`` version of :obj:`clock`.
-
-    Returns:
-        asynchronous generator object. Must use `anext` or `async for`.
-    """
-    t_0 = time.time()
-    n_dispatch = -1
-    while True:
-        if dispatch_rate is not None:
-            n_dispatch += 1
-            t_next = t_0 + n_dispatch / dispatch_rate
-            await asyncio.sleep(t_next - time.time())
-        yield ez.Flag()
+from .base import GenAxisArray, ProcessorState, BaseStatefulProducer, BaseProducerUnit
 
 
 class ClockSettings(ez.Settings):
-    """Settings for :obj:`Clock`. See :obj:`clock` for parameter description."""
+    """Settings for clock generator."""
 
-    # Message dispatch rate (Hz), or None (fast as possible)
-    dispatch_rate: float | None
-
-
-class ClockState(ez.State):
-    cur_settings: ClockSettings
-    gen: typing.AsyncGenerator
+    dispatch_rate: float | str | None = None
+    """Dispatch rate in Hz, 'realtime', or None for external clock"""
 
 
-class Clock(ez.Unit):
-    """Unit for :obj:`clock`."""
+class ClockState(ProcessorState):
+    """State for clock generator."""
 
+    t_0: float = field(default_factory=time.time)  # Start time
+    n_dispatch: int = 0  # Number of dispatches
+
+
+class ClockProducer(BaseStatefulProducer[ClockSettings, ez.Flag, ClockState]):
+    """
+    Produces clock ticks at specified rate.
+    Can be used to drive periodic operations.
+    """
+
+    def _reset_state(self) -> None:
+        """Reset internal state."""
+        self._state.t_0 = time.time()
+        self._state.n_dispatch = 0
+
+    def __call__(self) -> ez.Flag:
+        """Synchronous clock production. We override __call__ (which uses run_coroutine_sync) to avoid async overhead."""
+        if self.state.hash == -1:
+            self._reset_state()
+            self.state.hash = 0
+
+        if isinstance(self.settings.dispatch_rate, (int, float)):
+            # Manual dispatch_rate. (else it is 'as fast as possible')
+            target_time = (
+                self.state.t_0
+                + (self.state.n_dispatch + 1) / self.settings.dispatch_rate
+            )
+            now = time.time()
+            if target_time > now:
+                time.sleep(target_time - now)
+
+        self.state.n_dispatch += 1
+        return ez.Flag()
+
+    async def _produce(self) -> ez.Flag:
+        """Generate next clock tick."""
+        if isinstance(self.settings.dispatch_rate, (int, float)):
+            # Manual dispatch_rate. (else it is 'as fast as possible')
+            target_time = (
+                self.state.t_0
+                + (self.state.n_dispatch + 1) / self.settings.dispatch_rate
+            )
+            now = time.time()
+            if target_time > now:
+                await asyncio.sleep(target_time - now)
+
+        self.state.n_dispatch += 1
+        return ez.Flag()
+
+
+def aclock(dispatch_rate: float | None) -> ClockProducer:
+    """
+    Construct an async generator that yields events at a specified rate.
+
+    Returns:
+        A :obj:`ClockProducer` object.
+    """
+    return ClockProducer(ClockSettings(dispatch_rate=dispatch_rate))
+
+
+clock = aclock
+"""
+Alias for :obj:`aclock` expected by synchronous methods. `ClockProducer` can be used in sync or async.
+"""
+
+
+class Clock(
+    BaseProducerUnit[
+        ClockSettings,  # SettingsType
+        ez.Flag,  # MessageType
+        ClockProducer,  # ProducerType
+    ]
+):
     SETTINGS = ClockSettings
-    STATE = ClockState
 
-    INPUT_SETTINGS = ez.InputStream(ClockSettings)
-    OUTPUT_CLOCK = ez.OutputStream(ez.Flag)
-
-    async def initialize(self) -> None:
-        self.STATE.cur_settings = self.SETTINGS
-        self.construct_generator()
-
-    def construct_generator(self):
-        self.STATE.gen = aclock(self.STATE.cur_settings.dispatch_rate)
-
-    @ez.subscriber(INPUT_SETTINGS)
-    async def on_settings(self, msg: ClockSettings) -> None:
-        self.STATE.cur_settings = msg
-        self.construct_generator()
-
-    @ez.publisher(OUTPUT_CLOCK)
-    async def generate(self) -> typing.AsyncGenerator:
+    @ez.publisher(BaseProducerUnit.OUTPUT_SIGNAL)
+    async def produce(self) -> typing.AsyncGenerator:
+        # Override so we can not to yield if out is False-like
         while True:
-            out = await self.STATE.gen.__anext__()
+            out = await self.producer.__acall__()
             if out:
-                yield self.OUTPUT_CLOCK, out
+                yield self.OUTPUT_SIGNAL, out
 
 
 # COUNTER - Generate incrementing integer. fs and dispatch_rate parameters combine to give many options. #
+class CounterSettings(ez.Settings):
+    # TODO: Adapt this to use ezmsg.util.rate?
+    """
+    Settings for :obj:`Counter`.
+    See :obj:`acounter` for a description of the parameters.
+    """
+
+    n_time: int
+    """Number of samples to output per block."""
+
+    fs: float
+    """Sampling rate of signal output in Hz"""
+
+    n_ch: int = 1
+    """Number of channels to synthesize"""
+
+    dispatch_rate: float | str | None = None
+    """
+    Message dispatch rate (Hz), 'realtime', 'ext_clock', or None (fast as possible)
+     Note: if dispatch_rate is a float then time offsets will be synthetic and the
+     system will run faster or slower than wall clock time.
+    """
+
+    mod: int | None = None
+    """If set to an integer, counter will rollover"""
+
+
 async def acounter(
     n_time: int,
     fs: float | None,
@@ -107,15 +150,6 @@ async def acounter(
     This method of sleeping/yielding execution priority has quirky behavior with
     sub-millisecond sleep periods which may result in unexpected behavior (e.g.
     fs = 2000, n_time = 1, realtime = True -- may result in ~1400 msgs/sec)
-
-    Args:
-        n_time: Number of samples to output per block.
-        fs: Sampling rate of signal output in Hz.
-        n_ch: Number of channels to synthesize
-        dispatch_rate: Message dispatch rate (Hz), 'realtime' or None (fast as possible)
-            Note: if dispatch_rate is a float then time offsets will be synthetic and the
-            system will run faster or slower than wall clock time.
-        mod: If set to an integer, counter will rollover at this number.
 
     Returns:
         An asynchronous generator.
@@ -191,26 +225,6 @@ async def acounter(
         # 5. Update state for next iteration (after next yield)
         counter_start = block_samp[-1, 0] + 1  # do not % mod
         n_sent += n_time
-
-
-class CounterSettings(ez.Settings):
-    # TODO: Adapt this to use ezmsg.util.rate?
-    """
-    Settings for :obj:`Counter`.
-    See :obj:`acounter` for a description of the parameters.
-    """
-
-    n_time: int  # Number of samples to output per block
-    fs: float  # Sampling rate of signal output in Hz
-    n_ch: int = 1  # Number of channels to synthesize
-
-    # Message dispatch rate (Hz), 'realtime', 'ext_clock', or None (fast as possible)
-    #  Note: if dispatch_rate is a float then time offsets will be synthetic and the
-    #  system will run faster or slower than wall clock time.
-    dispatch_rate: float | str | None = None
-
-    # If set to an integer, counter will rollover
-    mod: int | None = None
 
 
 class CounterState(ez.State):
