@@ -35,6 +35,16 @@ class Processor(typing.Protocol[SettingsType, MessageType]):
     def __call__(self, message: MessageType) -> typing.Optional[MessageType]: ...
 
 
+class Producer(typing.Protocol[SettingsType, MessageType]):
+    """
+    Protocol for producers that generate messages.
+    """
+
+    def __call__(self) -> MessageType: ...
+
+    async def __acall__(self) -> MessageType: ...
+
+
 class Consumer(Processor[SettingsType, MessageType], typing.Protocol):
     """Protocol for consumers that receive messages but do not return a result."""
 
@@ -67,6 +77,25 @@ class StatefulProcessor(typing.Protocol[SettingsType, MessageType, StateType]):
         state: StateType,
         message: MessageType,
     ) -> tuple[StateType, typing.Optional[MessageType]]: ...
+
+
+class StatefulProducer(typing.Protocol[SettingsType, MessageType, StateType]):
+    """Protocol for producers that generate messages without consuming inputs."""
+
+    @property
+    def state(self) -> StateType: ...
+
+    @state.setter
+    def state(self, state: StateType | bytes | None) -> None: ...
+
+    def __call__(self) -> MessageType: ...
+
+    async def __acall__(self) -> MessageType: ...
+
+    async def stateful_op(
+        self,
+        state: StateType,
+    ) -> tuple[StateType, MessageType]: ...
 
 
 class StatefulConsumer(
@@ -124,6 +153,20 @@ class AsyncTransformer(
 
 
 # --- Base implementation classes for processors ---
+def _unify_settings(
+    obj: typing.Any, settings: SettingsType, *args, **kwargs
+) -> SettingsType:
+    settings_type = typing.get_args(obj.__orig_bases__[0])[0]
+    if settings is None:
+        if len(args) > 0 and isinstance(args[0], settings_type):
+            settings = args[0]
+        elif len(args) > 0 or len(kwargs) > 0:
+            settings = settings_type(*args, **kwargs)
+        else:
+            settings = settings_type()
+    return settings
+
+
 class BaseProcessor(ABC, typing.Generic[SettingsType, MessageType]):
     """
     Base class for processors.
@@ -137,15 +180,7 @@ class BaseProcessor(ABC, typing.Generic[SettingsType, MessageType]):
     """
 
     def __init__(self, *args, settings: typing.Optional[SettingsType] = None, **kwargs):
-        settings_type = typing.get_args(self.__orig_bases__[0])[0]
-        if settings is None:
-            if len(args) > 0 and isinstance(args[0], settings_type):
-                settings = args[0]
-            elif len(args) > 0 or len(kwargs) > 0:
-                settings = settings_type(*args, **kwargs)
-            else:
-                settings = settings_type()
-        self.settings = settings
+        self.settings = _unify_settings(self, settings, *args, **kwargs)
 
     @abstractmethod
     def _process(self, message: MessageType) -> typing.Optional[MessageType]: ...
@@ -160,6 +195,38 @@ class BaseProcessor(ABC, typing.Generic[SettingsType, MessageType]):
     def send(self, message: MessageType) -> typing.Optional[MessageType]:
         """Alias for __call__."""
         return self(message)
+
+
+class BaseProducer(ABC, typing.Generic[SettingsType, MessageType]):
+    """
+    Base class for producers -- processors that generate messages without consuming inputs.
+    This base simply overrides the type annotations of BaseProcessor.
+    """
+
+    def __init__(self, *args, settings: typing.Optional[SettingsType] = None, **kwargs):
+        self.settings = _unify_settings(self, settings, *args, **kwargs)
+
+    @abstractmethod
+    async def _produce(self) -> MessageType: ...
+
+    async def __acall__(self) -> MessageType:
+        return await self._produce()
+
+    def __call__(self) -> MessageType:
+        # Warning: This is a bit slow. Override this method in derived classes if performance is critical.
+        return run_coroutine_sync(self.__acall__())
+
+    def __iter__(self) -> typing.Iterator[MessageType]:
+        # Make self an iterator
+        return self
+
+    def __next__(self) -> MessageType:
+        # So this can be used as a generator.
+        return self()
+
+    async def __anext__(self):
+        # So this can be used as an async generator.
+        return await self.__acall__()
 
 
 class BaseConsumer(BaseProcessor[SettingsType, MessageType]):
@@ -268,6 +335,42 @@ class BaseStatefulProcessor(
     ) -> tuple[StateType, typing.Optional[MessageType]]:
         self.state = state
         result = self(message)
+        return self.state, result
+
+
+class BaseStatefulProducer(
+    BaseProducer[SettingsType, MessageType],
+    typing.Generic[SettingsType, MessageType, StateType],
+):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        _, _, state_type = typing.get_args(self.__orig_bases__[0])
+        self._state: StateType = state_type()
+
+    @property
+    def state(self) -> StateType:
+        return self._state
+
+    @state.setter
+    def state(self, state: StateType | bytes | None) -> None:
+        if state is not None:
+            if isinstance(state, bytes):
+                self._state = pickle.loads(state)
+            else:
+                self._state = state
+
+    async def __acall__(self) -> MessageType:
+        if self.state.hash == -1:
+            self._reset_state()
+            self.state.hash = 0
+        return await self._produce()
+
+    def stateful_op(
+        self,
+        state: StateType,
+    ) -> tuple[StateType, MessageType]:
+        self.state = state  # Update state via setter
+        result = self()  # Uses synchronous call
         return self.state, result
 
 
@@ -412,6 +515,9 @@ class CompositeProcessor(BaseProcessor[SettingsType, MessageType]):
 
 
 # --- Type variables for protocols and processors ---
+ProducerType = typing.TypeVar(
+    "ProducerType", bound=typing.Union[BaseProducer, BaseStatefulProducer]
+)
 ConsumerType = typing.TypeVar(
     "ConsumerType", bound=typing.Union[BaseConsumer, BaseStatefulConsumer]
 )
@@ -428,6 +534,61 @@ AsyncTransformerType = typing.TypeVar(
 
 
 # --- Base classes for ezmsg Unit with specific processing capabilities ---
+class BaseProducerUnit(
+    ez.Unit, typing.Generic[SettingsType, MessageType, ProducerType]
+):
+    """
+    Base class for producer units -- i.e. units that generate messages without consuming inputs.
+    Implement a new Unit as follows:
+
+    class CustomUnit(BaseProducerUnit[
+        CustomProducerSettings,    # SettingsType
+        AxisArray,                 # MessageType
+        CustomProducer,            # ProducerType
+    ]):
+        SETTINGS = CustomProducerSettings
+
+    ... that's all!
+
+    Where CustomProducerSettings, and CustomProducer
+    are custom implementations of ez.Settings, and BaseProducer or BaseStatefulProducer, respectively.
+    """
+
+    INPUT_SETTINGS = ez.InputStream(SettingsType)
+    OUTPUT_SIGNAL = ez.OutputStream(MessageType)
+
+    async def initialize(self) -> None:
+        self.create_producer()
+
+    def create_producer(self):
+        # self.producer: ProducerType
+        """Create the producer instance from settings."""
+        producer_type = typing.get_args(self.__orig_bases__[0])[2]
+        self.producer = producer_type(settings=self.SETTINGS)
+
+    @ez.subscriber(INPUT_SETTINGS)
+    async def on_settings(self, msg: SettingsType) -> None:
+        """
+        Receive a settings message, override self.SETTINGS, and re-create the producer.
+        Child classes that wish to have fine-grained control over whether the
+        core producer resets on settings changes should override this method.
+
+        Args:
+            msg: a settings message.
+        """
+        self.apply_settings(msg)
+        self.create_producer()
+
+    @ez.publisher(OUTPUT_SIGNAL)
+    async def produce(self) -> typing.AsyncGenerator:
+        try:
+            while True:
+                out = await self.producer.__acall__()
+                yield self.OUTPUT_SIGNAL, out
+        except Exception:
+            ez.logger.info(traceback.format_exc())
+
+
 class BaseConsumerUnit(
     ez.Unit, typing.Generic[SettingsType, MessageType, ConsumerType]
 ):
