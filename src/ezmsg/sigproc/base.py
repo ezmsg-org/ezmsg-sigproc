@@ -9,7 +9,7 @@ from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.generator import GenState
 
 from .util.profile import profile_subpub
-from .sampler import SampleMessage
+from .util.message import SampleMessage
 from .util.asio import run_coroutine_sync
 
 
