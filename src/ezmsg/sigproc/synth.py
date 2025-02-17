@@ -6,7 +6,6 @@ import typing
 
 import numpy as np
 import ezmsg.core as ez
-from ezmsg.util.generator import consumer
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
@@ -293,71 +292,61 @@ class Counter(
             ez.logger.info(traceback.format_exc())
 
 
-
-@consumer
-def sin(
-    axis: str | None = "time",
-    freq: float = 1.0,
-    amp: float = 1.0,
-    phase: float = 0.0,
-) -> typing.Generator[AxisArray, AxisArray, None]:
-    """
-    Construct a generator of sinusoidal waveforms in AxisArray objects.
-
-    Args:
-        axis: The name of the axis over which the sinusoid passes.
-            Note: The axis must exist in the msg.axes and be of type AxisArray.LinearAxis.
-        freq: The frequency of the sinusoid, in Hz.
-        amp: The amplitude of the sinusoid.
-        phase: The initial phase of the sinusoid, in radians.
-
-    Returns:
-        A primed generator that expects .send(axis_array) of sample counts
-        and yields an AxisArray of sinusoids.
-    """
-    msg_out = AxisArray(np.array([]), dims=[""])
-
-    ang_freq = 2.0 * np.pi * freq
-
-    while True:
-        msg_in: AxisArray = yield msg_out
-        # msg_in is expected to be sample counts
-
-        axis_name = axis
-        if axis_name is None:
-            axis_name = msg_in.dims[0]
-
-        w = (ang_freq * msg_in.get_axis(axis_name).gain) * msg_in.data
-        out_data = amp * np.sin(w + phase)
-        msg_out = replace(msg_in, data=out_data)
-
-
 class SinGeneratorSettings(ez.Settings):
     """
     Settings for :obj:`SinGenerator`.
     See :obj:`sin` for parameter descriptions.
     """
 
-    time_axis: str | None = "time"
-    freq: float = 1.0  # Oscillation frequency in Hz
+    axis: str | None = "time"
+    """
+    The name of the axis over which the sinusoid passes.
+    Note: The axis must exist in the msg.axes and be of type AxisArray.LinearAxis.
+    """
+
+    freq: float = 1.0
+    """The frequency of the sinusoid, in Hz."""
+
     amp: float = 1.0  # Amplitude
+    """The amplitude of the sinusoid."""
+
     phase: float = 0.0  # Phase offset (in radians)
+    """The initial phase of the sinusoid, in radians."""
 
 
-class SinGenerator(GenAxisArray):
-    """
-    Unit for :obj:`sin`.
-    """
+class SinTransformer(BaseTransformer[SinGeneratorSettings, AxisArray]):
+    """Transforms counter values into sinusoidal waveforms."""
 
+    def _process(self, message: AxisArray) -> AxisArray:
+        """Transform input counter values into sinusoidal waveform."""
+        axis = self.settings.axis or message.dims[0]
+
+        ang_freq = 2.0 * np.pi * self.settings.freq
+        w = (ang_freq * message.get_axis(axis).gain) * message.data
+        out_data = self.settings.amp * np.sin(w + self.settings.phase)
+
+        return replace(message, data=out_data)
+
+
+class SinGenerator(BaseTransformerUnit[SinGeneratorSettings, AxisArray, SinTransformer]):
+    """Unit for generating sinusoidal waveforms."""
     SETTINGS = SinGeneratorSettings
 
-    def construct_generator(self):
-        self.STATE.gen = sin(
-            axis=self.SETTINGS.time_axis,
-            freq=self.SETTINGS.freq,
-            amp=self.SETTINGS.amp,
-            phase=self.SETTINGS.phase,
-        )
+
+def sin(
+    axis: str | None = "time",
+    freq: float = 1.0,
+    amp: float = 1.0,
+    phase: float = 0.0,
+) -> SinTransformer:
+    """
+    Construct a generator of sinusoidal waveforms in AxisArray objects.
+
+    Returns:
+        A primed generator that expects .send(axis_array) of sample counts
+        and yields an AxisArray of sinusoids.
+    """
+    return SinTransformer(SinGeneratorSettings(axis=axis, freq=freq, amp=amp, phase=phase))
 
 
 class OscillatorSettings(ez.Settings):
