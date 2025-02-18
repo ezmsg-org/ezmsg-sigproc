@@ -1,6 +1,6 @@
 import asyncio
 import traceback
-from dataclasses import field
+from dataclasses import dataclass, field
 import time
 import typing
 
@@ -10,7 +10,7 @@ from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
 from .butterworthfilter import ButterworthFilter, ButterworthFilterSettings
-from .base import GenAxisArray, ProcessorState, BaseStatefulProducer, BaseProducerUnit, BaseTransformer, \
+from .base import ProcessorState, BaseStatefulProducer, BaseProducerUnit, BaseTransformer, \
     BaseTransformerUnit
 
 
@@ -136,16 +136,15 @@ class CounterSettings(ez.Settings):
     """If set to an integer, counter will rollover"""
 
 
-class CounterState(ProcessorState):
+@dataclass(unsafe_hash=True, frozen=False)  # Override the metaclass decorator
+class CounterState:
     """State for counter generator."""
-
+    hash: int = -1
+    clock_zero: float = field(default_factory=lambda: time.time())
     counter_start: int = 0  # next sample's first value
     n_sent: int = 0  # number of samples sent
-    clock_zero: float = field(default_factory=time.time)  # time of first sample
-    timer_type: str = (
-        "unspecified"  # "realtime" | "ext_clock" | "manual" | "unspecified"
-    )
-    new_generator: asyncio.Event = field(default_factory=asyncio.Event)
+    timer_type: str = "unspecified"  # "realtime" | "ext_clock" | "manual" | "unspecified"
+    new_generator: asyncio.Event = field(default_factory=lambda: asyncio.Event())
 
 
 class CounterProducer(BaseStatefulProducer[CounterSettings, AxisArray, CounterState]):
@@ -170,6 +169,7 @@ class CounterProducer(BaseStatefulProducer[CounterSettings, AxisArray, CounterSt
                 self._state.timer_type = self.settings.dispatch_rate.lower()
             else:
                 self._state.timer_type = "manual"
+        self._state.hash = 0
 
         self._state.new_generator.set()
         # I _think_ the intention is to switch between ext_clock and others without resetting the generator.
