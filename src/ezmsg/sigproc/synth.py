@@ -10,8 +10,13 @@ from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
 from .butterworthfilter import ButterworthFilter, ButterworthFilterSettings
-from .base import ProcessorState, BaseStatefulProducer, BaseProducerUnit, BaseTransformer, \
-    BaseTransformerUnit
+from .base import (
+    ProcessorState,
+    BaseStatefulProducer,
+    BaseProducerUnit,
+    BaseTransformer,
+    BaseTransformerUnit,
+)
 
 
 class ClockSettings(ez.Settings):
@@ -139,11 +144,14 @@ class CounterSettings(ez.Settings):
 @dataclass(unsafe_hash=True, frozen=False)  # Override the metaclass decorator
 class CounterState:
     """State for counter generator."""
+
     hash: int = -1
     clock_zero: float = field(default_factory=lambda: time.time())
     counter_start: int = 0  # next sample's first value
     n_sent: int = 0  # number of samples sent
-    timer_type: str = "unspecified"  # "realtime" | "ext_clock" | "manual" | "unspecified"
+    timer_type: str = (
+        "unspecified"  # "realtime" | "ext_clock" | "manual" | "unspecified"
+    )
     new_generator: asyncio.Event = field(default_factory=lambda: asyncio.Event())
 
 
@@ -328,8 +336,11 @@ class SinTransformer(BaseTransformer[SinGeneratorSettings, AxisArray]):
         return replace(message, data=out_data)
 
 
-class SinGenerator(BaseTransformerUnit[SinGeneratorSettings, AxisArray, SinTransformer]):
+class SinGenerator(
+    BaseTransformerUnit[SinGeneratorSettings, AxisArray, SinTransformer]
+):
     """Unit for generating sinusoidal waveforms."""
+
     SETTINGS = SinGeneratorSettings
 
 
@@ -346,7 +357,9 @@ def sin(
         A primed generator that expects .send(axis_array) of sample counts
         and yields an AxisArray of sinusoids.
     """
-    return SinTransformer(SinGeneratorSettings(axis=axis, freq=freq, amp=amp, phase=phase))
+    return SinTransformer(
+        SinGeneratorSettings(axis=axis, freq=freq, amp=amp, phase=phase)
+    )
 
 
 class OscillatorSettings(ez.Settings):
