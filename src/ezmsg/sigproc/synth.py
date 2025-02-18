@@ -158,6 +158,7 @@ class CounterProducer(BaseStatefulProducer[CounterSettings, AxisArray, CounterSt
             self.settings.dispatch_rate, str
         ) and self.settings.dispatch_rate not in ["realtime", "ext_clock"]:
             raise ValueError(f"Unknown dispatch_rate: {self.settings.dispatch_rate}")
+        self._reset_state()
 
     def _reset_state(self) -> None:
         """Reset internal state."""
@@ -169,7 +170,6 @@ class CounterProducer(BaseStatefulProducer[CounterSettings, AxisArray, CounterSt
                 self._state.timer_type = self.settings.dispatch_rate.lower()
             else:
                 self._state.timer_type = "manual"
-        self._state.hash = 0
 
         self._state.new_generator.set()
         # I _think_ the intention is to switch between ext_clock and others without resetting the generator.
@@ -620,8 +620,8 @@ class EEGSynth(ez.Collection):
 
     def network(self) -> ez.NetworkDefinition:
         return (
-            (self.CLOCK.OUTPUT_CLOCK, self.OSC.INPUT_CLOCK),
-            (self.CLOCK.OUTPUT_CLOCK, self.NOISE.INPUT_CLOCK),
+            (self.CLOCK.OUTPUT_SIGNAL, self.OSC.INPUT_CLOCK),
+            (self.CLOCK.OUTPUT_SIGNAL, self.NOISE.INPUT_CLOCK),
             (self.OSC.OUTPUT_SIGNAL, self.ADD.INPUT_SIGNAL_A),
             (self.NOISE.OUTPUT_SIGNAL, self.ADD.INPUT_SIGNAL_B),
             (self.ADD.OUTPUT_SIGNAL, self.OUTPUT_SIGNAL),
