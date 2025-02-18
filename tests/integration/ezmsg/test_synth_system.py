@@ -43,7 +43,7 @@ class ClockTestSystem(ez.Collection):
 
     def network(self) -> ez.NetworkDefinition:
         return (
-            (self.CLOCK.OUTPUT_CLOCK, self.LOG.INPUT_MESSAGE),
+            (self.CLOCK.OUTPUT_SIGNAL, self.LOG.INPUT_MESSAGE),
             (self.LOG.OUTPUT_MESSAGE, self.TERM.INPUT_MESSAGE),
         )
 
