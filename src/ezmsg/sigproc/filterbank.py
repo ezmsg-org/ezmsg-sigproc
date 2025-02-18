@@ -304,11 +304,11 @@ class Filterbank(
 
 
 def filterbank(
-        kernels: list[npt.NDArray] | tuple[npt.NDArray, ...],
-        mode: FilterbankMode = FilterbankMode.CONV,
-        min_phase: MinPhaseMode = MinPhaseMode.NONE,
-        axis: str = "time",
-        new_axis: str = "kernel",
+    kernels: list[npt.NDArray] | tuple[npt.NDArray, ...],
+    mode: FilterbankMode = FilterbankMode.CONV,
+    min_phase: MinPhaseMode = MinPhaseMode.NONE,
+    axis: str = "time",
+    new_axis: str = "kernel",
 ) -> FilterbankTransformer:
     """
     Perform multiple (direct or fft) convolutions on a signal using a bank of kernels.
@@ -319,6 +319,10 @@ def filterbank(
     """
     return FilterbankTransformer(
         settings=FilterbankSettings(
-            kernels=kernels, mode=mode, min_phase=min_phase, axis=axis, new_axis=new_axis
+            kernels=kernels,
+            mode=mode,
+            min_phase=min_phase,
+            axis=axis,
+            new_axis=new_axis,
         )
     )
