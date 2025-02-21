@@ -1,7 +1,6 @@
-import asyncio  # Dev/test apparatus
+import asyncio
 from collections import deque
-from dataclasses import dataclass, field
-import time
+import traceback
 import typing
 
 import numpy as np
@@ -12,7 +11,6 @@ from ezmsg.util.messages.axisarray import (
     slice_along_axis,
 )
 from ezmsg.util.messages.util import replace
-from ezmsg.util.generator import consumer
 
 from .util.profile import profile_subpub
 from .util.message import SampleMessage, SampleTriggerMessage
@@ -92,10 +90,6 @@ class SamplerTransformer(
         axis_idx = message.get_axis_idx(axis)
         axis_info = message.get_axis(axis)
         self._state.fs = 1.0 / axis_info.gain
-        sample_shape = (
-            message.data.shape[:axis_idx] + message.data.shape[axis_idx + 1 :]
-        )
-
         self._state.buffer = None
         self._state.triggers.clear()
         self._state.n_samples = message.data.shape[axis_idx]
@@ -198,13 +192,13 @@ class SamplerTransformer(
         max_buf_len = int(np.round(self.settings.buffer_dur * self._state.fs))
         req_buf_len = int(np.round((_period[1] - _period[0]) * self._state.fs))
         if req_buf_len >= max_buf_len:
-            ez.logger.warning(f"Sampling failed: {period=} >= {buffer_dur=}")
+            ez.logger.warning(f"Sampling failed: {_period=} >= {self.settings.buffer_dur=}")
             return []
 
         trigger_ts: float = message.timestamp
         if not self.settings.estimate_alignment:
             # Override the trigger timestamp with the next sample's likely timestamp.
-            trigger_ts = self._state.offset + (n_samples + 1) / self._state.fs
+            trigger_ts = self._state.offset + (self.state.n_samples + 1) / self._state.fs
 
         new_trig_msg = replace(
             message, timestamp=trigger_ts, period=_period, value=_value
