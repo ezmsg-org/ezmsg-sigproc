@@ -1,5 +1,6 @@
 import asyncio
 from collections import deque
+from dataclasses import field
 import traceback
 import typing
 
@@ -60,7 +61,7 @@ class SamplerState(ProcessorState):
     fs: float = 0.0
     offset: float | None = None
     buffer: npt.NDArray | None = None
-    triggers: deque[SampleTriggerMessage] = deque()
+    triggers: deque[SampleTriggerMessage] = field(default_factory=lambda: deque())
     n_samples: int = 0
 
 
