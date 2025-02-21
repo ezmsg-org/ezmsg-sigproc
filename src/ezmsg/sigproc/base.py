@@ -271,7 +271,7 @@ class BaseStatefulProcessor(
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        _, _, state_type = typing.get_args(self.__orig_bases__[0])
+        state_type = typing.get_args(self.__orig_bases__[0])[2]
         self._state: StateType = state_type()
 
     @property
