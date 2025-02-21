@@ -3,16 +3,19 @@ import typing
 
 import scipy.signal
 from scipy.signal import normalize
+from ezmsg.util.messages.axisarray import AxisArray
 
+from .base import BaseTransformerUnit
 from .filter import (
     FilterBaseSettings,
-    FilterCoefsMultiType,
-    FilterBase,
+    FilterByDesignTransformer, BACoeffs, SOSCoeffs, FilterByDesignState,
 )
 
 
 class ChebyshevFilterSettings(FilterBaseSettings):
-    """Settings for :obj:`ButterworthFilter`."""
+    """Settings for :obj:`ChebyshevFilter`."""
+
+    # axis and coef_type are inherited from FilterBaseSettings
 
     order: int = 0
     """
@@ -63,7 +66,7 @@ def cheby_design_fun(
     coef_type: str = "ba",
     cheby_type: str = "cheby1",
     wn_hz: bool = True,
-) -> FilterCoefsMultiType:
+) -> BACoeffs | SOSCoeffs | None:
     """
     Chebyshev type I and type II digital and analog filter design.
     Design an `order`th-order digital or analog Chebyshev type I or type II filter and return the filter coefficients.
@@ -100,20 +103,26 @@ def cheby_design_fun(
     return coefs
 
 
-class ChebyshevFilter(FilterBase):
-    SETTINGS = ChebyshevFilterSettings
-
-    def design_filter(
-        self,
-    ) -> typing.Callable[[float], FilterCoefsMultiType | None]:
+class ChebyshevFilterTransformer(
+    FilterByDesignTransformer[ChebyshevFilterSettings, AxisArray, FilterByDesignState, BACoeffs | SOSCoeffs]
+):
+    def get_design_function(self) -> typing.Callable[[float], BACoeffs | SOSCoeffs | None]:
         return functools.partial(
             cheby_design_fun,
-            order=self.SETTINGS.order,
-            ripple_tol=self.SETTINGS.ripple_tol,
-            Wn=self.SETTINGS.Wn,
-            btype=self.SETTINGS.btype,
-            analog=self.SETTINGS.analog,
-            coef_type=self.SETTINGS.coef_type,
-            cheby_type=self.SETTINGS.cheby_type,
-            wn_hz=self.SETTINGS.wn_hz,
+            order=self.settings.order,
+            ripple_tol=self.settings.ripple_tol,
+            Wn=self.settings.Wn,
+            btype=self.settings.btype,
+            analog=self.settings.analog,
+            coef_type=self.settings.coef_type,
+            cheby_type=self.settings.cheby_type,
+            wn_hz=self.settings.wn_hz,
         )
+
+
+class ChebyshevFilter(
+    BaseTransformerUnit[
+        ChebyshevFilterSettings, AxisArray, ChebyshevFilterTransformer
+    ]
+):
+    SETTINGS = ChebyshevFilterSettings
