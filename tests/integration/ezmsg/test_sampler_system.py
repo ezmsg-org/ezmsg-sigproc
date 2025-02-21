@@ -47,13 +47,13 @@ class SamplerSystem(ez.Collection):
     def network(self) -> ez.NetworkDefinition:
         return (
             (self.OSC.OUTPUT_SIGNAL, self.SAMPLER.INPUT_SIGNAL),
-            (self.SAMPLER.OUTPUT_SAMPLE, self.LOG.INPUT_MESSAGE),
+            (self.SAMPLER.OUTPUT_SIGNAL, self.LOG.INPUT_MESSAGE),
             (self.LOG.OUTPUT_MESSAGE, self.TERM.INPUT_MESSAGE),
             # Trigger branch
             (self.TRIGGER.OUTPUT_TRIGGER, self.SAMPLER.INPUT_TRIGGER),
             # Debug branches
             (self.TRIGGER.OUTPUT_TRIGGER, self.DEBUG.INPUT),
-            (self.SAMPLER.OUTPUT_SAMPLE, self.DEBUG.INPUT),
+            (self.SAMPLER.OUTPUT_SIGNAL, self.DEBUG.INPUT),
         )
 
 
