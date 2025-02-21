@@ -68,7 +68,7 @@ class FilterbankState(ProcessorState):
     tail: npt.NDArray | None = None
     template: AxisArray | None = None
     dest_arr: npt.NDArray | None = None
-    prep_kerns: npt.NDArray | None = None
+    prep_kerns: npt.NDArray | list[npt.NDArray] | None = None
     windower: WindowTransformer | None = None
     fft: typing.Callable | None = None
     ifft: typing.Callable | None = None
@@ -169,6 +169,7 @@ class FilterbankTransformer(
             self._state.dest_arr = np.zeros(
                 dest_shape, dtype="complex" if b_complex else "float"
             )
+            self._state.prep_kerns = kernels
         else:  # FFT mode
             # Calculate optimal nfft and windowing size.
             opt_size = (
@@ -249,7 +250,7 @@ class FilterbankTransformer(
 
             # Note: I tried several alternatives to this loop; all were slower than this.
             #  numba.jit; stride_tricks + np.einsum; threading. Latter might be better with Python 3.13.
-            for k_ix, k in enumerate(self.settings.kernels):
+            for k_ix, k in enumerate(self._state.prep_kerns):
                 n_out = in_dat.shape[-1] + k.shape[-1] - 1
                 self._state.dest_arr[..., k_ix, :n_out] = np.apply_along_axis(
                     np.convolve, -1, in_dat, k, mode="full"
