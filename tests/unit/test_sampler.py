@@ -6,7 +6,6 @@ from frozendict import frozendict
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.sigproc.util.message import SampleTriggerMessage
 from ezmsg.sigproc.sampler import (
-    SamplerTransformer,
     sampler,
 )
 
