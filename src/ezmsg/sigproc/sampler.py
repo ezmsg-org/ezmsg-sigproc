@@ -20,6 +20,8 @@ from .base import (
     ProcessorState,
     BaseConsumerUnit,
     BaseTransformerUnit,
+    BaseStatefulProducer,
+    BaseProducerUnit
 )
 
 
@@ -268,23 +270,32 @@ class TriggerGeneratorSettings(ez.Settings):
     """The period between triggers (sec)"""
 
 
-class TriggerGenerator(ez.Unit):
-    """
-    A unit to generate triggers every `publish_period` interval.
-    """
+class TriggerGeneratorState(ProcessorState):
+    output: int = 0
 
+
+class TriggerProducer(
+    BaseStatefulProducer[
+        TriggerGeneratorSettings, SampleTriggerMessage, TriggerGeneratorState
+    ]
+):
+    def _reset_state(self) -> None:
+        self._state.output = 0
+
+    async def _produce(self) -> SampleTriggerMessage:
+        await asyncio.sleep(self.settings.publish_period)
+        out_msg = SampleTriggerMessage(
+            period=self.settings.period, value=self._state.output
+        )
+        self._state.output += 1
+        return out_msg
+
+
+class TriggerGenerator(
+    BaseProducerUnit[
+        TriggerGeneratorSettings,
+        SampleTriggerMessage,
+        TriggerProducer,
+    ]
+):
     SETTINGS = TriggerGeneratorSettings
-
-    OUTPUT_TRIGGER = ez.OutputStream(SampleTriggerMessage)
-
-    @ez.publisher(OUTPUT_TRIGGER)
-    async def generate(self) -> typing.AsyncGenerator:
-        await asyncio.sleep(self.SETTINGS.prewait)
-
-        output = 0
-        while True:
-            out_msg = SampleTriggerMessage(period=self.SETTINGS.period, value=output)
-            yield self.OUTPUT_TRIGGER, out_msg
-
-            await asyncio.sleep(self.SETTINGS.publish_period)
-            output += 1
