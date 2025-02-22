@@ -61,7 +61,7 @@ class SamplerState(ProcessorState):
     fs: float = 0.0
     offset: float | None = None
     buffer: npt.NDArray | None = None
-    triggers: deque[SampleTriggerMessage] = field(default_factory=lambda: deque())
+    triggers: deque[SampleTriggerMessage] | None = None
     n_samples: int = 0
 
 
@@ -92,6 +92,8 @@ class SamplerTransformer(
         axis_info = message.get_axis(axis)
         self._state.fs = 1.0 / axis_info.gain
         self._state.buffer = None
+        if self._state.triggers is None:
+            self._state.triggers = deque()
         self._state.triggers.clear()
         self._state.n_samples = message.data.shape[axis_idx]
 
