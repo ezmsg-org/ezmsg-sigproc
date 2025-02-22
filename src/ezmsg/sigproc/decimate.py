@@ -15,7 +15,9 @@ class ChebyForDecimateTransformer(ChebyshevFilterTransformer):
      and if the target rate cannot be achieved it returns None, else it returns the filter coefficients.
     """
 
-    def get_design_function(self) -> typing.Callable[[float], BACoeffs | SOSCoeffs | None]:
+    def get_design_function(
+        self,
+    ) -> typing.Callable[[float], BACoeffs | SOSCoeffs | None]:
         def cheby_opt_design_fun(fs: float) -> BACoeffs | SOSCoeffs | None:
             if fs is None:
                 return None
@@ -29,12 +31,9 @@ class ChebyForDecimateTransformer(ChebyshevFilterTransformer):
 
 
 class ChebyForDecimate(
-    BaseTransformerUnit[
-        ChebyshevFilterSettings, AxisArray, ChebyForDecimateTransformer
-    ]
+    BaseTransformerUnit[ChebyshevFilterSettings, AxisArray, ChebyForDecimateTransformer]
 ):
     SETTINGS = ChebyshevFilterSettings
-
 
 
 class Decimate(ez.Collection):

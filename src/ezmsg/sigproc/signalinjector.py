@@ -21,10 +21,14 @@ class SignalInjectorState(ProcessorState):
     mixing: npt.NDArray | None = None
 
 
-class SignalInjectorTransformer(BaseAsyncTransformer[SignalInjectorSettings, AxisArray, SignalInjectorState]):
+class SignalInjectorTransformer(
+    BaseAsyncTransformer[SignalInjectorSettings, AxisArray, SignalInjectorState]
+):
     def _hash_message(self, message: AxisArray) -> int:
         time_ax_idx = message.get_axis_idx(self.settings.time_dim)
-        sample_shape = message.data.shape[:time_ax_idx] + message.data.shape[time_ax_idx + 1:]
+        sample_shape = (
+            message.data.shape[:time_ax_idx] + message.data.shape[time_ax_idx + 1 :]
+        )
         return hash((message.key,) + sample_shape)
 
     def _reset_state(self, message: AxisArray) -> None:
@@ -33,7 +37,9 @@ class SignalInjectorTransformer(BaseAsyncTransformer[SignalInjectorSettings, Axi
         if self._state.cur_amplitude is None:
             self._state.cur_amplitude = self.settings.amplitude
         time_ax_idx = message.get_axis_idx(self.settings.time_dim)
-        self._state.cur_shape = message.data.shape[:time_ax_idx] + message.data.shape[time_ax_idx + 1:]
+        self._state.cur_shape = (
+            message.data.shape[:time_ax_idx] + message.data.shape[time_ax_idx + 1 :]
+        )
         rng = np.random.default_rng(self.settings.mixing_seed)
         self._state.mixing = rng.random((1, message.shape2d(self.settings.time_dim)[1]))
         self._state.mixing = (self._state.mixing * 2.0) - 1.0
@@ -50,11 +56,11 @@ class SignalInjectorTransformer(BaseAsyncTransformer[SignalInjectorSettings, Axi
         return out_msg
 
 
-class SignalInjector(BaseAsyncTransformerUnit[
-    SignalInjectorSettings,
-    AxisArray,
-    SignalInjectorTransformer
-]):
+class SignalInjector(
+    BaseAsyncTransformerUnit[
+        SignalInjectorSettings, AxisArray, SignalInjectorTransformer
+    ]
+):
     SETTINGS = SignalInjectorSettings
     INPUT_FREQUENCY = ez.InputStream(float | None)
     INPUT_AMPLITUDE = ez.InputStream(float)

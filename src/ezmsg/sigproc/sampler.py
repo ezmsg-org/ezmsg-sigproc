@@ -1,6 +1,5 @@
 import asyncio
 from collections import deque
-from dataclasses import field
 import traceback
 import typing
 
@@ -197,13 +196,17 @@ class SamplerTransformer(
         max_buf_len = int(np.round(self.settings.buffer_dur * self._state.fs))
         req_buf_len = int(np.round((_period[1] - _period[0]) * self._state.fs))
         if req_buf_len >= max_buf_len:
-            ez.logger.warning(f"Sampling failed: {_period=} >= {self.settings.buffer_dur=}")
+            ez.logger.warning(
+                f"Sampling failed: {_period=} >= {self.settings.buffer_dur=}"
+            )
             return []
 
         trigger_ts: float = message.timestamp
         if not self.settings.estimate_alignment:
             # Override the trigger timestamp with the next sample's likely timestamp.
-            trigger_ts = self._state.offset + (self.state.n_samples + 1) / self._state.fs
+            trigger_ts = (
+                self._state.offset + (self.state.n_samples + 1) / self._state.fs
+            )
 
         new_trig_msg = replace(
             message, timestamp=trigger_ts, period=_period, value=_value

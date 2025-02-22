@@ -12,7 +12,10 @@ import scipy.signal
 from ezmsg.sigproc.base import (
     ProcessorState,
     BaseStatefulTransformer,
-    BaseTransformerUnit, SettingsType, MessageType, StateType,
+    BaseTransformerUnit,
+    SettingsType,
+    MessageType,
+    StateType,
 )
 
 
