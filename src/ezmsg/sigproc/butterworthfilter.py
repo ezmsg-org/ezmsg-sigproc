@@ -8,8 +8,10 @@ from scipy.signal import normalize
 from .base import BaseTransformerUnit
 from .filter import (
     FilterBaseSettings,
-    BACoeffs, SOSCoeffs,
-    FilterByDesignTransformer, FilterByDesignState,
+    BACoeffs,
+    SOSCoeffs,
+    FilterByDesignTransformer,
+    FilterByDesignState,
 )
 
 
@@ -112,9 +114,13 @@ def butter_design_fun(
 
 
 class ButterworthFilterTransformer(
-    FilterByDesignTransformer[ButterworthFilterSettings, AxisArray, FilterByDesignState, BACoeffs | SOSCoeffs]
+    FilterByDesignTransformer[
+        ButterworthFilterSettings, AxisArray, FilterByDesignState, BACoeffs | SOSCoeffs
+    ]
 ):
-    def get_design_function(self) -> typing.Callable[[float], BACoeffs | SOSCoeffs | None]:
+    def get_design_function(
+        self,
+    ) -> typing.Callable[[float], BACoeffs | SOSCoeffs | None]:
         return functools.partial(
             butter_design_fun,
             order=self.settings.order,
