@@ -50,9 +50,9 @@ class SamplerSystem(ez.Collection):
             (self.SAMPLER.OUTPUT_SIGNAL, self.LOG.INPUT_MESSAGE),
             (self.LOG.OUTPUT_MESSAGE, self.TERM.INPUT_MESSAGE),
             # Trigger branch
-            (self.TRIGGER.OUTPUT_TRIGGER, self.SAMPLER.INPUT_TRIGGER),
+            (self.TRIGGER.OUTPUT_SIGNAL, self.SAMPLER.INPUT_TRIGGER),
             # Debug branches
-            (self.TRIGGER.OUTPUT_TRIGGER, self.DEBUG.INPUT),
+            (self.TRIGGER.OUTPUT_SIGNAL, self.DEBUG.INPUT),
             (self.SAMPLER.OUTPUT_SIGNAL, self.DEBUG.INPUT),
         )
 
