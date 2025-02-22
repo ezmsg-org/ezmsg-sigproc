@@ -456,6 +456,9 @@ class BaseAsyncTransformer(
         # Override (synchronous) __call__ to run coroutine `aprocess`.
         return run_coroutine_sync(self.__acall__(message))
 
+    def _process(self, message: MessageType) -> MessageType:
+        return run_coroutine_sync(self._aprocess(message))
+
     @abstractmethod
     async def _aprocess(self, message: MessageType) -> MessageType: ...
 
