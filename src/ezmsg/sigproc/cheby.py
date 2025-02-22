@@ -8,7 +8,10 @@ from ezmsg.util.messages.axisarray import AxisArray
 from .base import BaseTransformerUnit
 from .filter import (
     FilterBaseSettings,
-    FilterByDesignTransformer, BACoeffs, SOSCoeffs, FilterByDesignState,
+    FilterByDesignTransformer,
+    BACoeffs,
+    SOSCoeffs,
+    FilterByDesignState,
 )
 
 
@@ -104,9 +107,13 @@ def cheby_design_fun(
 
 
 class ChebyshevFilterTransformer(
-    FilterByDesignTransformer[ChebyshevFilterSettings, AxisArray, FilterByDesignState, BACoeffs | SOSCoeffs]
+    FilterByDesignTransformer[
+        ChebyshevFilterSettings, AxisArray, FilterByDesignState, BACoeffs | SOSCoeffs
+    ]
 ):
-    def get_design_function(self) -> typing.Callable[[float], BACoeffs | SOSCoeffs | None]:
+    def get_design_function(
+        self,
+    ) -> typing.Callable[[float], BACoeffs | SOSCoeffs | None]:
         return functools.partial(
             cheby_design_fun,
             order=self.settings.order,
@@ -121,8 +128,6 @@ class ChebyshevFilterTransformer(
 
 
 class ChebyshevFilter(
-    BaseTransformerUnit[
-        ChebyshevFilterSettings, AxisArray, ChebyshevFilterTransformer
-    ]
+    BaseTransformerUnit[ChebyshevFilterSettings, AxisArray, ChebyshevFilterTransformer]
 ):
     SETTINGS = ChebyshevFilterSettings
