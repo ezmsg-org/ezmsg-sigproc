@@ -20,7 +20,7 @@ from .base import (
     BaseConsumerUnit,
     BaseTransformerUnit,
     BaseStatefulProducer,
-    BaseProducerUnit
+    BaseProducerUnit,
 )
 
 
