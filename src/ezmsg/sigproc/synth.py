@@ -444,24 +444,31 @@ class RandomGeneratorSettings(ez.Settings):
     """scale argument for :obj:`numpy.random.normal`"""
 
 
-class RandomGenerator(ez.Unit):
+class RandomTransformer(BaseTransformer[RandomGeneratorSettings, AxisArray]):
     """
-    Replaces input data with random data and yields the result.
+    Replaces input data with random data and returns the result.
     """
 
-    SETTINGS = RandomGeneratorSettings
+    def __init__(
+        self, *args, settings: RandomGeneratorSettings | None = None, **kwargs
+    ):
+        super().__init__(*args, settings=settings, **kwargs)
 
-    INPUT_SIGNAL = ez.InputStream(AxisArray)
-    OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
-
-    @ez.subscriber(INPUT_SIGNAL)
-    @ez.publisher(OUTPUT_SIGNAL)
-    async def generate(self, msg: AxisArray) -> typing.AsyncGenerator:
+    def _process(self, msg: AxisArray) -> AxisArray:
         random_data = np.random.normal(
-            size=msg.shape, loc=self.SETTINGS.loc, scale=self.SETTINGS.scale
+            size=msg.shape, loc=self.settings.loc, scale=self.settings.scale
         )
+        return replace(msg, data=random_data)
 
-        yield self.OUTPUT_SIGNAL, replace(msg, data=random_data)
+
+class RandomGenerator(
+    BaseTransformerUnit[
+        RandomGeneratorSettings,  # SettingsType
+        AxisArray,  # MessageType
+        RandomTransformer,  # TransformerType
+    ]
+):
+    SETTINGS = RandomGeneratorSettings
 
 
 class NoiseSettings(ez.Settings):
