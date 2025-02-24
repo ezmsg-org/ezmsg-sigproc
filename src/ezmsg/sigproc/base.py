@@ -658,7 +658,7 @@ class BaseTransformerUnit(
     """
     Implement a new Unit as follows:
 
-    class CustomUnit(TransformerUnit[
+    class CustomUnit(BaseTransformerUnit[
         CustomTransformerSettings,    # SettingsType
         AxisArray,                    # MessageType
         CustomTransformer,            # TransformerType
