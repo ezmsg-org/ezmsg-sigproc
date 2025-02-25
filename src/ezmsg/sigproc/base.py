@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import inspect
 import math
 import pickle
 import traceback
@@ -29,10 +30,15 @@ class Processor(typing.Protocol[SettingsType, MessageType]):
     """
     Protocol for processors.
     You probably will not implement this protocol directly.
-    Refer instead to the less ambiguous Consumer and Transformer protocols.
+    Refer instead to the less ambiguous Consumer and Transformer protocols, and the base classes
+    in this module which implement them.
+
+    Note: In Python 3.12+, we can invoke `__acall__` directly using `await obj(message)`,
+     but to support earlier versions we need to use `await obj.__acall__(message)`.
     """
 
     def __call__(self, message: MessageType) -> typing.Optional[MessageType]: ...
+    async def __acall__(self, message: MessageType) -> typing.Optional[MessageType]: ...
 
 
 class Producer(typing.Protocol[SettingsType, MessageType]):
@@ -41,20 +47,23 @@ class Producer(typing.Protocol[SettingsType, MessageType]):
     """
 
     def __call__(self) -> MessageType: ...
-
     async def __acall__(self) -> MessageType: ...
 
 
 class Consumer(Processor[SettingsType, MessageType], typing.Protocol):
-    """Protocol for consumers that receive messages but do not return a result."""
+    """
+    Protocol for consumers that receive messages but do not return a result.
+    """
 
     def __call__(self, message: MessageType) -> None: ...
+    async def __acall__(self, message: MessageType) -> None: ...
 
 
 class Transformer(Processor[SettingsType, MessageType], typing.Protocol):
     """Protocol for transformers that receive messages and return a result of the same class."""
 
     def __call__(self, message: MessageType) -> MessageType: ...
+    async def __acall__(self, message: MessageType) -> MessageType: ...
 
 
 class StatefulProcessor(typing.Protocol[SettingsType, MessageType, StateType]):
@@ -71,6 +80,7 @@ class StatefulProcessor(typing.Protocol[SettingsType, MessageType, StateType]):
     def state(self, state: StateType | bytes | None) -> None: ...
 
     def __call__(self, message: MessageType) -> typing.Optional[MessageType]: ...
+    async def __acall__(self, message: MessageType) -> typing.Optional[MessageType]: ...
 
     def stateful_op(
         self,
@@ -89,7 +99,6 @@ class StatefulProducer(typing.Protocol[SettingsType, MessageType, StateType]):
     def state(self, state: StateType | bytes | None) -> None: ...
 
     def __call__(self) -> MessageType: ...
-
     async def __acall__(self) -> MessageType: ...
 
     async def stateful_op(
@@ -104,6 +113,7 @@ class StatefulConsumer(
     """Protocol specifically for processors that consume messages without producing output."""
 
     def __call__(self, message: MessageType) -> None: ...
+    async def __acall__(self, message: MessageType) -> None: ...
 
     def stateful_op(
         self,
@@ -126,6 +136,7 @@ class StatefulTransformer(
     """
 
     def __call__(self, message: MessageType) -> MessageType: ...
+    async def __acall__(self, message: MessageType) -> MessageType: ...
 
     def stateful_op(
         self,
@@ -145,11 +156,7 @@ class AdaptiveTransformer(
         """
         ...
 
-
-class AsyncTransformer(
-    StatefulTransformer, typing.Protocol[SettingsType, MessageType, StateType]
-):
-    async def __acall__(self, message: MessageType) -> MessageType: ...
+    async def apartial_fit(self, message: SampleMessage) -> None: ...
 
 
 # --- Base implementation classes for processors ---
@@ -199,6 +206,10 @@ class BaseProcessor(ABC, typing.Generic[SettingsType, MessageType]):
         return self._process(message)
 
     async def __acall__(self, message: MessageType) -> typing.Optional[MessageType]:
+        """
+        In Python 3.12+, we can invoke this method simply with `await obj(message)`,
+        but earlier versions require direct syntax: `await obj.__acall__(message)`.
+        """
         return await self._aprocess(message)
 
     def send(self, message: MessageType) -> typing.Optional[MessageType]:
@@ -357,6 +368,13 @@ class BaseStatefulProcessor(
             self.state.hash = msg_hash
         return self._process(message)
 
+    async def __acall__(self, message: MessageType) -> typing.Optional[MessageType]:
+        msg_hash = self._hash_message(message)
+        if msg_hash != self.state.hash:
+            self._reset_state(message)
+            self.state.hash = msg_hash
+        return await self._aprocess(message)
+
     def stateful_op(
         self,
         state: StateType,
@@ -481,6 +499,10 @@ class BaseAdaptiveTransformer(
     @abstractmethod
     def partial_fit(self, message: SampleMessage) -> None: ...
 
+    async def apartial_fit(self, message: SampleMessage) -> None:
+        """Override me if you need async partial fitting."""
+        return self.partial_fit(message)
+
     def __call__(
         self, message: typing.Union[MessageType, SampleMessage]
     ) -> typing.Optional[MessageType]:
@@ -498,6 +520,13 @@ class BaseAdaptiveTransformer(
         if hasattr(message, "trigger"):
             return self.partial_fit(message)
         return super().__call__(message)
+
+    async def __acall__(
+        self, message: typing.Union[MessageType, SampleMessage]
+    ) -> typing.Optional[MessageType]:
+        if hasattr(message, "trigger"):
+            return await self.apartial_fit(message)
+        return await super().__acall__(message)
 
 
 class BaseAsyncTransformer(
@@ -530,9 +559,10 @@ class BaseAsyncTransformer(
 # Composite processor for building pipelines
 class CompositeProcessor(BaseProcessor[SettingsType, MessageType]):
     """
-    A processor that chains multiple processor together.
+    A processor that chains multiple processor together in a feedforward non-branching graph.
     The individual processors may be stateless or stateful.
-    The last processor may be a consumer or a transformer; all but the last must be transformers.
+    The first processor may be a producer, the last processor may be a consumer,
+     otherwise processors must be transformers.
     """
 
     def __init__(self, *args, **kwargs):
@@ -543,7 +573,7 @@ class CompositeProcessor(BaseProcessor[SettingsType, MessageType]):
     @abstractmethod
     def _initialize_processors(
         settings: SettingsType,
-    ) -> dict[str, StatefulProcessor]: ...
+    ) -> dict[str, BaseProducer | BaseProcessor]: ...
 
     @property
     def state(self) -> dict[str, ProcessorState]:
@@ -557,26 +587,53 @@ class CompositeProcessor(BaseProcessor[SettingsType, MessageType]):
             if isinstance(state, bytes):
                 state = pickle.loads(state)
             for k, v in state.items():
-                if hasattr(self._procs[k], "state"):
-                    self._procs[k].state = v
+                self._procs[k].state = v
 
-    def _process(self, message: MessageType) -> MessageType:
-        result = message
-        for k, proc in self._procs.items():
-            result = proc.send(result)  # `send` allows use of legacy generators
+    def _process(self, message: MessageType | None = None) -> MessageType | None:
+        """
+        Process a message through the pipeline of processors. If the message is None, or no message is provided,
+        then it will be assumed that the first processor is a producer and will be called without arguments.
+        This will be invoked via `__call__` or `send`.
+        We use `__next__` and `send` to allow using legacy generators that have yet to be converted to transformers.
+
+        Warning: All processors will be called using their synchronous API, which may invoke a slow sync->async wrapper
+         for processors that are async-first (i.e., children of BaseProducer or BaseAsyncTransformer).
+         If you are in an async context, please use instead this object's `asend` or `__acall__`,
+         which is much faster for async processors and does not incur penalty on sync processors.
+        """
+        first_proc = next(iter(self._procs.values()))
+        sig = inspect.signature(first_proc.__call__)
+        if len(sig.parameters) == 0:
+            result = first_proc.__next__()
+        else:
+            result = first_proc.send(message)
+
+        for k, proc in list(self._procs.items())[1:]:
+            result = proc.send(result)
         return result
 
-    async def _aprocess(self, message: MessageType) -> MessageType:
-        result = message
-        for k, proc in self._procs.items():
-            result = await proc.__acall__(result)
+    async def _aprocess(self, message: MessageType | None = None) -> MessageType | None:
+        """
+        Process a message through the pipeline of processors using their async APIs.
+        If the message is None, or no message is provided, then it will be assumed that the first processor
+        is a producer and will be called without arguments.
+        We use `__anext__` and `asend` to allow using legacy generators that have yet to be converted to transformers.
+        """
+        first_proc = next(iter(self._procs.values()))
+        sig = inspect.signature(first_proc.__acall__)
+        if len(sig.parameters) == 0:
+            result = await first_proc.__anext__()
+        else:
+            result = await first_proc.asend(message)
+        for k, proc in list(self._procs.items())[1:]:
+            result = await proc.asend(result)
         return result
 
     def stateful_op(
         self,
         state: dict[str, ProcessorState],
-        message: MessageType,
-    ) -> tuple[dict[str, ProcessorState], typing.Optional[MessageType]]:
+        message: MessageType | None,
+    ) -> tuple[dict[str, ProcessorState], MessageType | None]:
         result = message
         for k, proc in self._procs.items():
             if hasattr(proc, "stateful_op"):
@@ -595,13 +652,15 @@ ConsumerType = typing.TypeVar(
 )
 TransformerType = typing.TypeVar(
     "TransformerType",
-    bound=typing.Union[BaseTransformer, BaseStatefulTransformer, CompositeProcessor],
+    bound=typing.Union[
+        BaseTransformer,
+        BaseStatefulTransformer,
+        BaseAsyncTransformer,
+        CompositeProcessor,
+    ],
 )
 AdaptiveTransformerType = typing.TypeVar(
     "AdaptiveTransformerType", bound=BaseAdaptiveTransformer
-)
-AsyncTransformerType = typing.TypeVar(
-    "AsyncTransformerType", bound=BaseAsyncTransformer
 )
 
 
@@ -715,7 +774,7 @@ class BaseConsumerUnit(
             message:
         """
         try:
-            self.processor(message)
+            await self.processor.__acall__(message)
         except Exception:
             ez.logger.info(traceback.format_exc())
 
@@ -748,7 +807,7 @@ class BaseTransformerUnit(
     @profile_subpub(trace_oldest=False)
     async def on_signal(self, message: MessageType) -> typing.AsyncGenerator:
         try:
-            result = self.processor(message)
+            result = await self.processor.__acall__(message)
             if result is not None and math.prod(result.data.shape) > 0:
                 yield self.OUTPUT_SIGNAL, result
         except Exception as e:
@@ -763,24 +822,7 @@ class BaseAdaptiveTransformerUnit(
 
     @ez.subscriber(INPUT_SAMPLE)
     async def on_sample(self, msg: SampleMessage) -> None:
-        self.processor.partial_fit(msg)
-
-
-class BaseAsyncTransformerUnit(
-    BaseTransformerUnit,
-    typing.Generic[SettingsType, MessageType, AsyncTransformerType],
-):
-    @ez.subscriber(BaseConsumerUnit.INPUT_SIGNAL, zero_copy=True)
-    @ez.publisher(BaseTransformerUnit.OUTPUT_SIGNAL)
-    @profile_subpub(trace_oldest=False)
-    async def on_signal(self, message: MessageType) -> typing.AsyncGenerator:
-        try:
-            # Python >= 3.12: ret = await self.processor(message)
-            ret = await self.processor.__acall__(message)
-            if math.prod(ret.data.shape) > 0:
-                yield self.OUTPUT_SIGNAL, ret
-        except Exception as e:
-            ez.logger.info(f"{traceback.format_exc()} - {e}")
+        await self.processor.apartial_fit(msg)
 
 
 # Legacy class
