@@ -9,14 +9,52 @@ import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
-from .butterworthfilter import ButterworthFilter, ButterworthFilterSettings
+from .butterworthfilter import ButterworthFilterSettings, ButterworthFilterTransformer
 from .base import (
     ProcessorState,
     BaseStatefulProducer,
     BaseProducerUnit,
     BaseTransformer,
     BaseTransformerUnit,
+    CompositeProcessor,
+    SettingsType,
+    MessageType,
+    TransformerType,
+    BaseConsumerUnit,
 )
+from .util.profile import profile_subpub
+
+
+class AddState(ez.State):
+    queue_a: "asyncio.Queue[AxisArray]" = field(default_factory=asyncio.Queue)
+    queue_b: "asyncio.Queue[AxisArray]" = field(default_factory=asyncio.Queue)
+
+
+class Add(ez.Unit):
+    """Add two signals together.  Assumes compatible/similar axes/dimensions."""
+    # TODO: Refactor as BaseConsumerUnit, with additional INPUT_SIGNAL_B, OUTPUT_SIGNAL
+
+    STATE = AddState
+
+    INPUT_SIGNAL_A = ez.InputStream(AxisArray)
+    INPUT_SIGNAL_B = ez.InputStream(AxisArray)
+    OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
+
+    @ez.subscriber(INPUT_SIGNAL_A)
+    async def on_a(self, msg: AxisArray) -> None:
+        self.STATE.queue_a.put_nowait(msg)
+
+    @ez.subscriber(INPUT_SIGNAL_B)
+    async def on_b(self, msg: AxisArray) -> None:
+        self.STATE.queue_b.put_nowait(msg)
+
+    @ez.publisher(OUTPUT_SIGNAL)
+    async def output(self) -> typing.AsyncGenerator:
+        while True:
+            a = await self.STATE.queue_a.get()
+            b = await self.STATE.queue_b.get()
+
+            yield self.OUTPUT_SIGNAL, replace(a, data=a.data + b.data)
 
 
 class ClockSettings(ez.Settings):
@@ -141,18 +179,29 @@ class CounterSettings(ez.Settings):
     """If set to an integer, counter will rollover"""
 
 
-@dataclass(unsafe_hash=True, frozen=False)  # Override the metaclass decorator
-class CounterState:
-    """State for counter generator."""
+class CounterState(ProcessorState):
+    """
+    State for counter generator.
+    """
 
-    hash: int = -1
-    clock_zero: float = field(default_factory=lambda: time.time())
-    counter_start: int = 0  # next sample's first value
-    n_sent: int = 0  # number of samples sent
-    timer_type: str = (
-        "unspecified"  # "realtime" | "ext_clock" | "manual" | "unspecified"
-    )
-    new_generator: asyncio.Event = field(default_factory=lambda: asyncio.Event())
+    counter_start: int = 0
+    """next sample's first value"""
+
+    n_sent: int = 0
+    """number of samples sent"""
+
+    clock_zero: float | None = None
+    """time of first sample"""
+
+    timer_type: str = "unspecified"
+    """
+    "realtime" | "ext_clock" | "manual" | "unspecified"
+    """
+
+    new_generator: asyncio.Event | None = None
+    """
+    Event to signal the counter has been reset.
+    """
 
 
 class CounterProducer(BaseStatefulProducer[CounterSettings, AxisArray, CounterState]):
@@ -167,6 +216,7 @@ class CounterProducer(BaseStatefulProducer[CounterSettings, AxisArray, CounterSt
         ) and self.settings.dispatch_rate not in ["realtime", "ext_clock"]:
             raise ValueError(f"Unknown dispatch_rate: {self.settings.dispatch_rate}")
         self._reset_state()
+        self._state.hash = 0
 
     def _reset_state(self) -> None:
         """Reset internal state."""
@@ -178,9 +228,10 @@ class CounterProducer(BaseStatefulProducer[CounterSettings, AxisArray, CounterSt
                 self._state.timer_type = self.settings.dispatch_rate.lower()
             else:
                 self._state.timer_type = "manual"
-
+        if self._state.new_generator is None:
+            self._state.new_generator = asyncio.Event()
+        # Set the event to indicate that the state has been reset.
         self._state.new_generator.set()
-        # I _think_ the intention is to switch between ext_clock and others without resetting the generator.
 
     async def _produce(self) -> AxisArray:
         """Generate next counter block."""
@@ -210,7 +261,7 @@ class CounterProducer(BaseStatefulProducer[CounterSettings, AxisArray, CounterSt
             #  ext_clock -- no sleep. Assume this is called at appropriate intervals.
             offset = time.time()
         else:
-            # Was None
+            # Was "unspecified"
             offset = self.state.n_sent / self.settings.fs
 
         # 4. Create output AxisArray
@@ -275,13 +326,27 @@ class Counter(
 
     @ez.subscriber(INPUT_CLOCK)
     @ez.publisher(BaseProducerUnit.OUTPUT_SIGNAL)
-    async def on_clock(self, clock: ez.Flag):
+    async def on_clock(self, _: ez.Flag):
         if self.producer.settings.dispatch_rate == "ext_clock":
-            out = await self.producer.__anext__()
+            out = await self.producer.__acall__()
             yield self.OUTPUT_SIGNAL, out
 
     @ez.publisher(BaseProducerUnit.OUTPUT_SIGNAL)
     async def produce(self) -> typing.AsyncGenerator:
+        """
+        Generate counter output.
+        This is an infinite loop, but we will likely only enter the loop once if we are self-timed,
+        and twice if we are using an external clock.
+
+        When using an internal clock, we enter the loop, and wait for the event which should have
+        been reset upon initialization then we immediately clear, then go to the internal loop
+        that will async call __acall__ to let the internal timer determine when to produce an output.
+
+        When using an external clock, we enter the loop, and wait for the event which should have been
+        reset upon initialization then we immediately clear, then we hit `continue` to loop back around
+        and wait for the event to be set again -- potentially forever. In this case, it is expected that
+        `on_clock` will be called to produce the output.
+        """
         try:
             while True:
                 # Once-only, enter the generator loop
@@ -362,80 +427,6 @@ def sin(
     )
 
 
-class OscillatorSettings(ez.Settings):
-    """Settings for :obj:`Oscillator`"""
-
-    n_time: int
-    """Number of samples to output per block."""
-
-    fs: float
-    """Sampling rate of signal output in Hz"""
-
-    n_ch: int = 1
-    """Number of channels to output per block"""
-
-    dispatch_rate: float | str | None = None
-    """(Hz) | 'realtime' | 'ext_clock'"""
-
-    freq: float = 1.0
-    """Oscillation frequency in Hz"""
-
-    amp: float = 1.0
-    """Amplitude"""
-
-    phase: float = 0.0
-    """Phase offset (in radians)"""
-
-    sync: bool = False
-    """Adjust `freq` to sync with sampling rate"""
-
-
-class Oscillator(ez.Collection):
-    """
-    :obj:`Collection that chains :obj:`Counter` and :obj:`SinGenerator`.
-    """
-
-    SETTINGS = OscillatorSettings
-
-    INPUT_CLOCK = ez.InputStream(ez.Flag)
-    OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
-
-    COUNTER = Counter()
-    SIN = SinGenerator()
-
-    def configure(self) -> None:
-        # Calculate synchronous settings if necessary
-        freq = self.SETTINGS.freq
-        mod = None
-        if self.SETTINGS.sync:
-            period = 1.0 / self.SETTINGS.freq
-            mod = round(period * self.SETTINGS.fs)
-            freq = 1.0 / (mod / self.SETTINGS.fs)
-
-        self.COUNTER.apply_settings(
-            CounterSettings(
-                n_time=self.SETTINGS.n_time,
-                fs=self.SETTINGS.fs,
-                n_ch=self.SETTINGS.n_ch,
-                dispatch_rate=self.SETTINGS.dispatch_rate,
-                mod=mod,
-            )
-        )
-
-        self.SIN.apply_settings(
-            SinGeneratorSettings(
-                freq=freq, amp=self.SETTINGS.amp, phase=self.SETTINGS.phase
-            )
-        )
-
-    def network(self) -> ez.NetworkDefinition:
-        return (
-            (self.INPUT_CLOCK, self.COUNTER.INPUT_CLOCK),
-            (self.COUNTER.OUTPUT_SIGNAL, self.SIN.INPUT_SIGNAL),
-            (self.SIN.OUTPUT_SIGNAL, self.OUTPUT_SIGNAL),
-        )
-
-
 class RandomGeneratorSettings(ez.Settings):
     loc: float = 0.0
     """loc argument for :obj:`numpy.random.normal`"""
@@ -471,6 +462,106 @@ class RandomGenerator(
     SETTINGS = RandomGeneratorSettings
 
 
+class OscillatorSettings(ez.Settings):
+    """Settings for :obj:`Oscillator`"""
+
+    n_time: int
+    """Number of samples to output per block."""
+
+    fs: float
+    """Sampling rate of signal output in Hz"""
+
+    n_ch: int = 1
+    """Number of channels to output per block"""
+
+    dispatch_rate: float | str | None = None
+    """(Hz) | 'realtime' | 'ext_clock'"""
+
+    freq: float = 1.0
+    """Oscillation frequency in Hz"""
+
+    amp: float = 1.0
+    """Amplitude"""
+
+    phase: float = 0.0
+    """Phase offset (in radians)"""
+
+    sync: bool = False
+    """Adjust `freq` to sync with sampling rate"""
+
+
+class OscillatorTransformer(CompositeProcessor[OscillatorSettings, AxisArray]):
+    @staticmethod
+    def _initialize_processors(
+        settings: OscillatorSettings,
+    ) -> dict[str, CounterProducer | SinTransformer]:
+        # Calculate synchronous settings if necessary
+        freq = settings.freq
+        mod = None
+        if settings.sync:
+            period = 1.0 / settings.freq
+            mod = round(period * settings.fs)
+            freq = 1.0 / (mod / settings.fs)
+
+        return {
+            "counter": CounterProducer(
+                CounterSettings(
+                    n_time=settings.n_time,
+                    fs=settings.fs,
+                    n_ch=settings.n_ch,
+                    dispatch_rate=settings.dispatch_rate,
+                    mod=mod,
+                )
+            ),
+            "sin": SinTransformer(
+                SinGeneratorSettings(freq=freq, amp=settings.amp, phase=settings.phase)
+            ),
+        }
+
+
+class BaseCounterFirstTransformerUnit(
+    BaseTransformerUnit,
+    typing.Generic[SettingsType, MessageType, TransformerType],
+):
+    @ez.subscriber(BaseConsumerUnit.INPUT_SIGNAL, zero_copy=True)
+    @ez.publisher(BaseTransformerUnit.OUTPUT_SIGNAL)
+    @profile_subpub(trace_oldest=False)
+    async def on_signal(self, _: ez.Flag):
+        if self.processor.settings.dispatch_rate == "ext_clock":
+            out = await self.processor.__acall__(None)
+            yield self.OUTPUT_SIGNAL, out
+
+    @ez.publisher(BaseTransformerUnit.OUTPUT_SIGNAL)
+    async def produce(self) -> typing.AsyncGenerator:
+        try:
+            counter_state = self.processor._procs["counter"].state
+            while True:
+                # Once-only, enter the generator loop
+                await counter_state.new_generator.wait()
+                counter_state.new_generator.clear()
+
+                if self.processor.settings.dispatch_rate == "ext_clock":
+                    # We shouldn't even be here. Cycle around and wait on the event again.
+                    continue
+
+                # We are not using an external clock. Run the generator.
+                while not counter_state.new_generator.is_set():
+                    out = await self.processor.__acall__(None)
+                    yield self.OUTPUT_SIGNAL, out
+        except Exception:
+            ez.logger.info(traceback.format_exc())
+
+
+class Oscillator(
+    BaseCounterFirstTransformerUnit[
+        OscillatorSettings, AxisArray, OscillatorTransformer
+    ]
+):
+    """Generates sinusoidal waveforms using a counter and sine transformer."""
+
+    SETTINGS = OscillatorSettings
+
+
 class NoiseSettings(ez.Settings):
     """
     See :obj:`CounterSettings` and :obj:`RandomGeneratorSettings`.
@@ -488,105 +579,64 @@ class NoiseSettings(ez.Settings):
 WhiteNoiseSettings = NoiseSettings
 
 
-class WhiteNoise(ez.Collection):
-    """
-    A :obj:`Collection` that chains a :obj:`Counter` and :obj:`RandomGenerator`.
-    """
+class WhiteNoiseTransformer(CompositeProcessor[NoiseSettings, AxisArray]):
+    @staticmethod
+    def _initialize_processors(
+        settings: NoiseSettings,
+    ) -> dict[str, CounterProducer | RandomTransformer]:
+        return {
+            "counter": CounterProducer(
+                CounterSettings(
+                    n_time=settings.n_time,
+                    fs=settings.fs,
+                    n_ch=settings.n_ch,
+                    dispatch_rate=settings.dispatch_rate,
+                    mod=None,
+                )
+            ),
+            "random": RandomTransformer(
+                RandomGeneratorSettings(
+                    loc=settings.loc,
+                    scale=settings.scale,
+                )
+            ),
+        }
+
+
+class WhiteNoise(
+    BaseCounterFirstTransformerUnit[NoiseSettings, AxisArray, WhiteNoiseTransformer]
+):
+    """chains a :obj:`Counter` and :obj:`RandomGenerator`."""
 
     SETTINGS = NoiseSettings
-
-    INPUT_CLOCK = ez.InputStream(ez.Flag)
-    OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
-
-    COUNTER = Counter()
-    RANDOM = RandomGenerator()
-
-    def configure(self) -> None:
-        self.RANDOM.apply_settings(
-            RandomGeneratorSettings(loc=self.SETTINGS.loc, scale=self.SETTINGS.scale)
-        )
-
-        self.COUNTER.apply_settings(
-            CounterSettings(
-                n_time=self.SETTINGS.n_time,
-                fs=self.SETTINGS.fs,
-                n_ch=self.SETTINGS.n_ch,
-                dispatch_rate=self.SETTINGS.dispatch_rate,
-                mod=None,
-            )
-        )
-
-    def network(self) -> ez.NetworkDefinition:
-        return (
-            (self.INPUT_CLOCK, self.COUNTER.INPUT_CLOCK),
-            (self.COUNTER.OUTPUT_SIGNAL, self.RANDOM.INPUT_SIGNAL),
-            (self.RANDOM.OUTPUT_SIGNAL, self.OUTPUT_SIGNAL),
-        )
 
 
 PinkNoiseSettings = NoiseSettings
 
 
-class PinkNoise(ez.Collection):
-    """
-    A :obj:`Collection` that chains :obj:`WhiteNoise` and :obj:`ButterworthFilter`.
-    """
-
-    SETTINGS = PinkNoiseSettings
-
-    INPUT_CLOCK = ez.InputStream(ez.Flag)
-    OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
-
-    WHITE_NOISE = WhiteNoise()
-    FILTER = ButterworthFilter()
-
-    def configure(self) -> None:
-        self.WHITE_NOISE.apply_settings(self.SETTINGS)
-        self.FILTER.apply_settings(
-            ButterworthFilterSettings(
-                axis="time",
-                order=1,
-                cutoff=self.SETTINGS.fs * 0.01,  # Hz
-            )
-        )
-
-    def network(self) -> ez.NetworkDefinition:
-        return (
-            (self.INPUT_CLOCK, self.WHITE_NOISE.INPUT_CLOCK),
-            (self.WHITE_NOISE.OUTPUT_SIGNAL, self.FILTER.INPUT_SIGNAL),
-            (self.FILTER.OUTPUT_SIGNAL, self.OUTPUT_SIGNAL),
-        )
+class PinkNoiseTransformer(CompositeProcessor[PinkNoiseSettings, AxisArray]):
+    @staticmethod
+    def _initialize_processors(
+        settings: PinkNoiseSettings,
+    ) -> dict[str, WhiteNoiseTransformer | ButterworthFilterTransformer]:
+        return {
+            "white_noise": WhiteNoiseTransformer(settings=settings),
+            "filter": ButterworthFilterTransformer(
+                settings=ButterworthFilterSettings(
+                    axis="time",
+                    order=1,
+                    cutoff=settings.fs * 0.01,  # Hz
+                )
+            ),
+        }
 
 
-class AddState(ez.State):
-    queue_a: "asyncio.Queue[AxisArray]" = field(default_factory=asyncio.Queue)
-    queue_b: "asyncio.Queue[AxisArray]" = field(default_factory=asyncio.Queue)
+class PinkNoise(
+    BaseCounterFirstTransformerUnit[NoiseSettings, AxisArray, PinkNoiseTransformer]
+):
+    """chains :obj:`WhiteNoise` and :obj:`ButterworthFilter`."""
 
-
-class Add(ez.Unit):
-    """Add two signals together.  Assumes compatible/similar axes/dimensions."""
-
-    STATE = AddState
-
-    INPUT_SIGNAL_A = ez.InputStream(AxisArray)
-    INPUT_SIGNAL_B = ez.InputStream(AxisArray)
-    OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
-
-    @ez.subscriber(INPUT_SIGNAL_A)
-    async def on_a(self, msg: AxisArray) -> None:
-        self.STATE.queue_a.put_nowait(msg)
-
-    @ez.subscriber(INPUT_SIGNAL_B)
-    async def on_b(self, msg: AxisArray) -> None:
-        self.STATE.queue_b.put_nowait(msg)
-
-    @ez.publisher(OUTPUT_SIGNAL)
-    async def output(self) -> typing.AsyncGenerator:
-        while True:
-            a = await self.STATE.queue_a.get()
-            b = await self.STATE.queue_b.get()
-
-            yield self.OUTPUT_SIGNAL, replace(a, data=a.data + b.data)
+    SETTINGS = NoiseSettings
 
 
 class EEGSynthSettings(ez.Settings):
@@ -602,6 +652,13 @@ class EEGSynth(ez.Collection):
     """
     A :obj:`Collection` that chains a :obj:`Clock` to both :obj:`PinkNoise`
     and :obj:`Oscillator`, then :obj:`Add` s the result.
+
+    Unlike the Oscillator, WhiteNoise, and PinkNoise composite processors which have linear
+    flows, this class has a diamond flow, with clock branching to both PinkNoise and Oscillator,
+    which then are combined in Add.
+
+    TODO: Refactor as a ProducerUnit, similar to Clock, but we manually add all the other
+     transformers.
     """
 
     SETTINGS = EEGSynthSettings
