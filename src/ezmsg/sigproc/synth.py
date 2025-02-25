@@ -694,7 +694,7 @@ class EEGSynth(ez.Collection):
     flows, this class has a diamond flow, with clock branching to both PinkNoise and Oscillator,
     which then are combined in Add.
 
-    TODO: Refactor as a ProducerUnit, similar to Clock, but we manually add all the other
+    Optional: Refactor as a ProducerUnit, similar to Clock, but we manually add all the other
      transformers.
     """
 
@@ -734,8 +734,8 @@ class EEGSynth(ez.Collection):
 
     def network(self) -> ez.NetworkDefinition:
         return (
-            (self.CLOCK.OUTPUT_SIGNAL, self.OSC.INPUT_CLOCK),
-            (self.CLOCK.OUTPUT_SIGNAL, self.NOISE.INPUT_CLOCK),
+            (self.CLOCK.OUTPUT_SIGNAL, self.OSC.INPUT_SIGNAL),
+            (self.CLOCK.OUTPUT_SIGNAL, self.NOISE.INPUT_SIGNAL),
             (self.OSC.OUTPUT_SIGNAL, self.ADD.INPUT_SIGNAL_A),
             (self.NOISE.OUTPUT_SIGNAL, self.ADD.INPUT_SIGNAL_B),
             (self.ADD.OUTPUT_SIGNAL, self.OUTPUT_SIGNAL),
