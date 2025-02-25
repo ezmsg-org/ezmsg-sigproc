@@ -81,7 +81,8 @@ flowchart TD
     D(Consumer);
     E(Transformer);
     AA -->|no| A;
-    AA -->|yes| CompositeProcessor;
+    AA -->|single chain| CompositeProcessor;
+    AA -->|branching| BB[no base class];
     A -->|no| B;
     A -->|yes| C;
     C -->|no| D;
