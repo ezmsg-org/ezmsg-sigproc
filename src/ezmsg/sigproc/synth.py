@@ -22,39 +22,76 @@ from .base import (
     TransformerType,
     BaseConsumerUnit,
 )
+from .util.asio import run_coroutine_sync
 from .util.profile import profile_subpub
 
 
-class AddState(ez.State):
+@dataclass
+class AddState:
     queue_a: "asyncio.Queue[AxisArray]" = field(default_factory=asyncio.Queue)
     queue_b: "asyncio.Queue[AxisArray]" = field(default_factory=asyncio.Queue)
 
 
+class AddProcessor:
+    def __init__(self):
+        self._state = AddState()
+
+    @property
+    def state(self) -> AddState:
+        return self._state
+
+    @state.setter
+    def state(self, state: AddState | bytes | None) -> None:
+        if state is not None:
+            # TODO: Support hydrating state from bytes
+            # if isinstance(state, bytes):
+            #     self._state = pickle.loads(state)
+            # else:
+            self._state = state
+
+    def push_a(self, msg: AxisArray) -> None:
+        self._state.queue_a.put_nowait(msg)
+
+    def push_b(self, msg: AxisArray) -> None:
+        self._state.queue_b.put_nowait(msg)
+
+    async def __acall__(self) -> AxisArray:
+        a = await self._state.queue_a.get()
+        b = await self._state.queue_b.get()
+        return replace(a, data=a.data + b.data)
+
+    def __call__(self) -> AxisArray:
+        return run_coroutine_sync(self.__acall__())
+
+    # Aliases for legacy interface
+    async def __anext__(self):
+        return await self.__acall__()
+
+    def __next__(self):
+        return self.__call__()
+
+
 class Add(ez.Unit):
     """Add two signals together.  Assumes compatible/similar axes/dimensions."""
-    # TODO: Refactor as BaseConsumerUnit, with additional INPUT_SIGNAL_B, OUTPUT_SIGNAL
-
-    STATE = AddState
-
     INPUT_SIGNAL_A = ez.InputStream(AxisArray)
     INPUT_SIGNAL_B = ez.InputStream(AxisArray)
     OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
 
+    async def initialize(self) -> None:
+        self.processor = AddProcessor()
+
     @ez.subscriber(INPUT_SIGNAL_A)
     async def on_a(self, msg: AxisArray) -> None:
-        self.STATE.queue_a.put_nowait(msg)
+        self.processor.push_a(msg)
 
     @ez.subscriber(INPUT_SIGNAL_B)
     async def on_b(self, msg: AxisArray) -> None:
-        self.STATE.queue_b.put_nowait(msg)
+        self.processor.push_b(msg)
 
     @ez.publisher(OUTPUT_SIGNAL)
     async def output(self) -> typing.AsyncGenerator:
         while True:
-            a = await self.STATE.queue_a.get()
-            b = await self.STATE.queue_b.get()
-
-            yield self.OUTPUT_SIGNAL, replace(a, data=a.data + b.data)
+            yield self.OUTPUT_SIGNAL, await self.processor.__acall__()
 
 
 class ClockSettings(ez.Settings):
