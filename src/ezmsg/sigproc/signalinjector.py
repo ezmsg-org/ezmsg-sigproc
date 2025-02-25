@@ -4,7 +4,7 @@ from ezmsg.util.messages.util import replace
 import numpy as np
 import numpy.typing as npt
 
-from .base import BaseAsyncTransformer, ProcessorState, BaseAsyncTransformerUnit
+from .base import BaseAsyncTransformer, ProcessorState, BaseTransformerUnit
 
 
 class SignalInjectorSettings(ez.Settings):
@@ -57,9 +57,7 @@ class SignalInjectorTransformer(
 
 
 class SignalInjector(
-    BaseAsyncTransformerUnit[
-        SignalInjectorSettings, AxisArray, SignalInjectorTransformer
-    ]
+    BaseTransformerUnit[SignalInjectorSettings, AxisArray, SignalInjectorTransformer]
 ):
     SETTINGS = SignalInjectorSettings
     INPUT_FREQUENCY = ez.InputStream(float | None)
