@@ -10,12 +10,12 @@ class ScaleSettings(ez.Settings):
     """Factor by which to scale the data magnitude."""
 
 
-class ScaleTransformer(BaseTransformer[ScaleSettings, AxisArray]):
+class ScaleTransformer(BaseTransformer[ScaleSettings, AxisArray, AxisArray]):
     def _process(self, message: AxisArray) -> AxisArray:
         return replace(message, data=self.settings.scale * message.data)
 
 
-class Scale(BaseTransformerUnit[ScaleSettings, AxisArray, ScaleTransformer]):
+class Scale(BaseTransformerUnit[ScaleSettings, AxisArray, AxisArray, ScaleTransformer]):
     SETTINGS = ScaleSettings
 
 

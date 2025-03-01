@@ -14,7 +14,7 @@ class LogSettings(ez.Settings):
     """If True, clip the data to the minimum positive value of the data type before taking the log."""
 
 
-class LogTransformer(BaseTransformer[LogSettings, AxisArray]):
+class LogTransformer(BaseTransformer[LogSettings, AxisArray, AxisArray]):
     def _process(self, message: AxisArray) -> AxisArray:
         data = message.data
         if (
@@ -26,7 +26,7 @@ class LogTransformer(BaseTransformer[LogSettings, AxisArray]):
         return replace(message, data=np.log(data) / np.log(self.settings.base))
 
 
-class Log(BaseTransformerUnit[LogSettings, AxisArray, LogTransformer]):
+class Log(BaseTransformerUnit[LogSettings, AxisArray, AxisArray, LogTransformer]):
     SETTINGS = LogSettings
 
 

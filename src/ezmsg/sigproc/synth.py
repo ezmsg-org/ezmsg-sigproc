@@ -18,7 +18,8 @@ from .base import (
     BaseTransformerUnit,
     CompositeProcessor,
     SettingsType,
-    MessageType,
+    MessageInType,
+    MessageOutType,
     TransformerType,
     BaseConsumerUnit,
 )
@@ -73,6 +74,7 @@ class AddProcessor:
 
 class Add(ez.Unit):
     """Add two signals together.  Assumes compatible/similar axes/dimensions."""
+
     INPUT_SIGNAL_A = ez.InputStream(AxisArray)
     INPUT_SIGNAL_B = ez.InputStream(AxisArray)
     OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
@@ -352,7 +354,7 @@ def acounter(
 class Counter(
     BaseProducerUnit[
         CounterSettings,  # SettingsType
-        AxisArray,  # MessageType
+        AxisArray,  # MessageOutType
         CounterProducer,  # ProducerType
     ]
 ):
@@ -424,7 +426,7 @@ class SinGeneratorSettings(ez.Settings):
     """The initial phase of the sinusoid, in radians."""
 
 
-class SinTransformer(BaseTransformer[SinGeneratorSettings, AxisArray]):
+class SinTransformer(BaseTransformer[SinGeneratorSettings, AxisArray, AxisArray]):
     """Transforms counter values into sinusoidal waveforms."""
 
     def _process(self, message: AxisArray) -> AxisArray:
@@ -439,7 +441,7 @@ class SinTransformer(BaseTransformer[SinGeneratorSettings, AxisArray]):
 
 
 class SinGenerator(
-    BaseTransformerUnit[SinGeneratorSettings, AxisArray, SinTransformer]
+    BaseTransformerUnit[SinGeneratorSettings, AxisArray, AxisArray, SinTransformer]
 ):
     """Unit for generating sinusoidal waveforms."""
 
@@ -472,7 +474,7 @@ class RandomGeneratorSettings(ez.Settings):
     """scale argument for :obj:`numpy.random.normal`"""
 
 
-class RandomTransformer(BaseTransformer[RandomGeneratorSettings, AxisArray]):
+class RandomTransformer(BaseTransformer[RandomGeneratorSettings, AxisArray, AxisArray]):
     """
     Replaces input data with random data and returns the result.
     """
@@ -491,9 +493,10 @@ class RandomTransformer(BaseTransformer[RandomGeneratorSettings, AxisArray]):
 
 class RandomGenerator(
     BaseTransformerUnit[
-        RandomGeneratorSettings,  # SettingsType
-        AxisArray,  # MessageType
-        RandomTransformer,  # TransformerType
+        RandomGeneratorSettings,
+        AxisArray,
+        AxisArray,
+        RandomTransformer,
     ]
 ):
     SETTINGS = RandomGeneratorSettings
@@ -527,7 +530,9 @@ class OscillatorSettings(ez.Settings):
     """Adjust `freq` to sync with sampling rate"""
 
 
-class OscillatorTransformer(CompositeProcessor[OscillatorSettings, AxisArray]):
+class OscillatorTransformer(
+    CompositeProcessor[OscillatorSettings, AxisArray, AxisArray]
+):
     @staticmethod
     def _initialize_processors(
         settings: OscillatorSettings,
@@ -557,9 +562,22 @@ class OscillatorTransformer(CompositeProcessor[OscillatorSettings, AxisArray]):
 
 
 class BaseCounterFirstTransformerUnit(
-    BaseTransformerUnit,
-    typing.Generic[SettingsType, MessageType, TransformerType],
+    BaseTransformerUnit[SettingsType, MessageInType, MessageOutType, TransformerType],
+    typing.Generic[SettingsType, MessageInType, MessageOutType, TransformerType],
 ):
+    """
+    Base class for units whose primary processor is a composite processor with a CounterProducer as the first
+     processor (producer) in the chain. CounterProducer is sometimes a transformer (
+    """
+
+    def create_processor(self):
+        super().create_processor()
+        def recurse_get_counter(proc) -> CounterProducer:
+            if hasattr(proc, "_procs"):
+                return recurse_get_counter(list(proc._procs.values())[0])
+            return proc
+        self._counter = recurse_get_counter(self.processor)
+
     @ez.subscriber(BaseConsumerUnit.INPUT_SIGNAL, zero_copy=True)
     @ez.publisher(BaseTransformerUnit.OUTPUT_SIGNAL)
     @profile_subpub(trace_oldest=False)
@@ -571,7 +589,7 @@ class BaseCounterFirstTransformerUnit(
     @ez.publisher(BaseTransformerUnit.OUTPUT_SIGNAL)
     async def produce(self) -> typing.AsyncGenerator:
         try:
-            counter_state = self.processor._procs["counter"].state
+            counter_state = self._counter.state
             while True:
                 # Once-only, enter the generator loop
                 await counter_state.new_generator.wait()
@@ -591,7 +609,7 @@ class BaseCounterFirstTransformerUnit(
 
 class Oscillator(
     BaseCounterFirstTransformerUnit[
-        OscillatorSettings, AxisArray, OscillatorTransformer
+        OscillatorSettings, AxisArray, AxisArray, OscillatorTransformer
     ]
 ):
     """Generates sinusoidal waveforms using a counter and sine transformer."""
@@ -616,7 +634,7 @@ class NoiseSettings(ez.Settings):
 WhiteNoiseSettings = NoiseSettings
 
 
-class WhiteNoiseTransformer(CompositeProcessor[NoiseSettings, AxisArray]):
+class WhiteNoiseTransformer(CompositeProcessor[NoiseSettings, AxisArray, AxisArray]):
     @staticmethod
     def _initialize_processors(
         settings: NoiseSettings,
@@ -641,7 +659,9 @@ class WhiteNoiseTransformer(CompositeProcessor[NoiseSettings, AxisArray]):
 
 
 class WhiteNoise(
-    BaseCounterFirstTransformerUnit[NoiseSettings, AxisArray, WhiteNoiseTransformer]
+    BaseCounterFirstTransformerUnit[
+        NoiseSettings, AxisArray, AxisArray, WhiteNoiseTransformer
+    ]
 ):
     """chains a :obj:`Counter` and :obj:`RandomGenerator`."""
 
@@ -651,7 +671,7 @@ class WhiteNoise(
 PinkNoiseSettings = NoiseSettings
 
 
-class PinkNoiseTransformer(CompositeProcessor[PinkNoiseSettings, AxisArray]):
+class PinkNoiseTransformer(CompositeProcessor[PinkNoiseSettings, AxisArray, AxisArray]):
     @staticmethod
     def _initialize_processors(
         settings: PinkNoiseSettings,
@@ -669,7 +689,9 @@ class PinkNoiseTransformer(CompositeProcessor[PinkNoiseSettings, AxisArray]):
 
 
 class PinkNoise(
-    BaseCounterFirstTransformerUnit[NoiseSettings, AxisArray, PinkNoiseTransformer]
+    BaseCounterFirstTransformerUnit[
+        NoiseSettings, AxisArray, AxisArray, PinkNoiseTransformer
+    ]
 ):
     """chains :obj:`WhiteNoise` and :obj:`ButterworthFilter`."""
 

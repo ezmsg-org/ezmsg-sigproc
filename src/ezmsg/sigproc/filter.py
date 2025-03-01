@@ -14,7 +14,6 @@ from ezmsg.sigproc.base import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
     SettingsType,
-    MessageType,
     StateType,
 )
 
@@ -66,7 +65,7 @@ class FilterState(ProcessorState):
 
 
 class FilterTransformer(
-    BaseStatefulTransformer[FilterSettings, AxisArray, FilterState]
+    BaseStatefulTransformer[FilterSettings, AxisArray, AxisArray, FilterState]
 ):
     """
     Filter data using the provided coefficients.
@@ -130,7 +129,9 @@ class FilterTransformer(
         return replace(message, data=dat_out)
 
 
-class Filter(BaseTransformerUnit[FilterSettings, AxisArray, FilterTransformer]):
+class Filter(
+    BaseTransformerUnit[FilterSettings, AxisArray, AxisArray, FilterTransformer]
+):
     SETTINGS = FilterSettings
 
 
@@ -153,9 +154,9 @@ class FilterByDesignState(ProcessorState):
 
 
 class FilterByDesignTransformer(
-    BaseStatefulTransformer[FilterBaseSettings, AxisArray, FilterByDesignState],
+    BaseStatefulTransformer[SettingsType, AxisArray, AxisArray, FilterByDesignState],
     ABC,
-    typing.Generic[SettingsType, MessageType, StateType, FilterCoefsType],
+    typing.Generic[SettingsType, FilterCoefsType],
 ):
     """Abstract base class for filter design transformers."""
 

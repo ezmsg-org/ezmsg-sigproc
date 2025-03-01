@@ -226,7 +226,10 @@ class AdaptiveStandardScalerState(ProcessorState):
 
 class AdaptiveStandardScalerTransformer(
     BaseStatefulTransformer[
-        AdaptiveStandardScalerSettings, AxisArray, AdaptiveStandardScalerState
+        AdaptiveStandardScalerSettings,
+        AxisArray,
+        AxisArray,
+        AdaptiveStandardScalerState,
     ]
 ):
     def _hash_message(self, message: AxisArray) -> int:
@@ -263,7 +266,10 @@ class AdaptiveStandardScalerTransformer(
 
 class AdaptiveStandardScaler(
     BaseTransformerUnit[
-        AdaptiveStandardScalerSettings, AxisArray, AdaptiveStandardScalerTransformer
+        AdaptiveStandardScalerSettings,
+        AxisArray,
+        AxisArray,
+        AdaptiveStandardScalerTransformer,
     ]
 ):
     SETTINGS = AdaptiveStandardScalerSettings

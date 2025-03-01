@@ -67,7 +67,7 @@ class SamplerState(ProcessorState):
 
 
 class SamplerTransformer(
-    BaseStatefulTransformer[SamplerSettings, AxisArray, SamplerState]
+    BaseStatefulTransformer[SamplerSettings, AxisArray, AxisArray, SamplerState]
 ):
     def __call__(
         self, message: AxisArray | SampleTriggerMessage
@@ -215,7 +215,9 @@ class SamplerTransformer(
         return []
 
 
-class Sampler(BaseTransformerUnit[SamplerSettings, AxisArray, SamplerTransformer]):
+class Sampler(
+    BaseTransformerUnit[SamplerSettings, AxisArray, AxisArray, SamplerTransformer]
+):
     SETTINGS = SamplerSettings
 
     INPUT_TRIGGER = ez.InputStream(SampleTriggerMessage)
