@@ -13,7 +13,9 @@ class ConstDifferenceSettings(ez.Settings):
     """If True (default) then value is subtracted from the input data. If False, the input data is subtracted from value."""
 
 
-class ConstDifferenceTransformer(BaseTransformer[ConstDifferenceSettings, AxisArray]):
+class ConstDifferenceTransformer(
+    BaseTransformer[ConstDifferenceSettings, AxisArray, AxisArray]
+):
     def _process(self, message: AxisArray) -> AxisArray:
         return replace(
             message,
@@ -24,7 +26,9 @@ class ConstDifferenceTransformer(BaseTransformer[ConstDifferenceSettings, AxisAr
 
 
 class ConstDifference(
-    BaseTransformerUnit[ConstDifferenceSettings, AxisArray, ConstDifferenceTransformer]
+    BaseTransformerUnit[
+        ConstDifferenceSettings, AxisArray, AxisArray, ConstDifferenceTransformer
+    ]
 ):
     SETTINGS = ConstDifferenceSettings
 

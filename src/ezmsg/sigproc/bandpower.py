@@ -32,7 +32,7 @@ class BandPowerSettings(ez.Settings):
     """
 
 
-class BandPowerTransformer(CompositeProcessor[BandPowerSettings, AxisArray]):
+class BandPowerTransformer(CompositeProcessor[BandPowerSettings, AxisArray, AxisArray]):
     @staticmethod
     def _initialize_processors(
         settings: BandPowerSettings,
@@ -52,7 +52,7 @@ class BandPowerTransformer(CompositeProcessor[BandPowerSettings, AxisArray]):
 
 
 class BandPower(
-    BaseTransformerUnit[BandPowerSettings, AxisArray, BandPowerTransformer]
+    BaseTransformerUnit[BandPowerSettings, AxisArray, AxisArray, BandPowerTransformer]
 ):
     SETTINGS = BandPowerSettings
 

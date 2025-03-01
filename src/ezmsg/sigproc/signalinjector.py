@@ -22,7 +22,9 @@ class SignalInjectorState(ProcessorState):
 
 
 class SignalInjectorTransformer(
-    BaseAsyncTransformer[SignalInjectorSettings, AxisArray, SignalInjectorState]
+    BaseAsyncTransformer[
+        SignalInjectorSettings, AxisArray, AxisArray, SignalInjectorState
+    ]
 ):
     def _hash_message(self, message: AxisArray) -> int:
         time_ax_idx = message.get_axis_idx(self.settings.time_dim)
@@ -57,7 +59,9 @@ class SignalInjectorTransformer(
 
 
 class SignalInjector(
-    BaseTransformerUnit[SignalInjectorSettings, AxisArray, SignalInjectorTransformer]
+    BaseTransformerUnit[
+        SignalInjectorSettings, AxisArray, AxisArray, SignalInjectorTransformer
+    ]
 ):
     SETTINGS = SignalInjectorSettings
     INPUT_FREQUENCY = ez.InputStream(float | None)

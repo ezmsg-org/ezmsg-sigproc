@@ -42,7 +42,7 @@ class ActivationSettings(ez.Settings):
          SIGMOID and EXPIT are equivalent. See :obj:`scipy.special.expit` for more details."""
 
 
-class ActivationTransformer(BaseTransformer[ActivationSettings, AxisArray]):
+class ActivationTransformer(BaseTransformer[ActivationSettings, AxisArray, AxisArray]):
     def _process(self, message: AxisArray) -> AxisArray:
         if type(self.settings.function) is ActivationFunction:
             func = ACTIVATIONS[self.settings.function]
@@ -62,7 +62,7 @@ class ActivationTransformer(BaseTransformer[ActivationSettings, AxisArray]):
 
 
 class Activation(
-    BaseTransformerUnit[ActivationSettings, AxisArray, ActivationTransformer]
+    BaseTransformerUnit[ActivationSettings, AxisArray, AxisArray, ActivationTransformer]
 ):
     SETTINGS = ActivationSettings
 
