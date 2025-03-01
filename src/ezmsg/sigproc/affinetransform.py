@@ -37,7 +37,9 @@ class AffineTransformState(ProcessorState):
 
 
 class AffineTransformTransformer(
-    BaseStatefulTransformer[AffineTransformSettings, AxisArray, AffineTransformState]
+    BaseStatefulTransformer[
+        AffineTransformSettings, AxisArray, AxisArray, AffineTransformState
+    ]
 ):
     def __call__(self, message: AxisArray) -> AxisArray:
         # Override __call__ so we can shortcut if weights are None.
@@ -126,7 +128,9 @@ class AffineTransformTransformer(
 
 
 class AffineTransform(
-    BaseTransformerUnit[AffineTransformSettings, AxisArray, AffineTransformTransformer]
+    BaseTransformerUnit[
+        AffineTransformSettings, AxisArray, AxisArray, AffineTransformTransformer
+    ]
 ):
     SETTINGS = AffineTransformSettings
 
@@ -174,7 +178,7 @@ class CommonRereferenceSettings(ez.Settings):
 
 
 class CommonRereferenceTransformer(
-    BaseTransformer[CommonRereferenceSettings, AxisArray]
+    BaseTransformer[CommonRereferenceSettings, AxisArray, AxisArray]
 ):
     def _process(self, message: AxisArray) -> AxisArray:
         if self.settings.mode == "passthrough":
@@ -209,7 +213,7 @@ class CommonRereferenceTransformer(
 
 class CommonRereference(
     BaseTransformerUnit[
-        CommonRereferenceSettings, AxisArray, CommonRereferenceTransformer
+        CommonRereferenceSettings, AxisArray, AxisArray, CommonRereferenceTransformer
     ]
 ):
     SETTINGS = CommonRereferenceSettings

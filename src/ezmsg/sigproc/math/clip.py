@@ -14,7 +14,7 @@ class ClipSettings(ez.Settings):
     """Upper clip bound."""
 
 
-class ClipTransformer(BaseTransformer[ClipSettings, AxisArray]):
+class ClipTransformer(BaseTransformer[ClipSettings, AxisArray, AxisArray]):
     def _process(self, message: AxisArray) -> AxisArray:
         return replace(
             message,
@@ -22,7 +22,7 @@ class ClipTransformer(BaseTransformer[ClipSettings, AxisArray]):
         )
 
 
-class Clip(BaseTransformerUnit[ClipSettings, AxisArray, ClipTransformer]):
+class Clip(BaseTransformerUnit[ClipSettings, AxisArray, AxisArray, ClipTransformer]):
     SETTINGS = ClipSettings
 
 

@@ -32,7 +32,9 @@ class CWTState(ProcessorState):
     last_conv_samp: npt.NDArray | None = None
 
 
-class CWTTransformer(BaseStatefulTransformer[CWTSettings, AxisArray, CWTState]):
+class CWTTransformer(
+    BaseStatefulTransformer[CWTSettings, AxisArray, AxisArray, CWTState]
+):
     def _hash_message(self, message: AxisArray) -> int:
         ax_idx = message.get_axis_idx(self.settings.axis)
         in_shape = message.data.shape[:ax_idx] + message.data.shape[ax_idx + 1 :]
@@ -146,7 +148,7 @@ class CWTTransformer(BaseStatefulTransformer[CWTSettings, AxisArray, CWTState]):
         )
 
 
-class CWT(BaseTransformerUnit[CWTSettings, AxisArray, CWTTransformer]):
+class CWT(BaseTransformerUnit[CWTSettings, AxisArray, AxisArray, CWTTransformer]):
     SETTINGS = CWTSettings
 
 

@@ -9,7 +9,7 @@ from .downsample import Downsample, DownsampleSettings
 from .filter import BACoeffs, SOSCoeffs
 
 
-class ChebyForDecimateTransformer(ChebyshevFilterTransformer):
+class ChebyForDecimateTransformer(ChebyshevFilterTransformer[BACoeffs | SOSCoeffs]):
     """
     A :obj:`ChebyshevFilterTransformer` with a design filter method that additionally accepts a target sampling rate,
      and if the target rate cannot be achieved it returns None, else it returns the filter coefficients.
@@ -31,7 +31,9 @@ class ChebyForDecimateTransformer(ChebyshevFilterTransformer):
 
 
 class ChebyForDecimate(
-    BaseTransformerUnit[ChebyshevFilterSettings, AxisArray, ChebyForDecimateTransformer]
+    BaseTransformerUnit[
+        ChebyshevFilterSettings, AxisArray, AxisArray, ChebyForDecimateTransformer
+    ]
 ):
     SETTINGS = ChebyshevFilterSettings
 

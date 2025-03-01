@@ -82,7 +82,9 @@ class RangedAggregateState(ProcessorState):
 
 
 class RangedAggregateTransformer(
-    BaseStatefulTransformer[RangedAggregateSettings, AxisArray, RangedAggregateState]
+    BaseStatefulTransformer[
+        RangedAggregateSettings, AxisArray, AxisArray, RangedAggregateState
+    ]
 ):
     def __call__(self, message: AxisArray) -> AxisArray:
         # Override for shortcut passthrough mode.
@@ -166,7 +168,9 @@ class RangedAggregateTransformer(
 
 
 class RangedAggregate(
-    BaseTransformerUnit[RangedAggregateSettings, AxisArray, RangedAggregateTransformer]
+    BaseTransformerUnit[
+        RangedAggregateSettings, AxisArray, AxisArray, RangedAggregateTransformer
+    ]
 ):
     SETTINGS = RangedAggregateSettings
 

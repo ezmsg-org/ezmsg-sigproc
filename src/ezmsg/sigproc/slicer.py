@@ -76,7 +76,7 @@ class SlicerState(ProcessorState):
 
 
 class SlicerTransformer(
-    BaseStatefulTransformer[SlicerSettings, AxisArray, SlicerState]
+    BaseStatefulTransformer[SlicerSettings, AxisArray, AxisArray, SlicerState]
 ):
     def _hash_message(self, message: AxisArray) -> int:
         axis = self.settings.axis or message.dims[-1]
@@ -137,7 +137,9 @@ class SlicerTransformer(
         )
 
 
-class Slicer(BaseTransformerUnit[SlicerSettings, AxisArray, SlicerTransformer]):
+class Slicer(
+    BaseTransformerUnit[SlicerSettings, AxisArray, AxisArray, SlicerTransformer]
+):
     SETTINGS = SlicerSettings
 
 

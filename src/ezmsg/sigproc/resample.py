@@ -48,7 +48,7 @@ class ResampleState(ProcessorState):
 
 
 class ResampleProcessor(
-    BaseStatefulProcessor[ResampleSettings, AxisArray, ResampleState]
+    BaseStatefulProcessor[ResampleSettings, AxisArray, AxisArray, ResampleState]
 ):
     def _hash_message(self, message: AxisArray) -> int:
         ax_idx: int = message.get_axis_idx(self.settings.axis)

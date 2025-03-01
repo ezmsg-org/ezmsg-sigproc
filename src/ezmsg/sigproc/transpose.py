@@ -25,7 +25,7 @@ class TransposeState(ProcessorState):
 
 
 class TransposeTransformer(
-    BaseStatefulTransformer[TransposeSettings, AxisArray, TransposeState]
+    BaseStatefulTransformer[TransposeSettings, AxisArray, AxisArray, TransposeState]
 ):
     """
     Downsampled data simply comprise every `factor`th sample.
@@ -114,7 +114,7 @@ class TransposeTransformer(
 
 
 class Transpose(
-    BaseTransformerUnit[TransposeSettings, AxisArray, TransposeTransformer]
+    BaseTransformerUnit[TransposeSettings, AxisArray, AxisArray, TransposeTransformer]
 ):
     SETTINGS = TransposeSettings
 

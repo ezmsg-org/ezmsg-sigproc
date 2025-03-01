@@ -123,7 +123,7 @@ class SpectrumState(ProcessorState):
 
 
 class SpectrumTransformer(
-    BaseStatefulTransformer[SpectrumSettings, AxisArray, SpectrumState]
+    BaseStatefulTransformer[SpectrumSettings, AxisArray, AxisArray, SpectrumState]
 ):
     def _hash_message(self, message: AxisArray) -> int:
         axis = self.settings.axis or message.dims[0]
@@ -256,7 +256,9 @@ class SpectrumTransformer(
         return msg_out
 
 
-class Spectrum(BaseTransformerUnit[SpectrumSettings, AxisArray, SpectrumTransformer]):
+class Spectrum(
+    BaseTransformerUnit[SpectrumSettings, AxisArray, AxisArray, SpectrumTransformer]
+):
     SETTINGS = SpectrumSettings
 
 

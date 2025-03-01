@@ -36,7 +36,9 @@ class SpectrogramSettings(ez.Settings):
     """The :obj:`SpectralOutput` format."""
 
 
-class SpectrogramTransformer(CompositeProcessor[SpectrogramSettings, AxisArray]):
+class SpectrogramTransformer(
+    CompositeProcessor[SpectrogramSettings, AxisArray, AxisArray]
+):
     @staticmethod
     def _initialize_processors(
         settings: SpectrogramSettings,
@@ -63,7 +65,9 @@ class SpectrogramTransformer(CompositeProcessor[SpectrogramSettings, AxisArray])
 
 
 class Spectrogram(
-    BaseTransformerUnit[SpectrogramSettings, AxisArray, SpectrogramTransformer]
+    BaseTransformerUnit[
+        SpectrogramSettings, AxisArray, AxisArray, SpectrogramTransformer
+    ]
 ):
     SETTINGS = SpectrogramSettings
 

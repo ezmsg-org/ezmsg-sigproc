@@ -78,7 +78,7 @@ class FilterbankState(ProcessorState):
 
 
 class FilterbankTransformer(
-    BaseStatefulTransformer[FilterbankSettings, AxisArray, FilterbankState]
+    BaseStatefulTransformer[FilterbankSettings, AxisArray, AxisArray, FilterbankState]
 ):
     def _hash_message(self, message: AxisArray) -> int:
         axis = self.settings.axis or message.dims[0]
@@ -298,7 +298,7 @@ class FilterbankTransformer(
 
 
 class Filterbank(
-    BaseTransformerUnit[FilterbankSettings, AxisArray, FilterbankTransformer]
+    BaseTransformerUnit[FilterbankSettings, AxisArray, AxisArray, FilterbankTransformer]
 ):
     SETTINGS = FilterbankSettings
 
