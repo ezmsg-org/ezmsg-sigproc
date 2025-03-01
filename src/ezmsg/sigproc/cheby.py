@@ -11,7 +11,6 @@ from .filter import (
     FilterByDesignTransformer,
     BACoeffs,
     SOSCoeffs,
-    FilterByDesignState,
 )
 
 
@@ -106,11 +105,7 @@ def cheby_design_fun(
     return coefs
 
 
-class ChebyshevFilterTransformer(
-    FilterByDesignTransformer[
-        ChebyshevFilterSettings, AxisArray, FilterByDesignState, BACoeffs | SOSCoeffs
-    ]
-):
+class ChebyshevFilterTransformer(FilterByDesignTransformer[ChebyshevFilterSettings, BACoeffs | SOSCoeffs]):
     def get_design_function(
         self,
     ) -> typing.Callable[[float], BACoeffs | SOSCoeffs | None]:
@@ -128,6 +123,8 @@ class ChebyshevFilterTransformer(
 
 
 class ChebyshevFilter(
-    BaseTransformerUnit[ChebyshevFilterSettings, AxisArray, ChebyshevFilterTransformer]
+    BaseTransformerUnit[
+        ChebyshevFilterSettings, AxisArray, AxisArray, ChebyshevFilterTransformer
+    ]
 ):
     SETTINGS = ChebyshevFilterSettings

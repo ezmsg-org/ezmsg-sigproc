@@ -51,7 +51,7 @@ class WindowState(ProcessorState):
 
 
 class WindowTransformer(
-    BaseStatefulTransformer[WindowSettings, AxisArray, WindowState]
+    BaseStatefulTransformer[WindowSettings, AxisArray, AxisArray, WindowState]
 ):
     """
     Apply a sliding window along the specified axis to input streaming data.
@@ -293,7 +293,9 @@ class WindowTransformer(
         return msg_out
 
 
-class Window(BaseTransformerUnit[WindowSettings, AxisArray, WindowTransformer]):
+class Window(
+    BaseTransformerUnit[WindowSettings, AxisArray, AxisArray, WindowTransformer]
+):
     SETTINGS = WindowSettings
     INPUT_SIGNAL = ez.InputStream(AxisArray)
     OUTPUT_SIGNAL = ez.OutputStream(AxisArray)

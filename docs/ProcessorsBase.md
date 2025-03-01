@@ -6,25 +6,26 @@ The `ezmsg.sigproc.base` module contains the base classes for the signal process
 
 ### Generic TypeVars
 
-| Idx | Class                     | Description                                                                 |
-|-----|---------------------------|-----------------------------------------------------------------------------|
-| 1   | `MessageType` (M)         | for messages                                                                |
-| 2   | `SettingsType`            | bound to ez.Settings                                                        |
-| 3   | `StateType` (St)          | bound to ProcessorState which is simply ez.State with a `hash: int` field.  |
+| Idx | Class                 | Description                                                                |
+|-----|-----------------------|----------------------------------------------------------------------------|
+| 1   | `MessageInType` (Mi)  | for messages passed to a consumer, processor, or transformer               |
+| 2   | `MessageOutType` (Mo) | for messages returned by a producer, processor, or transformer             |
+| 3   | `SettingsType`        | bound to ez.Settings                                                       |
+| 4   | `StateType` (St)      | bound to ProcessorState which is simply ez.State with a `hash: int` field. |
 
 ### Protocols
 
-| Idx | Class                 | Parent | State | `__call__` | `stateful_op` | @state | partial_fit |
-|-----|-----------------------|--------|-------|------------|---------------|--------|-------------|
-| 1   | `Processor`           | -      | No    | [M, None]  | -             | -      | -           |
-| 2   | `Producer`            | -      | No    | M          | -             | -      | -           |
-| 3   | `Consumer`            | 1      | No    | None       | -             | -      | -           |
-| 4   | `Transformer`         | 1      | No    | M          | -             | -      | -           |
-| 5   | `StatefulProcessor`   | -      | Yes   | [M, None]  | St, [M, None] | Y      | -           |
-| 6   | `StatefulProducer`    | -      | Yes   | M          | St, M         | Y      | -           |
-| 7   | `StatefulConsumer`    | 5      | Yes   | None       | St, None      | Y      | -           |
-| 8   | `StatefulTransformer` | 5      | Yes   | M          | St, M         | Y      | -           |
-| 9   | `AdaptiveTransformer` | 8      | Yes   | M          | St, M         | Y      | Y           |
+| Idx | Class                 | Parent | State | `__call__` sig           | @state | partial_fit |
+|-----|-----------------------|--------|-------|--------------------------|--------|-------------|
+| 1   | `Processor`           | -      | No    | [Mi, None] ->[Mo, None]  | -      | -           |
+| 2   | `Producer`            | -      | No    | Mi -> Mo                 | -      | -           |
+| 3   | `Consumer`            | 1      | No    | Mi -> None               | -      | -           |
+| 4   | `Transformer`         | 1      | No    | Mi -> Mo                 | -      | -           |
+| 5   | `StatefulProcessor`   | -      | Yes   | [Mi, None] -> [Mo, None] | Y      | -           |
+| 6   | `StatefulProducer`    | -      | Yes   | None -> Mo               | Y      | -           |
+| 7   | `StatefulConsumer`    | 5      | Yes   | Mi -> None               | Y      | -           |
+| 8   | `StatefulTransformer` | 5      | Yes   | Mi -> Mo                 | Y      | -           |
+| 9   | `AdaptiveTransformer` | 8      | Yes   | Mi -> Mo                 | Y      | Y           |
 
 Note: `__call__` and `partial_fit` both have asynchronous alternatives: `__acall__` and `apartial_fit` respectively.
 
@@ -44,7 +45,13 @@ Note: `__call__` and `partial_fit` both have asynchronous alternatives: `__acall
 | 10  | `BaseAsyncTransformer`    | 8      | 8        | `__acall__` wraps abstract `_aprocess`; `__call__` runs `__acall__`.               |
 | 11  | `CompositeProcessor`      | 1      | 5        | Methods iterate over sequence of processors created in `_initialize_processors`.   |
 
-Note: For most base classes, the async methods simply call the synchronous methods. Exceptions are `BaseProducer` (and its children) and `BaseAsyncTransformer` which are async-first. For async-first classes, the logic is implemented in the async methods and the sync methods are thin wrappers around them. The wrapper uses a helper method called `run_coroutine_sync` to run the async method in a synchronous context, but this adds some overhead and synchronous calls should be avoided if possible, either by using an async context or by overriding the sync methods with the same logic without needing async.
+For most base classes, the async methods simply call the synchronous methods where the processor logic is expected. Exceptions are `BaseProducer` (and its children) and `BaseAsyncTransformer` which are async-first and should be strongly considered for operations that are I/O bound.
+
+For async-first classes, the logic is implemented in the async methods and the sync methods are thin wrappers around the async methods. The wrapper uses a helper method called `run_coroutine_sync` to run the async method in a synchronous context, but this adds some noticeable processing overhead.
+
+If you need to call your processor outside ezmsg (which uses async), and you cannot easily add an async context* in your processing, then you might want to consider duplicating the processor logic in the sync methods.
+
+* Note: Jupyter notebooks are async by default, so you can await async code in a notebook without any extra setup.
 
 ### Generic TypeVars for ezmsg Units
 
@@ -122,9 +129,25 @@ flowchart TD
 Often, all that is required is the following (e.g., for a custom transformer):
 
 ```Python
-class CustomUnit(TransformerUnit[
+import ezmsg.core as ez
+from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.sigproc.base import BaseTransformer, BaseTransformerUnit
+
+
+class CustomTransformerSettings(ez.Settings):
+    ...
+
+
+class CustomTransformer(BaseTransformer[CustomTransformerSettings, AxisArray, AxisArray]):
+    def _process(self, message: AxisArray) -> AxisArray:
+        # Your processing code here...
+        return message
+
+
+class CustomUnit(BaseTransformerUnit[
         CustomTransformerSettings,    # SettingsType
-        AxisArray,                    # MessageType
+        AxisArray,                    # MessageInType
+        AxisArray,                    # MessageOutType
         CustomTransformer,            # TransformerType
     ]):
         SETTINGS = CustomTransformerSettings

@@ -34,7 +34,7 @@ class DownsampleState(ProcessorState):
 
 
 class DownsampleTransformer(
-    BaseStatefulTransformer[DownsampleSettings, AxisArray, DownsampleState]
+    BaseStatefulTransformer[DownsampleSettings, AxisArray, AxisArray, DownsampleState]
 ):
     """
     Downsampled data simply comprise every `factor`th sample.
@@ -100,7 +100,7 @@ class DownsampleTransformer(
 
 
 class Downsample(
-    BaseTransformerUnit[DownsampleSettings, AxisArray, DownsampleTransformer]
+    BaseTransformerUnit[DownsampleSettings, AxisArray, AxisArray, DownsampleTransformer]
 ):
     SETTINGS = DownsampleSettings
 

@@ -9,12 +9,14 @@ class InvertSettings(ez.Settings):
     pass
 
 
-class InvertTransformer(BaseTransformer[InvertSettings, AxisArray]):
+class InvertTransformer(BaseTransformer[InvertSettings, AxisArray, AxisArray]):
     def _process(self, message: AxisArray) -> AxisArray:
         return replace(message, data=1 / message.data)
 
 
-class Invert(BaseTransformerUnit[InvertSettings, AxisArray, InvertTransformer]):
+class Invert(
+    BaseTransformerUnit[InvertSettings, AxisArray, AxisArray, InvertTransformer]
+):
     SETTINGS = InvertSettings
 
 

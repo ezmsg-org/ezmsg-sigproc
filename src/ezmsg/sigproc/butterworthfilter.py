@@ -114,9 +114,7 @@ def butter_design_fun(
 
 
 class ButterworthFilterTransformer(
-    FilterByDesignTransformer[
-        ButterworthFilterSettings, AxisArray, FilterByDesignState, BACoeffs | SOSCoeffs
-    ]
+    FilterByDesignTransformer[ButterworthFilterSettings, BACoeffs | SOSCoeffs]
 ):
     def get_design_function(
         self,
@@ -133,7 +131,7 @@ class ButterworthFilterTransformer(
 
 class ButterworthFilter(
     BaseTransformerUnit[
-        ButterworthFilterSettings, AxisArray, ButterworthFilterTransformer
+        ButterworthFilterSettings, AxisArray, AxisArray, ButterworthFilterTransformer
     ]
 ):
     SETTINGS = ButterworthFilterSettings
