@@ -678,14 +678,28 @@ def _check_message_type_compatibility(type1: type, type2: type) -> bool:
 
     # Handle None with Optional
     if type1 is None:
-        return hasattr(type2, "__origin__") and type2.__origin__ is typing.Union and type(None) in typing.get_args(type2)
+        return (
+            hasattr(type2, "__origin__")
+            and type2.__origin__ is typing.Union
+            and type(None) in typing.get_args(type2)
+        )
     if type2 is None:
-        return hasattr(type1, "__origin__") and type1.__origin__ is typing.Union and type(None) in typing.get_args(type1)
+        return (
+            hasattr(type1, "__origin__")
+            and type1.__origin__ is typing.Union
+            and type(None) in typing.get_args(type1)
+        )
 
     # Handle Optional types
-    if hasattr(type2, "__origin__") and type2.__origin__ is typing.Union and type(None) in typing.get_args(type2):
+    if (
+        hasattr(type2, "__origin__")
+        and type2.__origin__ is typing.Union
+        and type(None) in typing.get_args(type2)
+    ):
         # Extract the non-None type from Optional
-        non_none_type = next(arg for arg in typing.get_args(type2) if arg is not type(None))
+        non_none_type = next(
+            arg for arg in typing.get_args(type2) if arg is not type(None)
+        )
         return issubclass(type1, non_none_type)
 
     # Regular issubclass check

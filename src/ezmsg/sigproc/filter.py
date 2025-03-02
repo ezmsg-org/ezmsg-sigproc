@@ -158,6 +158,7 @@ class FilterByDesignTransformer(
     typing.Generic[SettingsType, FilterCoefsType],
 ):
     """Abstract base class for filter design transformers."""
+
     @classmethod
     def get_message_type(cls, _) -> typing.Type[AxisArray]:
         return AxisArray
