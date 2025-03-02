@@ -199,6 +199,14 @@ class BaseProcessor(ABC, typing.Generic[SettingsType, MessageInType, MessageOutT
       calling async methods from sync methods.
     """
 
+    @classmethod
+    def get_settings_type(cls) -> typing.Type[SettingsType]:
+        return typing.get_args(cls.__orig_bases__[0])[0]
+
+    @classmethod
+    def get_message_type(cls, dir: str) -> typing.Type[MessageInType | MessageOutType]:
+        return typing.get_args(cls.__orig_bases__[0])[1 if dir == "in" else 2]
+
     def __init__(self, *args, settings: typing.Optional[SettingsType] = None, **kwargs):
         self.settings = _unify_settings(self, settings, *args, **kwargs)
 
@@ -246,6 +254,16 @@ class BaseProducer(ABC, typing.Generic[SettingsType, MessageOutType]):
       receive inputs, will require some sort of IO which will benefit from being async.
     """
 
+    @classmethod
+    def get_settings_type(cls) -> typing.Type[SettingsType]:
+        return typing.get_args(cls.__orig_bases__[0])[0]
+
+    @classmethod
+    def get_message_type(cls, dir: str) -> typing.Type[MessageOutType]:
+        if dir == "out":
+            return typing.get_args(cls.__orig_bases__[0])[1]
+        return None
+
     def __init__(self, *args, settings: typing.Optional[SettingsType] = None, **kwargs):
         self.settings = _unify_settings(self, settings, *args, **kwargs)
 
@@ -281,6 +299,12 @@ class BaseConsumer(
     This base simply overrides type annotations of BaseProcessor to remove the outputs.
     (We don't bother overriding `send` and `asend` because those are deprecated.)
     """
+
+    @classmethod
+    def get_message_type(cls, dir: str) -> typing.Type[MessageInType]:
+        if dir == "in":
+            return typing.get_args(cls.__orig_bases__[0])[1]
+        return None
 
     @abstractmethod
     def _process(self, message: MessageInType) -> None: ...
@@ -320,8 +344,8 @@ class BaseTransformer(
         return await super().__acall__(message)
 
 
-def _get_state_type(obj):
-    for base in obj.__class__.__mro__:
+def _get_state_type(cls):
+    for base in cls.__mro__:
         if hasattr(base, "__orig_bases__"):
             for orig_base in base.__orig_bases__:
                 if hasattr(orig_base, "__origin__"):
@@ -347,9 +371,13 @@ class BaseStatefulProcessor(
     or BaseStatefulTransformer for operations that do return a result.
     """
 
+    @classmethod
+    def get_state_type(cls):
+        return _get_state_type(cls)
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        state_type = _get_state_type(self)
+        state_type = self.__class__.get_state_type()
         self._state: StateType = state_type()
         # TODO: Enforce that StateType has .hash: int field.
 
@@ -436,9 +464,13 @@ class BaseStatefulProducer(
       initialization (.hash == -1) to state reset (.hash == 0).
     """
 
+    @classmethod
+    def get_state_type(cls):
+        return _get_state_type(cls)
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)  # .settings
-        state_type = typing.get_args(self.__orig_bases__[0])[2]
+        state_type = self.__class__.get_state_type()
         self._state: StateType = state_type()
 
     @property
@@ -483,6 +515,12 @@ class BaseStatefulConsumer(
     Base class for stateful message consumers that don't produce output.
     This class merely overrides the type annotations of BaseStatefulProcessor.
     """
+
+    @classmethod
+    def get_message_type(cls, dir: str) -> typing.Type[MessageInType]:
+        if dir == "in":
+            return typing.get_args(cls.__orig_bases__[0])[1]
+        return None
 
     @abstractmethod
     def _process(self, message: MessageInType) -> None: ...
@@ -602,6 +640,58 @@ class BaseAsyncTransformer(
 
 
 # Composite processor for building pipelines
+def _get_processor_message_type(
+    proc: BaseProcessor | BaseProducer | typing.Generator, dir: str
+) -> typing.Optional[type]:
+    """Extract the input type from a processor."""
+    if inspect.isgenerator(proc):
+        gen_func = proc.gi_frame.f_globals[proc.gi_frame.f_code.co_name]
+        args = typing.get_args(gen_func.__annotations__.get("return"))
+        return args[0] if dir == "out" else args[1]  # yield type / send type
+    return proc.__class__.get_message_type(dir)
+
+
+def _check_message_type_compatibility(type1: type, type2: type) -> bool:
+    """
+    Check if two types are compatible for message passing.
+
+    Returns True if:
+    - Both are None
+    - Either is typing.Any
+    - One is None and the other is typing.Optional
+    - type1 is a subclass of type2, or of the inner type if type2 is Optional
+
+    Args:
+        type1: First type to compare
+        type2: Second type to compare
+
+    Returns:
+        bool: True if the types are compatible, False otherwise
+    """
+    # Both None is compatible
+    if type1 is None and type2 is None:
+        return True
+
+    # If either is Any, they are compatible
+    if type1 is typing.Any or type2 is typing.Any:
+        return True
+
+    # Handle None with Optional
+    if type1 is None:
+        return hasattr(type2, "__origin__") and type2.__origin__ is typing.Union and type(None) in typing.get_args(type2)
+    if type2 is None:
+        return hasattr(type1, "__origin__") and type1.__origin__ is typing.Union and type(None) in typing.get_args(type1)
+
+    # Handle Optional types
+    if hasattr(type2, "__origin__") and type2.__origin__ is typing.Union and type(None) in typing.get_args(type2):
+        # Extract the non-None type from Optional
+        non_none_type = next(arg for arg in typing.get_args(type2) if arg is not type(None))
+        return issubclass(type1, non_none_type)
+
+    # Regular issubclass check
+    return issubclass(type1, type2)
+
+
 class CompositeProcessor(
     BaseProcessor[SettingsType, MessageInType, MessageOutType],
     typing.Generic[SettingsType, MessageInType, MessageOutType],
@@ -867,7 +957,9 @@ class BaseTransformerUnit(
 
 
 class BaseAdaptiveTransformerUnit(
-    BaseTransformerUnit[SettingsType, MessageInType, MessageOutType, AdaptiveTransformerType],
+    BaseTransformerUnit[
+        SettingsType, MessageInType, MessageOutType, AdaptiveTransformerType
+    ],
     typing.Generic[
         SettingsType, MessageInType, MessageOutType, AdaptiveTransformerType
     ],

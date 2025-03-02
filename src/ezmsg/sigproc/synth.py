@@ -248,6 +248,12 @@ class CounterProducer(BaseStatefulProducer[CounterSettings, AxisArray, CounterSt
 
     # TODO: Adapt this to use ezmsg.util.rate?
 
+    @classmethod
+    def get_message_type(cls, dir: str) -> typing.Type[typing.Optional[AxisArray]]:
+        if dir == "in":
+            return typing.Optional[AxisArray]
+        return AxisArray
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         if isinstance(
@@ -572,10 +578,12 @@ class BaseCounterFirstTransformerUnit(
 
     def create_processor(self):
         super().create_processor()
+
         def recurse_get_counter(proc) -> CounterProducer:
             if hasattr(proc, "_procs"):
                 return recurse_get_counter(list(proc._procs.values())[0])
             return proc
+
         self._counter = recurse_get_counter(self.processor)
 
     @ez.subscriber(BaseConsumerUnit.INPUT_SIGNAL, zero_copy=True)

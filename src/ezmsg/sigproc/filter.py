@@ -14,7 +14,6 @@ from ezmsg.sigproc.base import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
     SettingsType,
-    StateType,
 )
 
 
@@ -159,6 +158,9 @@ class FilterByDesignTransformer(
     typing.Generic[SettingsType, FilterCoefsType],
 ):
     """Abstract base class for filter design transformers."""
+    @classmethod
+    def get_message_type(cls, _) -> typing.Type[AxisArray]:
+        return AxisArray
 
     @abstractmethod
     def get_design_function(self) -> typing.Callable[[float], FilterCoefsType | None]:
