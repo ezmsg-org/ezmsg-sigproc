@@ -1,6 +1,5 @@
 from dataclasses import field
 
-import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 
 from .spectrogram import SpectrogramSettings, SpectrogramTransformer
@@ -9,10 +8,16 @@ from .aggregate import (
     RangedAggregateTransformer,
     RangedAggregateSettings,
 )
-from .base import CompositeProcessor, BaseStatefulProcessor, BaseTransformerUnit
+from .base import (
+    CompositeProcessor,
+    BaseStatefulProcessor,
+    BaseTransformerUnit,
+    processor_settings,
+)
 
 
-class BandPowerSettings(ez.Settings):
+@processor_settings
+class BandPowerSettings:
     """
     Settings for ``BandPower``.
     """

@@ -4,14 +4,18 @@ import typing
 
 import numpy as np
 import numpy.typing as npt
-import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import (
     AxisArray,
     slice_along_axis,
     replace,
 )
 
-from .base import ProcessorState, BaseStatefulTransformer, BaseTransformerUnit
+from .base import (
+    BaseStatefulTransformer,
+    BaseTransformerUnit,
+    processor_settings,
+    processor_state,
+)
 
 
 class OptionsEnum(enum.Enum):
@@ -66,7 +70,8 @@ class SpectralOutput(OptionsEnum):
     NEGATIVE = "Negative Frequencies"
 
 
-class SpectrumSettings(ez.Settings):
+@processor_settings
+class SpectrumSettings:
     """
     Settings for :obj:`Spectrum.
     See :obj:`spectrum` for a description of the parameters.
@@ -112,7 +117,8 @@ class SpectrumSettings(ez.Settings):
     """
 
 
-class SpectrumState(ProcessorState):
+@processor_state
+class SpectrumState:
     f_sl: slice | None = None
     # I would prefer `slice(None)` as f_sl default but this fails because it is mutable.
     freq_axis: AxisArray.LinearAxis | None = None

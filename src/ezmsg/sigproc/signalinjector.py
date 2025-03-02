@@ -4,17 +4,24 @@ from ezmsg.util.messages.util import replace
 import numpy as np
 import numpy.typing as npt
 
-from .base import BaseAsyncTransformer, ProcessorState, BaseTransformerUnit
+from .base import (
+    BaseAsyncTransformer,
+    BaseTransformerUnit,
+    processor_state,
+    processor_settings,
+)
 
 
-class SignalInjectorSettings(ez.Settings):
+@processor_settings
+class SignalInjectorSettings:
     time_dim: str = "time"  # Input signal needs a time dimension with units in sec.
     frequency: float | None = None  # Hz
     amplitude: float = 1.0
     mixing_seed: int | None = None
 
 
-class SignalInjectorState(ProcessorState):
+@processor_state
+class SignalInjectorState:
     cur_shape: tuple[int, ...] | None = None
     cur_frequency: float | None = None
     cur_amplitude: float | None = None

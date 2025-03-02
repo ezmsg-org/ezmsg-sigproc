@@ -1,22 +1,22 @@
 import numpy as np
-import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
 from ..base import BaseTransformer, BaseTransformerUnit
 
 
-class AbsSettings(ez.Settings):
+class AbsSettings:
     pass
 
 
-class AbsTransformer(BaseTransformer[AbsSettings, AxisArray, AxisArray]):
+class AbsTransformer(BaseTransformer[None, AxisArray, AxisArray]):
     def _process(self, message: AxisArray) -> AxisArray:
         return replace(message, data=np.abs(message.data))
 
 
-class Abs(BaseTransformerUnit[AbsSettings, AxisArray, AxisArray, AbsTransformer]):
-    SETTINGS = AbsSettings
+class Abs(
+    BaseTransformerUnit[None, AxisArray, AxisArray, AbsTransformer]
+): ...  # SETTINGS = None
 
 
 def abs() -> AbsTransformer:
@@ -26,4 +26,4 @@ def abs() -> AbsTransformer:
     Returns: :obj:`AbsTransformer`.
 
     """
-    return AbsTransformer(AbsSettings())
+    return AbsTransformer()

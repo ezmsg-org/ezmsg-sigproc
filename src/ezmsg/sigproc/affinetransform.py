@@ -8,14 +8,16 @@ from ezmsg.util.messages.axisarray import AxisArray, AxisBase
 from ezmsg.util.messages.util import replace
 
 from .base import (
-    ProcessorState,
     BaseStatefulTransformer,
     BaseTransformerUnit,
     BaseTransformer,
+    processor_settings,
+    processor_state,
 )
 
 
-class AffineTransformSettings(ez.Settings):
+@processor_settings
+class AffineTransformSettings:
     """
     Settings for :obj:`AffineTransform`.
     See :obj:`affine_transform` for argument details.
@@ -31,7 +33,8 @@ class AffineTransformSettings(ez.Settings):
     """Set False to transpose the weights before applying."""
 
 
-class AffineTransformState(ProcessorState):
+@processor_state
+class AffineTransformState:
     weights: npt.NDArray | None = None
     new_axis: AxisBase | None = None
 
@@ -162,7 +165,8 @@ def zeros_for_noop(data: npt.NDArray, **ignore_kwargs) -> npt.NDArray:
     return np.zeros_like(data)
 
 
-class CommonRereferenceSettings(ez.Settings):
+@processor_settings
+class CommonRereferenceSettings:
     """
     Settings for :obj:`CommonRereference`
     """
