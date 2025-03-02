@@ -9,10 +9,16 @@ import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
-from .base import ProcessorState, BaseStatefulProcessor, BaseConsumerUnit
+from .base import (
+    BaseStatefulProcessor,
+    BaseConsumerUnit,
+    processor_settings,
+    processor_state,
+)
 
 
-class ResampleSettings(ez.Settings):
+@processor_settings
+class ResampleSettings:
     axis: str = "time"
 
     resample_rate: float | None = None
@@ -38,7 +44,8 @@ class ResampleBuffer:
     last_update: float
 
 
-class ResampleState(ProcessorState):
+@processor_state
+class ResampleState:
     signal_buffer: ResampleBuffer | None = None
     ref_axis: tuple[typing.Union[AxisArray.TimeAxis, AxisArray.CoordinateAxis], int] = (
         AxisArray.TimeAxis(fs=1.0),
