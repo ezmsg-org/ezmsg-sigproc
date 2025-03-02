@@ -6,10 +6,16 @@ from ezmsg.util.messages.axisarray import (
 )
 import ezmsg.core as ez
 
-from .base import ProcessorState, BaseStatefulTransformer, BaseTransformerUnit
+from .base import (
+    BaseStatefulTransformer,
+    BaseTransformerUnit,
+    processor_settings,
+    processor_state,
+)
 
 
-class DownsampleSettings(ez.Settings):
+@processor_settings
+class DownsampleSettings:
     """
     Settings for :obj:`Downsample` node.
     """
@@ -25,7 +31,8 @@ class DownsampleSettings(ez.Settings):
     """Explicitly specify downsample factor.  If specified, target_rate is ignored."""
 
 
-class DownsampleState(ProcessorState):
+@processor_state
+class DownsampleState:
     q: int = 0
     """The integer downsampling factor. It will be determined based on the target rate."""
 

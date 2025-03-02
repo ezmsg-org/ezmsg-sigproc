@@ -2,7 +2,6 @@ import typing
 
 import numpy as np
 import numpy.typing as npt
-import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import (
     AxisArray,
     slice_along_axis,
@@ -12,9 +11,10 @@ from ezmsg.util.messages.axisarray import (
 
 from .spectral import OptionsEnum
 from .base import (
-    ProcessorState,
     BaseStatefulTransformer,
     BaseTransformerUnit,
+    processor_settings,
+    processor_state,
 )
 
 
@@ -57,7 +57,8 @@ AGGREGATORS = {
 }
 
 
-class RangedAggregateSettings(ez.Settings):
+@processor_settings
+class RangedAggregateSettings:
     """
     Settings for ``RangedAggregate``.
     """
@@ -75,7 +76,8 @@ class RangedAggregateSettings(ez.Settings):
     """:obj:`AggregationFunction` to apply to each band."""
 
 
-class RangedAggregateState(ProcessorState):
+@processor_state
+class RangedAggregateState:
     slices: list[tuple[typing.Any, ...]] | None = None
     out_axis: AxisBase | None = None
     ax_vec: npt.NDArray | None = None

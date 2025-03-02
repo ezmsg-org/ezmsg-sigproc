@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
 import inspect
+import dataclasses
+import functools
 import math
 import pickle
 import traceback
@@ -15,15 +17,16 @@ from .util.asio import run_coroutine_sync
 
 
 # --- All processor state classes must inherit from this or at least have .hash ---
-class ProcessorState(ez.State):
-    hash: int = -1
-
+processor_settings = functools.partial(dataclasses.dataclass, frozen=True, init=True)
+processor_state = functools.partial(
+    dataclasses.dataclass, unsafe_hash=True, frozen=False, init=False
+)
 
 # --- Type variables for protocols and processors ---
 MessageInType = typing.TypeVar("MessageInType")
 MessageOutType = typing.TypeVar("MessageOutType")
-SettingsType = typing.TypeVar("SettingsType", bound=ez.Settings)
-StateType = typing.TypeVar("StateType", bound=ProcessorState)
+SettingsType = typing.TypeVar("SettingsType")
+StateType = typing.TypeVar("StateType")
 
 
 # --- Protocols for processors ---
@@ -377,6 +380,7 @@ class BaseStatefulProcessor(
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._hash = -1
         state_type = self.__class__.get_state_type()
         self._state: StateType = state_type()
         # TODO: Enforce that StateType has .hash: int field.
@@ -426,28 +430,28 @@ class BaseStatefulProcessor(
 
     def __call__(self, message: MessageInType) -> typing.Optional[MessageOutType]:
         msg_hash = self._hash_message(message)
-        if msg_hash != self.state.hash:
+        if msg_hash != self._hash:
             self._reset_state(message)
-            self.state.hash = msg_hash
+            self._hash = msg_hash
         return self._process(message)
 
     async def __acall__(
         self, message: MessageInType
     ) -> typing.Optional[MessageOutType]:
         msg_hash = self._hash_message(message)
-        if msg_hash != self.state.hash:
+        if msg_hash != self._hash:
             self._reset_state(message)
-            self.state.hash = msg_hash
+            self._hash = msg_hash
         return await self._aprocess(message)
 
     def stateful_op(
         self,
-        state: StateType,
+        state: [StateType, int],
         message: MessageInType,
-    ) -> tuple[StateType, typing.Optional[MessageOutType]]:
-        self.state = state
+    ) -> tuple[[StateType, int], typing.Optional[MessageOutType]]:
+        self.state, self._hash = state
         result = self(message)
-        return self.state, result
+        return (self.state, self._hash), result
 
 
 class BaseStatefulProducer(
@@ -460,7 +464,7 @@ class BaseStatefulProducer(
       or to cycle through a set of values.
 
     Unlike BaseStatefulProcessor, this class does not message hashing because there
-      are no input messages. We still use self.state.hash to simply track the transition from
+      are no input messages. We still use self._hash to simply track the transition from
       initialization (.hash == -1) to state reset (.hash == 0).
     """
 
@@ -470,6 +474,7 @@ class BaseStatefulProducer(
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)  # .settings
+        self._hash = -1
         state_type = self.__class__.get_state_type()
         self._state: StateType = state_type()
 
@@ -493,18 +498,18 @@ class BaseStatefulProducer(
         ...
 
     async def __acall__(self) -> MessageOutType:
-        if self.state.hash == -1:
+        if self._hash == -1:
             self._reset_state()
-            self.state.hash = 0
+            self._hash = 0
         return await self._produce()
 
     def stateful_op(
         self,
-        state: StateType,
-    ) -> tuple[StateType, MessageOutType]:
-        self.state = state  # Update state via setter
+        state: tuple[StateType, int],
+    ) -> tuple[tuple[StateType, int], MessageOutType]:
+        self.state, self._hash = state  # Update state via setter
         result = self()  # Uses synchronous call
-        return self.state, result
+        return (self.state, self._hash), result
 
 
 class BaseStatefulConsumer(
@@ -536,9 +541,9 @@ class BaseStatefulConsumer(
 
     def stateful_op(
         self,
-        state: StateType,
+        state: tuple[StateType, int],
         message: MessageInType,
-    ) -> tuple[StateType, None]:
+    ) -> tuple[tuple[StateType, int], None]:
         state, _ = super().stateful_op(state, message)
         return state, None
 
@@ -566,9 +571,9 @@ class BaseStatefulTransformer(
 
     def stateful_op(
         self,
-        state: StateType,
+        state: tuple[StateType, int],
         message: MessageInType,
-    ) -> tuple[StateType, MessageOutType]:
+    ) -> tuple[tuple[StateType, int], MessageOutType]:
         return super().stateful_op(state, message)
 
 
@@ -634,8 +639,10 @@ class BaseAsyncTransformer(
     async def __acall__(self, message: MessageInType) -> MessageOutType:
         # Note: In Python 3.12, we can invoke this with `await obj(message)`
         # Earlier versions must be explicit: `await obj.__acall__(message)`
-        if self._hash_message(message) != self.state.hash:
+        msg_hash = self._hash_message(message)
+        if msg_hash != self._hash:
             self._reset_state(message)
+            self._hash = msg_hash
         return await self._aprocess(message)
 
 
@@ -764,13 +771,13 @@ class CompositeProcessor(
     ) -> dict[str, BaseProducer | BaseProcessor]: ...
 
     @property
-    def state(self) -> dict[str, ProcessorState]:
+    def state(self) -> dict[str, typing.Any]:
         return {
             k: proc.state for k, proc in self._procs.items() if hasattr(proc, "state")
         }
 
     @state.setter
-    def state(self, state: dict[str, ProcessorState] | bytes | None) -> None:
+    def state(self, state: dict[str, typing.Any] | bytes | None) -> None:
         if state is not None:
             if isinstance(state, bytes):
                 state = pickle.loads(state)
@@ -822,9 +829,9 @@ class CompositeProcessor(
 
     def stateful_op(
         self,
-        state: dict[str, ProcessorState],
+        state: dict[str, tuple[typing.Any, int]],
         message: MessageInType | None,
-    ) -> tuple[dict[str, ProcessorState], MessageOutType | None]:
+    ) -> tuple[dict[str, tuple[typing.Any, int]], MessageOutType | None]:
         result = message
         for k, proc in self._procs.items():
             if hasattr(proc, "stateful_op"):

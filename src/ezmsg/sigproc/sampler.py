@@ -16,15 +16,17 @@ from .util.profile import profile_subpub
 from .util.message import SampleMessage, SampleTriggerMessage
 from .base import (
     BaseStatefulTransformer,
-    ProcessorState,
     BaseConsumerUnit,
     BaseTransformerUnit,
     BaseStatefulProducer,
     BaseProducerUnit,
+    processor_settings,
+    processor_state,
 )
 
 
-class SamplerSettings(ez.Settings):
+@processor_settings
+class SamplerSettings:
     """
     Settings for :obj:`Sampler`.
     See :obj:`sampler` for a description of the fields.
@@ -58,7 +60,8 @@ class SamplerSettings(ez.Settings):
     """
 
 
-class SamplerState(ProcessorState):
+@processor_state
+class SamplerState:
     fs: float = 0.0
     offset: float | None = None
     buffer: npt.NDArray | None = None
@@ -264,7 +267,8 @@ def sampler(
     )
 
 
-class TriggerGeneratorSettings(ez.Settings):
+@processor_settings
+class TriggerGeneratorSettings:
     period: tuple[float, float]
     """The period around the trigger event."""
 
@@ -275,7 +279,8 @@ class TriggerGeneratorSettings(ez.Settings):
     """The period between triggers (sec)"""
 
 
-class TriggerGeneratorState(ProcessorState):
+@processor_state
+class TriggerGeneratorState:
     output: int = 0
 
 
