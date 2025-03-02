@@ -3,15 +3,20 @@ import typing
 import numpy as np
 import numpy.typing as npt
 import pywt
-import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
-from .base import ProcessorState, BaseStatefulTransformer, BaseTransformerUnit
+from .base import (
+    BaseStatefulTransformer,
+    BaseTransformerUnit,
+    processor_settings,
+    processor_state,
+)
 from .filterbank import filterbank, FilterbankMode, MinPhaseMode
 
 
-class CWTSettings(ez.Settings):
+@processor_settings
+class CWTSettings:
     """
     Settings for :obj:`CWT`
     See :obj:`cwt` for argument details.
@@ -24,7 +29,8 @@ class CWTSettings(ez.Settings):
     scales: list | tuple | npt.NDArray | None = None
 
 
-class CWTState(ProcessorState):
+@processor_state
+class CWTState:
     neg_rt_scales: npt.NDArray | None = None
     int_psi_scales: list[npt.NDArray] | None = None
     template: AxisArray | None = None

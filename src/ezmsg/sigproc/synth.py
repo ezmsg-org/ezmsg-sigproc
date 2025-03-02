@@ -11,7 +11,6 @@ from ezmsg.util.messages.util import replace
 
 from .butterworthfilter import ButterworthFilterSettings, ButterworthFilterTransformer
 from .base import (
-    ProcessorState,
     BaseStatefulProducer,
     BaseProducerUnit,
     BaseTransformer,
@@ -22,6 +21,8 @@ from .base import (
     MessageOutType,
     TransformerType,
     BaseConsumerUnit,
+    processor_settings,
+    processor_state,
 )
 from .util.asio import run_coroutine_sync
 from .util.profile import profile_subpub
@@ -96,14 +97,16 @@ class Add(ez.Unit):
             yield self.OUTPUT_SIGNAL, await self.processor.__acall__()
 
 
-class ClockSettings(ez.Settings):
+@processor_settings
+class ClockSettings:
     """Settings for clock generator."""
 
     dispatch_rate: float | str | None = None
     """Dispatch rate in Hz, 'realtime', or None for external clock"""
 
 
-class ClockState(ProcessorState):
+@processor_state
+class ClockState:
     """State for clock generator."""
 
     t_0: float = field(default_factory=time.time)  # Start time
@@ -123,9 +126,9 @@ class ClockProducer(BaseStatefulProducer[ClockSettings, ez.Flag, ClockState]):
 
     def __call__(self) -> ez.Flag:
         """Synchronous clock production. We override __call__ (which uses run_coroutine_sync) to avoid async overhead."""
-        if self.state.hash == -1:
+        if self._hash == -1:
             self._reset_state()
-            self.state.hash = 0
+            self._hash = 0
 
         if isinstance(self.settings.dispatch_rate, (int, float)):
             # Manual dispatch_rate. (else it is 'as fast as possible')
@@ -191,7 +194,8 @@ class Clock(
 
 
 # COUNTER - Generate incrementing integer. fs and dispatch_rate parameters combine to give many options. #
-class CounterSettings(ez.Settings):
+@processor_settings
+class CounterSettings:
     # TODO: Adapt this to use ezmsg.util.rate?
     """
     Settings for :obj:`Counter`.
@@ -218,7 +222,8 @@ class CounterSettings(ez.Settings):
     """If set to an integer, counter will rollover"""
 
 
-class CounterState(ProcessorState):
+@processor_state
+class CounterState:
     """
     State for counter generator.
     """
@@ -261,7 +266,7 @@ class CounterProducer(BaseStatefulProducer[CounterSettings, AxisArray, CounterSt
         ) and self.settings.dispatch_rate not in ["realtime", "ext_clock"]:
             raise ValueError(f"Unknown dispatch_rate: {self.settings.dispatch_rate}")
         self._reset_state()
-        self._state.hash = 0
+        self._hash = 0
 
     def _reset_state(self) -> None:
         """Reset internal state."""
@@ -410,7 +415,8 @@ class Counter(
             ez.logger.info(traceback.format_exc())
 
 
-class SinGeneratorSettings(ez.Settings):
+@processor_settings
+class SinGeneratorSettings:
     """
     Settings for :obj:`SinGenerator`.
     See :obj:`sin` for parameter descriptions.
@@ -472,7 +478,8 @@ def sin(
     )
 
 
-class RandomGeneratorSettings(ez.Settings):
+@processor_settings
+class RandomGeneratorSettings:
     loc: float = 0.0
     """loc argument for :obj:`numpy.random.normal`"""
 
@@ -508,7 +515,8 @@ class RandomGenerator(
     SETTINGS = RandomGeneratorSettings
 
 
-class OscillatorSettings(ez.Settings):
+@processor_settings
+class OscillatorSettings:
     """Settings for :obj:`Oscillator`"""
 
     n_time: int
@@ -625,7 +633,8 @@ class Oscillator(
     SETTINGS = OscillatorSettings
 
 
-class NoiseSettings(ez.Settings):
+@processor_settings
+class NoiseSettings:
     """
     See :obj:`CounterSettings` and :obj:`RandomGeneratorSettings`.
     """

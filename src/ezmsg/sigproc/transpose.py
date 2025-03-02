@@ -3,12 +3,17 @@ from ezmsg.util.messages.axisarray import (
     AxisArray,
     replace,
 )
-import ezmsg.core as ez
 
-from .base import ProcessorState, BaseStatefulTransformer, BaseTransformerUnit
+from .base import (
+    BaseStatefulTransformer,
+    BaseTransformerUnit,
+    processor_settings,
+    processor_state,
+)
 
 
-class TransposeSettings(ez.Settings):
+@processor_settings
+class TransposeSettings:
     """
     Settings for :obj:`Transpose` node.
 
@@ -20,7 +25,8 @@ class TransposeSettings(ez.Settings):
     order: str | None = None
 
 
-class TransposeState(ProcessorState):
+@processor_state
+class TransposeState:
     axes_ints: tuple[int, ...] | None = None
 
 

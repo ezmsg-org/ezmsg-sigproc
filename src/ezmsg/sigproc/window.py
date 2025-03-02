@@ -13,7 +13,12 @@ from ezmsg.util.messages.axisarray import (
     replace,
 )
 
-from .base import ProcessorState, BaseStatefulTransformer, BaseTransformerUnit
+from .base import (
+    BaseStatefulTransformer,
+    BaseTransformerUnit,
+    processor_settings,
+    processor_state,
+)
 from .util.sparse import sliding_win_oneaxis as sparse_sliding_win_oneaxis
 from .util.profile import profile_subpub
 
@@ -24,7 +29,8 @@ class Anchor(enum.Enum):
     MIDDLE = "middle"
 
 
-class WindowSettings(ez.Settings):
+@processor_settings
+class WindowSettings:
     axis: str | None = None
     newaxis: str | None = None  # new axis for output. No new axes if None
     window_dur: float | None = None  # Sec. passthrough if None
@@ -33,7 +39,8 @@ class WindowSettings(ez.Settings):
     anchor: str | Anchor = Anchor.BEGINNING
 
 
-class WindowState(ProcessorState):
+@processor_state
+class WindowState:
     buffer: npt.NDArray | sparse.SparseArray | None = None
 
     window_samples: int | None = None

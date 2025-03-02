@@ -7,14 +7,14 @@ import scipy.signal as sps
 import scipy.fft as sp_fft
 from scipy.special import lambertw
 import numpy.typing as npt
-import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
 from .base import (
-    ProcessorState,
     BaseStatefulTransformer,
     BaseTransformerUnit,
+    processor_settings,
+    processor_state,
 )
 from .spectrum import OptionsEnum
 from .window import WindowTransformer
@@ -37,7 +37,8 @@ class MinPhaseMode(OptionsEnum):
     # HOMOMORPHICFULL = "Like HOMOMORPHIC, but uses the full number of taps and same magnitude"
 
 
-class FilterbankSettings(ez.Settings):
+@processor_settings
+class FilterbankSettings:
     kernels: list[npt.NDArray] | tuple[npt.NDArray, ...]
 
     mode: FilterbankMode = FilterbankMode.CONV
@@ -63,7 +64,8 @@ class FilterbankSettings(ez.Settings):
     """The name of the new axis corresponding to the kernel index."""
 
 
-class FilterbankState(ProcessorState):
+@processor_state
+class FilterbankState:
     tail: npt.NDArray | None = None
     template: AxisArray | None = None
     dest_arr: npt.NDArray | None = None
