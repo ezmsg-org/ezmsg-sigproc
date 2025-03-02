@@ -11,7 +11,6 @@ from .filter import (
     BACoeffs,
     SOSCoeffs,
     FilterByDesignTransformer,
-    FilterByDesignState,
 )
 
 
