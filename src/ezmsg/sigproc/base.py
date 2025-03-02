@@ -706,6 +706,42 @@ class CompositeProcessor(
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)  # .settings
         self._procs = self.__class__._initialize_processors(self.settings)
+        self._validate_processor_chain()
+
+    def _validate_processor_chain(self) -> None:
+        """Validate the processor chain types at runtime."""
+        if not self._procs:
+            raise ValueError("CompositeProcessor requires at least one processor")
+
+        expected_in_type = _get_processor_message_type(self, "in")
+        expected_out_type = _get_processor_message_type(self, "out")
+
+        procs = list(self._procs.values())
+        in_type = _get_processor_message_type(procs[0], "in")
+        if not _check_message_type_compatibility(expected_in_type, in_type):
+            raise TypeError(
+                f"Input type mismatch: Composite processor expects {expected_in_type}, "
+                f"but its first processor accepts {in_type}"
+            )
+
+        out_type = _get_processor_message_type(procs[-1], "out")
+        if not _check_message_type_compatibility(expected_out_type, out_type):
+            raise TypeError(
+                f"Output type mismatch: Composite processor wants to return {expected_out_type}, "
+                f"but its last processor returns {out_type}"
+            )
+
+        # Check intermediate connections
+        for i in range(len(procs) - 1):
+            current_out_type = _get_processor_message_type(procs[i], "out")
+            next_in_type = _get_processor_message_type(procs[i + 1], "in")
+
+            if not _check_message_type_compatibility(current_out_type, next_in_type):
+                raise TypeError(
+                    f"Message type mismatch between processors {i} and {i + 1}: "
+                    f"{procs[i].__class__.__name__} outputs {current_out_type}, "
+                    f"but {procs[i + 1].__class__.__name__} expects {next_in_type}"
+                )
 
     @staticmethod
     @abstractmethod
