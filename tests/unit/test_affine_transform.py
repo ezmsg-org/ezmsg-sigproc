@@ -6,7 +6,7 @@ from ezmsg.util.messages.axisarray import AxisArray
 
 from ezmsg.sigproc.affinetransform import affine_transform, common_rereference
 
-from util import assert_messages_equal
+from tests.helpers.util import assert_messages_equal
 
 
 def test_affine_generator():
@@ -37,7 +37,7 @@ def test_affine_generator():
     _ = gen.send(msg_in)
 
     # Test with weights from a CSV file.
-    csv_path = Path(__file__).parent / "resources" / "xform.csv"
+    csv_path = Path(__file__).parents[1] / "resources" / "xform.csv"
     weights = np.loadtxt(csv_path, delimiter=",")
     expected_out = in_dat @ weights.T
     # Same result: expected_out = np.vstack([(step[None, :] * weights).sum(axis=1) for step in in_dat])
@@ -133,4 +133,4 @@ def test_car_passthrough():
     gen = common_rereference(mode="passthrough")
     msg_out = gen.send(msg_in)
     assert np.array_equal(msg_out.data, in_dat)
-    assert not np.may_share_memory(msg_out.data, in_dat)
+    assert np.may_share_memory(msg_out.data, in_dat)
