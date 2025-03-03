@@ -31,16 +31,17 @@ def get_test_fn(test_name: str | None = None, extension: str = "txt") -> Path:
 
 def create_messages_with_periodic_signal(
     sin_params: list[dict[str, float]] = [
-        {"f": 10.0, "dur": 5.0, "offset": 0.0},
-        {"f": 20.0, "dur": 5.0, "offset": 0.0},
-        {"f": 70.0, "dur": 5.0, "offset": 0.0},
-        {"f": 14.0, "dur": 5.0, "offset": 5.0},
-        {"f": 35.0, "dur": 5.0, "offset": 5.0},
-        {"f": 300.0, "dur": 5.0, "offset": 5.0},
+        {"f": 10.0, "dur": 5.0, "offset": 0.0, "p": 0},
+        {"f": 20.0, "dur": 5.0, "offset": 0.0, "p": 0},
+        {"f": 70.0, "dur": 5.0, "offset": 0.0, "p": 0},
+        {"f": 14.0, "dur": 5.0, "offset": 5.0, "p": 0},
+        {"f": 35.0, "dur": 5.0, "offset": 5.0, "p": 0},
+        {"f": 300.0, "dur": 5.0, "offset": 5.0, "p": 0},
     ],
     fs: float = 1000.0,
     msg_dur: float = 1.0,
     win_step_dur: float | None = None,
+    n_ch: int = 1,
 ) -> list[AxisArray]:
     """
     Create a continuous signal with periodic components. The signal will be divided into n segments,
@@ -73,13 +74,13 @@ def create_messages_with_periodic_signal(
     offset = 0.0
     messages = []
     _ch_axis = AxisArray.CoordinateAxis(
-        data=np.array(["Ch1"]), unit="label", dims=["ch"]
+        data=np.array([f"Ch{_}" for _ in range(n_ch)]), unit="label", dims=["ch"]
     )
     for split_dat in data_splits:
         _time_axis = AxisArray.TimeAxis(fs=fs, offset=offset)
         messages.append(
             AxisArray(
-                split_dat[..., None],
+                split_dat[..., None] + np.zeros((1, n_ch)),
                 dims=["time", "ch"],
                 axes=frozendict(
                     {
