@@ -910,12 +910,9 @@ class BaseProducerUnit(
 
     @ez.publisher(OUTPUT_SIGNAL)
     async def produce(self) -> typing.AsyncGenerator:
-        try:
-            while True:
-                out = await self.producer.__acall__()
-                yield self.OUTPUT_SIGNAL, out
-        except Exception:
-            ez.logger.info(traceback.format_exc())
+        while True:
+            out = await self.producer.__acall__()
+            yield self.OUTPUT_SIGNAL, out
 
 
 class BaseConsumerUnit(
@@ -971,10 +968,7 @@ class BaseConsumerUnit(
         Args:
             message:
         """
-        try:
-            await self.processor.__acall__(message)
-        except Exception:
-            ez.logger.info(traceback.format_exc())
+        await self.processor.__acall__(message)
 
 
 class BaseTransformerUnit(
@@ -1005,12 +999,9 @@ class BaseTransformerUnit(
     @ez.publisher(OUTPUT_SIGNAL)
     @profile_subpub(trace_oldest=False)
     async def on_signal(self, message: MessageInType) -> typing.AsyncGenerator:
-        try:
-            result = await self.processor.__acall__(message)
-            if result is not None and math.prod(result.data.shape) > 0:
-                yield self.OUTPUT_SIGNAL, result
-        except Exception as e:
-            ez.logger.info(f"{traceback.format_exc()} - {e}")
+        result = await self.processor.__acall__(message)
+        if result is not None and math.prod(result.data.shape) > 0:
+            yield self.OUTPUT_SIGNAL, result
 
 
 class BaseAdaptiveTransformerUnit(
