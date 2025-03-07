@@ -1,11 +1,11 @@
+import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
-from ..base import BaseTransformer, BaseTransformerUnit, processor_settings
+from ..base import BaseTransformer, BaseTransformerUnit
 
 
-@processor_settings
-class ScaleSettings:
+class ScaleSettings(ez.Settings):
     scale: float = 1.0
     """Factor by which to scale the data magnitude."""
 

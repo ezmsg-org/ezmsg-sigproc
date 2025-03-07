@@ -1,12 +1,12 @@
 import numpy as np
+import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
-from ..base import BaseTransformer, BaseTransformerUnit, processor_settings
+from ..base import BaseTransformer, BaseTransformerUnit
 
 
-@processor_settings
-class LogSettings:
+class LogSettings(ez.Settings):
     base: float = 10.0
     """The base of the logarithm. Default is 10."""
 

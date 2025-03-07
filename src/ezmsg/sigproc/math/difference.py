@@ -1,11 +1,11 @@
+import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
-from ..base import BaseTransformer, BaseTransformerUnit, processor_settings
+from ..base import BaseTransformer, BaseTransformerUnit
 
 
-@processor_settings
-class ConstDifferenceSettings:
+class ConstDifferenceSettings(ez.Settings):
     value: float = 0.0
     """number to subtract or be subtracted from the input data"""
 

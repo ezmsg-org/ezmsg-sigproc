@@ -17,7 +17,7 @@ from .util.asio import run_coroutine_sync
 
 
 # --- All processor state classes must inherit from this or at least have .hash ---
-processor_settings = functools.partial(dataclasses.dataclass, frozen=True, init=True)
+# processor_settings = functools.partial(dataclasses.dataclass, frozen=True, init=True)
 processor_state = functools.partial(
     dataclasses.dataclass, unsafe_hash=True, frozen=False, init=False
 )

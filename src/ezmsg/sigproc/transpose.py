@@ -1,4 +1,5 @@
 import numpy as np
+import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import (
     AxisArray,
     replace,
@@ -7,13 +8,11 @@ from ezmsg.util.messages.axisarray import (
 from .base import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
-    processor_settings,
     processor_state,
 )
 
 
-@processor_settings
-class TransposeSettings:
+class TransposeSettings(ez.Settings):
     """
     Settings for :obj:`Transpose` node.
 

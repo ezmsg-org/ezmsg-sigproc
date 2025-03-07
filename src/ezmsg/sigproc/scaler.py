@@ -4,6 +4,7 @@ import typing
 import numpy as np
 import numpy.typing as npt
 import scipy.signal
+import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 from ezmsg.util.generator import consumer
@@ -11,7 +12,6 @@ from ezmsg.util.generator import consumer
 from .base import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
-    processor_settings,
     processor_state,
 )
 
@@ -212,8 +212,7 @@ def scaler(
         msg_out = replace(msg_in, data=result)
 
 
-@processor_settings
-class AdaptiveStandardScalerSettings:
+class AdaptiveStandardScalerSettings(ez.Settings):
     """
     Settings for :obj:`AdaptiveStandardScaler`.
     See :obj:`scaler_np` for a description of the parameters.

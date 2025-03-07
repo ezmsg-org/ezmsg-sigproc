@@ -1,12 +1,12 @@
 import numpy as np
+import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
-from ..base import BaseTransformer, BaseTransformerUnit, processor_settings
+from ..base import BaseTransformer, BaseTransformerUnit
 
 
-@processor_settings
-class ClipSettings:
+class ClipSettings(ez.Settings):
     a_min: float
     """Lower clip bound."""
 

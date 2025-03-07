@@ -5,7 +5,7 @@ import scipy.signal
 from scipy.signal import normalize
 from ezmsg.util.messages.axisarray import AxisArray
 
-from .base import BaseTransformerUnit, processor_settings
+from .base import BaseTransformerUnit
 from .filter import (
     FilterBaseSettings,
     FilterByDesignTransformer,
@@ -14,7 +14,6 @@ from .filter import (
 )
 
 
-@processor_settings
 class ChebyshevFilterSettings(FilterBaseSettings):
     """Settings for :obj:`ChebyshevFilter`."""
 

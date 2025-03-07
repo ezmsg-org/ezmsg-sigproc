@@ -2,6 +2,7 @@ from abc import abstractmethod, ABC
 from dataclasses import dataclass, field
 import typing
 
+import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 import numpy as np
@@ -13,7 +14,6 @@ from ezmsg.sigproc.base import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
     SettingsType,
-    processor_settings,
 )
 
 
@@ -44,8 +44,7 @@ def _normalize_coefs(
     return coef_type, coefs
 
 
-@processor_settings
-class FilterBaseSettings:
+class FilterBaseSettings(ez.Settings):
     axis: str | None = None
     """The name of the axis to operate on."""
 
@@ -53,7 +52,6 @@ class FilterBaseSettings:
     """The type of filter coefficients. One of "ba" or "sos"."""
 
 
-@processor_settings
 class FilterSettings(FilterBaseSettings):
     coefs: FilterCoefficients | None = None
     """The pre-calculated filter coefficients."""
