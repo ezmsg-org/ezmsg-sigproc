@@ -16,7 +16,6 @@ from ezmsg.util.messages.axisarray import (
 from .base import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
-    processor_settings,
     processor_state,
 )
 from .util.sparse import sliding_win_oneaxis as sparse_sliding_win_oneaxis
@@ -29,8 +28,7 @@ class Anchor(enum.Enum):
     MIDDLE = "middle"
 
 
-@processor_settings
-class WindowSettings:
+class WindowSettings(ez.Settings):
     axis: str | None = None
     newaxis: str | None = None  # new axis for output. No new axes if None
     window_dur: float | None = None  # Sec. passthrough if None

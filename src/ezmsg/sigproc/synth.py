@@ -21,7 +21,6 @@ from .base import (
     MessageOutType,
     TransformerType,
     BaseConsumerUnit,
-    processor_settings,
     processor_state,
 )
 from .util.asio import run_coroutine_sync
@@ -97,8 +96,7 @@ class Add(ez.Unit):
             yield self.OUTPUT_SIGNAL, await self.processor.__acall__()
 
 
-@processor_settings
-class ClockSettings:
+class ClockSettings(ez.Settings):
     """Settings for clock generator."""
 
     dispatch_rate: float | str | None = None
@@ -194,8 +192,7 @@ class Clock(
 
 
 # COUNTER - Generate incrementing integer. fs and dispatch_rate parameters combine to give many options. #
-@processor_settings
-class CounterSettings:
+class CounterSettings(ez.Settings):
     # TODO: Adapt this to use ezmsg.util.rate?
     """
     Settings for :obj:`Counter`.
@@ -415,8 +412,7 @@ class Counter(
             ez.logger.info(traceback.format_exc())
 
 
-@processor_settings
-class SinGeneratorSettings:
+class SinGeneratorSettings(ez.Settings):
     """
     Settings for :obj:`SinGenerator`.
     See :obj:`sin` for parameter descriptions.
@@ -478,8 +474,7 @@ def sin(
     )
 
 
-@processor_settings
-class RandomGeneratorSettings:
+class RandomGeneratorSettings(ez.Settings):
     loc: float = 0.0
     """loc argument for :obj:`numpy.random.normal`"""
 
@@ -515,8 +510,7 @@ class RandomGenerator(
     SETTINGS = RandomGeneratorSettings
 
 
-@processor_settings
-class OscillatorSettings:
+class OscillatorSettings(ez.Settings):
     """Settings for :obj:`Oscillator`"""
 
     n_time: int
@@ -633,8 +627,7 @@ class Oscillator(
     SETTINGS = OscillatorSettings
 
 
-@processor_settings
-class NoiseSettings:
+class NoiseSettings(ez.Settings):
     """
     See :obj:`CounterSettings` and :obj:`RandomGeneratorSettings`.
     """

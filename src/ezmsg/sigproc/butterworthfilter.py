@@ -5,7 +5,7 @@ import scipy.signal
 from ezmsg.util.messages.axisarray import AxisArray
 from scipy.signal import normalize
 
-from .base import BaseTransformerUnit, processor_settings
+from .base import BaseTransformerUnit
 from .filter import (
     FilterBaseSettings,
     BACoeffs,
@@ -14,7 +14,6 @@ from .filter import (
 )
 
 
-@processor_settings
 class ButterworthFilterSettings(FilterBaseSettings):
     """Settings for :obj:`ButterworthFilter`."""
 

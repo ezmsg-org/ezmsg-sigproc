@@ -20,13 +20,11 @@ from .base import (
     BaseTransformerUnit,
     BaseStatefulProducer,
     BaseProducerUnit,
-    processor_settings,
     processor_state,
 )
 
 
-@processor_settings
-class SamplerSettings:
+class SamplerSettings(ez.Settings):
     """
     Settings for :obj:`Sampler`.
     See :obj:`sampler` for a description of the fields.
@@ -267,8 +265,7 @@ def sampler(
     )
 
 
-@processor_settings
-class TriggerGeneratorSettings:
+class TriggerGeneratorSettings(ez.Settings):
     period: tuple[float, float]
     """The period around the trigger event."""
 

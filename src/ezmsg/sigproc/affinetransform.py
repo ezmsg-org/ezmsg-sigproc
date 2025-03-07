@@ -11,13 +11,11 @@ from .base import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
     BaseTransformer,
-    processor_settings,
     processor_state,
 )
 
 
-@processor_settings
-class AffineTransformSettings:
+class AffineTransformSettings(ez.Settings):
     """
     Settings for :obj:`AffineTransform`.
     See :obj:`affine_transform` for argument details.
@@ -165,8 +163,7 @@ def zeros_for_noop(data: npt.NDArray, **ignore_kwargs) -> npt.NDArray:
     return np.zeros_like(data)
 
 
-@processor_settings
-class CommonRereferenceSettings:
+class CommonRereferenceSettings(ez.Settings):
     """
     Settings for :obj:`CommonRereference`
     """
