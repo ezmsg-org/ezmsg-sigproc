@@ -12,13 +12,11 @@ from ezmsg.util.messages.util import replace
 from .base import (
     BaseStatefulProcessor,
     BaseConsumerUnit,
-    processor_settings,
     processor_state,
 )
 
 
-@processor_settings
-class ResampleSettings:
+class ResampleSettings(ez.Settings):
     axis: str = "time"
 
     resample_rate: float | None = None

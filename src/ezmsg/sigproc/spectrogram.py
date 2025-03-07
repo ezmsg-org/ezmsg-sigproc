@@ -1,3 +1,4 @@
+import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.modify import modify_axis
 
@@ -12,12 +13,10 @@ from .base import (
     CompositeProcessor,
     BaseStatefulProcessor,
     BaseTransformerUnit,
-    processor_settings,
 )
 
 
-@processor_settings
-class SpectrogramSettings:
+class SpectrogramSettings(ez.Settings):
     """
     Settings for :obj:`SpectrogramTransformer`.
     """

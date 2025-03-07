@@ -9,13 +9,11 @@ import ezmsg.core as ez
 from .base import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
-    processor_settings,
     processor_state,
 )
 
 
-@processor_settings
-class DownsampleSettings:
+class DownsampleSettings(ez.Settings):
     """
     Settings for :obj:`Downsample` node.
     """

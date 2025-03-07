@@ -8,12 +8,10 @@ from .base import (
     BaseAsyncTransformer,
     BaseTransformerUnit,
     processor_state,
-    processor_settings,
 )
 
 
-@processor_settings
-class SignalInjectorSettings:
+class SignalInjectorSettings(ez.Settings):
     time_dim: str = "time"  # Input signal needs a time dimension with units in sec.
     frequency: float | None = None  # Hz
     amplitude: float = 1.0

@@ -1,9 +1,10 @@
 import scipy.special
+import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
 from .spectral import OptionsEnum
-from .base import BaseTransformer, BaseTransformerUnit, processor_settings
+from .base import BaseTransformer, BaseTransformerUnit
 
 
 class ActivationFunction(OptionsEnum):
@@ -34,8 +35,7 @@ ACTIVATIONS = {
 }
 
 
-@processor_settings
-class ActivationSettings:
+class ActivationSettings(ez.Settings):
     function: str | ActivationFunction = ActivationFunction.NONE
     """An enum value from ActivationFunction or a string representing the activation function.
          Possible values are: SIGMOID, EXPIT, LOGIT, LOGEXPIT, "sigmoid", "expit", "logit", "log_expit".

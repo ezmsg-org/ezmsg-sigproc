@@ -1,5 +1,6 @@
 import numpy as np
 import numpy.typing as npt
+import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import (
     AxisArray,
     slice_along_axis,
@@ -10,7 +11,6 @@ from ezmsg.util.messages.axisarray import (
 from .base import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
-    processor_settings,
     processor_state,
 )
 
@@ -61,8 +61,7 @@ def parse_slice(
     return tuple([item for sublist in suplist for item in sublist])
 
 
-@processor_settings
-class SlicerSettings:
+class SlicerSettings(ez.Settings):
     selection: str = ""
     """selection: See :obj:`ezmsg.sigproc.slicer.parse_slice` for details."""
 
