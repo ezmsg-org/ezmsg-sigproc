@@ -11,14 +11,18 @@ from .base import processor_state, BaseStatefulTransformer
 class AdaptiveLatticeNotchFilterSettings(ez.Settings):
     """Settings for the Adaptive Lattice Notch Filter."""
 
-    gamma: float = 0.995  # Pole-zero contraction factor
-    mu: float = 0.99  # Smoothing factor
-    eta: float = 0.99  # Forgetting factor
-    axis: str = "time"  # Axis to apply filter to
-    init_notch_freq: float | None = (
-        None  # Initial notch frequency. Should be < nyquist.
-    )
-    chunkwise: bool = True  # Speed up processing by updating the target freq once per chunk only.
+    gamma: float = 0.995
+    """Pole-zero contraction factor"""
+    mu: float = 0.99
+    """Smoothing factor"""
+    eta: float = 0.99
+    """Forgetting factor"""
+    axis: str = "time"
+    """Axis to apply filter to"""
+    init_notch_freq: float | None = None
+    """Initial notch frequency. Should be < nyquist."""
+    chunkwise: bool = False
+    """Speed up processing by updating the target freq once per chunk only."""
 
 
 @processor_state
@@ -106,6 +110,8 @@ class AdaptiveLatticeNotchFilterTransformer(
     def _process(self, message: AxisArray) -> AxisArray:
         x_data = message.data
         ax_idx = message.get_axis_idx(self.settings.axis)
+
+        # TODO: Time should be moved to -1th axis, not the 0th axis
         if message.dims[0] != self.settings.axis:
             x_data = np.moveaxis(x_data, ax_idx, 0)
 
@@ -121,46 +127,57 @@ class AdaptiveLatticeNotchFilterTransformer(
         gamma_plus_1 = 1 + gamma
         omega_scale = fs / (2 * np.pi)
 
-        if True:  # self.settings.chunkwise:
-            # TODO: Time should be moved to -1th axis
-            # Update the target frequency once per chunk
-            # For the lattice filter with constant k1:
-            # s_n = x_n - k1*(1+gamma)*s_n_1 - gamma*s_n_2
-            # This is equivalent to an IIR filter with b=1, a=[1, k1*(1+gamma), gamma]
+        # For the lattice filter with constant k1:
+        # s_n = x_n - k1*(1+gamma)*s_n_1 - gamma*s_n_2
+        # This is equivalent to an IIR filter with b=1, a=[1, k1*(1+gamma), gamma]
 
-            # For the output filter:
-            # y_n = s_n + 2*k1*s_n_1 + s_n_2
-            # We can treat this as a direct-form FIR filter applied to s_out
+        # For the output filter:
+        # y_n = s_n + 2*k1*s_n_1 + s_n_2
+        # We can treat this as a direct-form FIR filter applied to s_out
 
+        if self.settings.chunkwise:
+            # Process each chunk using current filter parameters
+            # Reshape input and prepare output arrays
             _s = self._state.s_history.reshape((2, -1))
             _x = x_data.reshape((x_data.shape[0], -1))
             s_n = np.zeros_like(_x)
+            y_out = np.zeros_like(_x)
+
+            # Apply static filter for each feature dimension
             for ix, k in enumerate(self._state.k1.flatten()):
+                # Filter to get s_n (notch filter state)
                 a_s = [1, k * gamma_plus_1, gamma]
                 s_n[:, ix], self._state.zi[:, ix] = scipy.signal.lfilter([1], a_s, _x[:, ix], zi=self._state.zi[:, ix])
+                
+                # Apply output filter to get y_out
                 b_y = [1, 2 * k, 1]
                 y_out[:, ix] = scipy.signal.lfilter(b_y, [1], s_n[:, ix])
-            self._state.s_history = s_n[-2:].reshape((2,) + x_data.shape[1:])
 
-            # TODO: Fixup below
+            # Update filter parameters using final values from the chunk
+            s_n_reshaped = s_n.reshape((s_n.shape[0],) + x_data.shape[1:])
+            s_final = s_n_reshaped[-1]  # Current s_n
+            s_final_1 = s_n_reshaped[-2]  # s_n_1
+            s_final_2 = s_n_reshaped[-3] if len(s_n_reshaped) > 2 else self._state.s_history[0]  # s_n_2
 
-            # Calculate frequency from final k1 value
-            omega_n = np.arccos(-self._state.k1)
-            freq = omega_n * omega_scale
-            freq_out = np.full_like(x_data, freq)
-
-            # Update state with the last values
-            self._state.s_history[:] = s_out[-2:]
-
-            # Calculate updates to p, q, and k1 based on the final values
-            # This would happen once per chunk instead of per sample
-            p = eta * p + one_minus_eta * (s_out[-2] * (s_out[-1] + s_out[-3] if len(s_out) > 2 else s_n_2))
-            q = eta * q + one_minus_eta * (2 * (s_out[-2] * s_out[-2]))
+            # Update p and q using final values
+            self._state.p = eta * self._state.p + one_minus_eta * (s_final_1 * (s_final + s_final_2))
+            self._state.q = eta * self._state.q + one_minus_eta * (2 * (s_final_1 * s_final_1))
 
             # Update reflection coefficient
-            new_k1 = -p / (q + 1e-8)
-            new_k1 = np.clip(new_k1, -1, 1)
-            k1 = mu * k1 + one_minus_mu * new_k1
+            new_k1 = -self._state.p / (self._state.q + 1e-8)  # Avoid division by zero
+            new_k1 = np.clip(new_k1, -1, 1)  # Clip to prevent instability
+            self._state.k1 = mu * self._state.k1 + one_minus_mu * new_k1  # Smoothed
+
+            # Calculate frequency from updated k1 value
+            omega_n = np.arccos(-self._state.k1)
+            freq = omega_n * omega_scale
+            freq_out = np.full_like(x_data.reshape(x_data.shape), freq)
+
+            # Update s_history for next chunk
+            self._state.s_history = s_n_reshaped[-2:].reshape((2,) + x_data.shape[1:])
+
+            # Reshape y_out back to original dimensions
+            y_out = y_out.reshape(x_data.shape)
 
         else:
 
