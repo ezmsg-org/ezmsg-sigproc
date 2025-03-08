@@ -1,14 +1,14 @@
 import numpy as np
 import numpy.typing as npt
 import scipy.signal
+import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray, CoordinateAxis
 from ezmsg.util.messages.util import replace
 
-from .base import processor_settings, processor_state, BaseStatefulTransformer
+from .base import processor_state, BaseStatefulTransformer
 
 
-@processor_settings
-class AdaptiveLatticeNotchFilterSettings:
+class AdaptiveLatticeNotchFilterSettings(ez.Settings):
     """Settings for the Adaptive Lattice Notch Filter."""
 
     gamma: float = 0.995  # Pole-zero contraction factor
