@@ -7,7 +7,6 @@ import pickle
 import traceback
 import typing
 
-from multimethod import multimethod as singledispatchmethod
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.generator import GenState
