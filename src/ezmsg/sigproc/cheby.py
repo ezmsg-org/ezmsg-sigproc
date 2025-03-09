@@ -3,14 +3,12 @@ import typing
 
 import scipy.signal
 from scipy.signal import normalize
-from ezmsg.util.messages.axisarray import AxisArray
 
-from .base import BaseTransformerUnit
 from .filter import (
     FilterBaseSettings,
     FilterByDesignTransformer,
     BACoeffs,
-    SOSCoeffs,
+    SOSCoeffs, BaseFilterByDesignTransformerUnit,
 )
 
 
@@ -125,8 +123,8 @@ class ChebyshevFilterTransformer(
 
 
 class ChebyshevFilter(
-    BaseTransformerUnit[
-        ChebyshevFilterSettings, AxisArray, AxisArray, ChebyshevFilterTransformer
+    BaseFilterByDesignTransformerUnit[
+        ChebyshevFilterSettings, ChebyshevFilterTransformer
     ]
 ):
     SETTINGS = ChebyshevFilterSettings
