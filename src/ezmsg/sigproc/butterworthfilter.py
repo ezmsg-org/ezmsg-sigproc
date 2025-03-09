@@ -2,15 +2,13 @@ import functools
 import typing
 
 import scipy.signal
-from ezmsg.util.messages.axisarray import AxisArray
 from scipy.signal import normalize
 
-from .base import BaseTransformerUnit
 from .filter import (
     FilterBaseSettings,
     BACoeffs,
     SOSCoeffs,
-    FilterByDesignTransformer,
+    FilterByDesignTransformer, BaseFilterByDesignTransformerUnit,
 )
 
 
@@ -129,8 +127,8 @@ class ButterworthFilterTransformer(
 
 
 class ButterworthFilter(
-    BaseTransformerUnit[
-        ButterworthFilterSettings, AxisArray, AxisArray, ButterworthFilterTransformer
+    BaseFilterByDesignTransformerUnit[
+        ButterworthFilterSettings, ButterworthFilterTransformer
     ]
 ):
     SETTINGS = ButterworthFilterSettings

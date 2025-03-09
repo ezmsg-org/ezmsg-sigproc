@@ -13,7 +13,7 @@ from ezmsg.sigproc.base import (
     processor_state,
     BaseStatefulTransformer,
     BaseTransformerUnit,
-    SettingsType,
+    SettingsType, BaseConsumerUnit, TransformerType,
 )
 
 
@@ -74,6 +74,9 @@ class FilterTransformer(
     def __call__(self, message: AxisArray) -> AxisArray:
         if self.settings.coefs is None:
             return message
+        if self._state.zi is None:
+            self._reset_state(message)
+            self._hash = self._hash_message(message)
         return super().__call__(message)
 
     def _hash_message(self, message: AxisArray) -> int:
@@ -106,6 +109,50 @@ class FilterTransformer(
             n_tile = (1,) + n_tile
 
         self.state.zi = np.tile(zi[zi_expand], n_tile)
+
+    def update_coefficients(
+            self,
+            coefs: FilterCoefficients | tuple[npt.NDArray, npt.NDArray] | npt.NDArray,
+            coef_type: str | None = None,
+    ) -> None:
+        """
+        Update filter coefficients.
+
+        If the new coefficients have the same length as the current ones, only the coefficients are updated.
+        If the lengths differ, the filter state is also reset to handle the new filter order.
+
+        Args:
+            coefs: New filter coefficients
+        """
+        old_coefs = self.settings.coefs
+
+        # Update settings with new coefficients
+        self.settings = replace(self.settings, coefs=coefs)
+        if coef_type is not None:
+            self.settings = replace(self.settings, coef_type=coef_type)
+
+        # Check if we need to reset the state
+        if self.state.zi is not None:
+            reset_needed = False
+
+            if self.settings.coef_type == "ba":
+                if isinstance(old_coefs, FilterCoefficients) and isinstance(coefs, FilterCoefficients):
+                    if len(old_coefs.b) != len(coefs.b) or len(old_coefs.a) != len(coefs.a):
+                        reset_needed = True
+                elif isinstance(old_coefs, tuple) and isinstance(coefs, tuple):
+                    if len(old_coefs[0]) != len(coefs[0]) or len(old_coefs[1]) != len(coefs[1]):
+                        reset_needed = True
+                else:
+                    reset_needed = True
+            elif self.settings.coef_type == "sos":
+                if isinstance(old_coefs, np.ndarray) and isinstance(coefs, np.ndarray):
+                    if old_coefs.shape != coefs.shape:
+                        reset_needed = True
+                else:
+                    reset_needed = True
+
+            if reset_needed:
+                self.state.zi = None  # This will trigger _reset_state on the next call
 
     def _process(self, message: AxisArray) -> AxisArray:
         if message.data.size > 0:
@@ -152,6 +199,7 @@ def filtergen(
 @processor_state
 class FilterByDesignState:
     filter: FilterTransformer | None = None
+    needs_redesign: bool = False
 
 
 class FilterByDesignTransformer(
@@ -170,6 +218,24 @@ class FilterByDesignTransformer(
         """Return a function that takes sampling frequency and returns filter coefficients."""
         ...
 
+    def update_settings(self, new_settings: typing.Optional[SettingsType] = None, **kwargs) -> None:
+        """
+        Update settings and mark that filter coefficients need to be recalculated.
+
+        Args:
+            new_settings: Complete new settings object to replace current settings
+            **kwargs: Individual settings to update
+        """
+        # Update settings
+        if new_settings is not None:
+            self.settings = new_settings
+        else:
+            self.settings = replace(self.settings, **kwargs)
+
+        # Set flag to trigger recalculation on next message
+        if self.state.filter is not None:
+            self.state.needs_redesign = True
+
     def __call__(self, message: AxisArray) -> AxisArray:
         # Offer a shortcut when there is no design function or order is 0.
         if hasattr(self.settings, "order") and not self.settings.order:
@@ -177,6 +243,15 @@ class FilterByDesignTransformer(
         design_fun = self.get_design_function()
         if design_fun is None:
             return message
+
+        # Check if filter exists but needs redesign due to settings change
+        if self.state.filter is not None and self.state.needs_redesign:
+            axis = self.state.filter.settings.axis
+            fs = 1 / message.axes[axis].gain
+            coefs = design_fun(fs)
+            self.state.filter.update_coefficients(coefs, coef_type=self.settings.coef_type)
+            self.state.needs_redesign = False
+
         return super().__call__(message)
 
     def _hash_message(self, message: AxisArray) -> int:
@@ -187,10 +262,42 @@ class FilterByDesignTransformer(
         return hash((message.key, samp_shape, gain))
 
     def _reset_state(self, message: AxisArray) -> None:
-        axis = message.dims[0] if self.settings.axis is None else self.settings.axis
         design_fun = self.get_design_function()
-        coefs = design_fun(1 / message.axes[axis].gain)
-        self.state.filter = filtergen(axis, coefs, self.settings.coef_type)
+        axis = message.dims[0] if self.settings.axis is None else self.settings.axis
+        fs = 1 / message.axes[axis].gain
+        coefs = design_fun(fs)
+        new_settings = FilterSettings(axis=axis, coef_type=self.settings.coef_type, coefs=coefs)
+        self.state.filter = FilterTransformer(settings=new_settings)
 
     def _process(self, message: AxisArray) -> AxisArray:
         return self.state.filter(message)
+
+
+class BaseFilterByDesignTransformerUnit(
+    BaseTransformerUnit[
+        SettingsType, AxisArray, AxisArray, FilterByDesignTransformer
+    ],
+    typing.Generic[
+        SettingsType, TransformerType
+    ],
+):
+
+    @ez.subscriber(BaseConsumerUnit.INPUT_SETTINGS)
+    async def on_settings(self, msg: SettingsType) -> None:
+        """
+        Receive a settings message, override self.SETTINGS, and re-create the processor.
+        Child classes that wish to have fine-grained control over whether the
+        core processor resets on settings changes should override this method.
+
+        Args:
+            msg: a settings message.
+        """
+        self.apply_settings(msg)
+
+        # Check if processor exists yet
+        if hasattr(self, "processor") and self.processor is not None:
+            # Update the existing processor with new settings
+            self.processor.update_settings(self.SETTINGS)
+        else:
+            # Processor doesn't exist yet, create a new one
+            self.create_processor()
