@@ -147,8 +147,10 @@ class AdaptiveLatticeNotchFilterTransformer(
             for ix, k in enumerate(self._state.k1.flatten()):
                 # Filter to get s_n (notch filter state)
                 a_s = [1, k * gamma_plus_1, gamma]
-                s_n[:, ix], self._state.zi[:, ix] = scipy.signal.lfilter([1], a_s, _x[:, ix], zi=self._state.zi[:, ix])
-                
+                s_n[:, ix], self._state.zi[:, ix] = scipy.signal.lfilter(
+                    [1], a_s, _x[:, ix], zi=self._state.zi[:, ix]
+                )
+
                 # Apply output filter to get y_out
                 b_y = [1, 2 * k, 1]
                 y_out[:, ix] = scipy.signal.lfilter(b_y, [1], s_n[:, ix])
@@ -157,11 +159,17 @@ class AdaptiveLatticeNotchFilterTransformer(
             s_n_reshaped = s_n.reshape((s_n.shape[0],) + x_data.shape[1:])
             s_final = s_n_reshaped[-1]  # Current s_n
             s_final_1 = s_n_reshaped[-2]  # s_n_1
-            s_final_2 = s_n_reshaped[-3] if len(s_n_reshaped) > 2 else self._state.s_history[0]  # s_n_2
+            s_final_2 = (
+                s_n_reshaped[-3] if len(s_n_reshaped) > 2 else self._state.s_history[0]
+            )  # s_n_2
 
             # Update p and q using final values
-            self._state.p = eta * self._state.p + one_minus_eta * (s_final_1 * (s_final + s_final_2))
-            self._state.q = eta * self._state.q + one_minus_eta * (2 * (s_final_1 * s_final_1))
+            self._state.p = eta * self._state.p + one_minus_eta * (
+                s_final_1 * (s_final + s_final_2)
+            )
+            self._state.q = eta * self._state.q + one_minus_eta * (
+                2 * (s_final_1 * s_final_1)
+            )
 
             # Update reflection coefficient
             new_k1 = -self._state.p / (self._state.q + 1e-8)  # Avoid division by zero
@@ -180,7 +188,6 @@ class AdaptiveLatticeNotchFilterTransformer(
             y_out = y_out.reshape(x_data.shape)
 
         else:
-
             # Perform filtering, sample-by-sample
             y_out = np.zeros_like(x_data)
             freq_out = np.zeros_like(x_data)
@@ -195,10 +202,14 @@ class AdaptiveLatticeNotchFilterTransformer(
                 self._state.p = eta * self._state.p + one_minus_eta * (
                     s_n_1 * (s_n + s_n_2)
                 )
-                self._state.q = eta * self._state.q + one_minus_eta * (2 * (s_n_1 * s_n_1))
+                self._state.q = eta * self._state.q + one_minus_eta * (
+                    2 * (s_n_1 * s_n_1)
+                )
 
                 # Update reflection coefficient
-                new_k1 = -self._state.p / (self._state.q + 1e-8)  # Avoid division by zero
+                new_k1 = -self._state.p / (
+                    self._state.q + 1e-8
+                )  # Avoid division by zero
                 new_k1 = np.clip(new_k1, -1, 1)  # Clip to prevent instability
                 self._state.k1 = mu * self._state.k1 + one_minus_mu * new_k1  # Smoothed
 
