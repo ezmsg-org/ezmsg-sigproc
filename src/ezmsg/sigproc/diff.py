@@ -71,7 +71,7 @@ class DiffTransformer(
         return replace(message, data=diffs)
 
 
-class Downsample(
+class DiffUnit(
     BaseTransformerUnit[DiffSettings, AxisArray, AxisArray, DiffTransformer]
 ):
     SETTINGS = DiffSettings
