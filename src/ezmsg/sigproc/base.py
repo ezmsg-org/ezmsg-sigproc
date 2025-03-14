@@ -737,7 +737,7 @@ class CompositeProcessor(
         expected_in_type = _get_processor_message_type(self, "in")
         expected_out_type = _get_processor_message_type(self, "out")
 
-        procs = list(self._procs.values())
+        procs = [_ for _ in self._procs.values() if _ is not None]
         in_type = _get_processor_message_type(procs[0], "in")
         if not _check_message_type_compatibility(expected_in_type, in_type):
             raise TypeError(
