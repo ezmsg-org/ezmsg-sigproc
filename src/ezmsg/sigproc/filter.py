@@ -13,7 +13,9 @@ from ezmsg.sigproc.base import (
     processor_state,
     BaseStatefulTransformer,
     BaseTransformerUnit,
-    SettingsType, BaseConsumerUnit, TransformerType,
+    SettingsType,
+    BaseConsumerUnit,
+    TransformerType,
 )
 
 
@@ -111,9 +113,9 @@ class FilterTransformer(
         self.state.zi = np.tile(zi[zi_expand], n_tile)
 
     def update_coefficients(
-            self,
-            coefs: FilterCoefficients | tuple[npt.NDArray, npt.NDArray] | npt.NDArray,
-            coef_type: str | None = None,
+        self,
+        coefs: FilterCoefficients | tuple[npt.NDArray, npt.NDArray] | npt.NDArray,
+        coef_type: str | None = None,
     ) -> None:
         """
         Update filter coefficients.
@@ -136,11 +138,17 @@ class FilterTransformer(
             reset_needed = False
 
             if self.settings.coef_type == "ba":
-                if isinstance(old_coefs, FilterCoefficients) and isinstance(coefs, FilterCoefficients):
-                    if len(old_coefs.b) != len(coefs.b) or len(old_coefs.a) != len(coefs.a):
+                if isinstance(old_coefs, FilterCoefficients) and isinstance(
+                    coefs, FilterCoefficients
+                ):
+                    if len(old_coefs.b) != len(coefs.b) or len(old_coefs.a) != len(
+                        coefs.a
+                    ):
                         reset_needed = True
                 elif isinstance(old_coefs, tuple) and isinstance(coefs, tuple):
-                    if len(old_coefs[0]) != len(coefs[0]) or len(old_coefs[1]) != len(coefs[1]):
+                    if len(old_coefs[0]) != len(coefs[0]) or len(old_coefs[1]) != len(
+                        coefs[1]
+                    ):
                         reset_needed = True
                 else:
                     reset_needed = True
@@ -218,7 +226,9 @@ class FilterByDesignTransformer(
         """Return a function that takes sampling frequency and returns filter coefficients."""
         ...
 
-    def update_settings(self, new_settings: typing.Optional[SettingsType] = None, **kwargs) -> None:
+    def update_settings(
+        self, new_settings: typing.Optional[SettingsType] = None, **kwargs
+    ) -> None:
         """
         Update settings and mark that filter coefficients need to be recalculated.
 
@@ -249,7 +259,9 @@ class FilterByDesignTransformer(
             axis = self.state.filter.settings.axis
             fs = 1 / message.axes[axis].gain
             coefs = design_fun(fs)
-            self.state.filter.update_coefficients(coefs, coef_type=self.settings.coef_type)
+            self.state.filter.update_coefficients(
+                coefs, coef_type=self.settings.coef_type
+            )
             self.state.needs_redesign = False
 
         return super().__call__(message)
@@ -266,7 +278,9 @@ class FilterByDesignTransformer(
         axis = message.dims[0] if self.settings.axis is None else self.settings.axis
         fs = 1 / message.axes[axis].gain
         coefs = design_fun(fs)
-        new_settings = FilterSettings(axis=axis, coef_type=self.settings.coef_type, coefs=coefs)
+        new_settings = FilterSettings(
+            axis=axis, coef_type=self.settings.coef_type, coefs=coefs
+        )
         self.state.filter = FilterTransformer(settings=new_settings)
 
     def _process(self, message: AxisArray) -> AxisArray:
@@ -274,14 +288,9 @@ class FilterByDesignTransformer(
 
 
 class BaseFilterByDesignTransformerUnit(
-    BaseTransformerUnit[
-        SettingsType, AxisArray, AxisArray, FilterByDesignTransformer
-    ],
-    typing.Generic[
-        SettingsType, TransformerType
-    ],
+    BaseTransformerUnit[SettingsType, AxisArray, AxisArray, FilterByDesignTransformer],
+    typing.Generic[SettingsType, TransformerType],
 ):
-
     @ez.subscriber(BaseConsumerUnit.INPUT_SETTINGS)
     async def on_settings(self, msg: SettingsType) -> None:
         """

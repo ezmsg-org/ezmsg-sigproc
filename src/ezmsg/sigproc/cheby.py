@@ -8,7 +8,8 @@ from .filter import (
     FilterBaseSettings,
     FilterByDesignTransformer,
     BACoeffs,
-    SOSCoeffs, BaseFilterByDesignTransformerUnit,
+    SOSCoeffs,
+    BaseFilterByDesignTransformerUnit,
 )
 
 
