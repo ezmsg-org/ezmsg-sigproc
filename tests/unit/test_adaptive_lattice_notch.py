@@ -3,15 +3,13 @@ from ezmsg.util.messages.axisarray import AxisArray
 
 from ezmsg.sigproc.adaptive_lattice_notch import (
     AdaptiveLatticeNotchFilterTransformer,
-    AdaptiveLatticeNotchFilterSettings,
 )
 from tests.helpers.util import (
     create_messages_with_periodic_signal,
-    assert_messages_equal,
 )
 
 
-def debug_plot():
+def debug_plot(t, ppg, hrs, hr_freq, rrs):
     try:
         import matplotlib.pyplot as plt
     except ImportError:
@@ -49,7 +47,7 @@ def test_adaptive_lattice_notch_transformer():
     fs = 50.0  # Sampling frequency
     dur = 60.0  # Duration in seconds
     sin_params = [
-        {"f": 0.25, "a": 2.0, "dur": dur, "offset": 0.0, "p": np.pi/2},  # Resp
+        {"f": 0.25, "a": 2.0, "dur": dur, "offset": 0.0, "p": np.pi / 2},  # Resp
         {"f": 2.5, "a": 10.0, "dur": dur, "offset": 0.0},
         {"f": 5.0, "a": 5.0, "dur": dur, "offset": 0.0},
         {"f": 7.5, "a": 2.0, "dur": dur, "offset": 0.0},
