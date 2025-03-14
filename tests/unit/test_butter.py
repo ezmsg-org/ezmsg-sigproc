@@ -186,16 +186,20 @@ def test_butterworth_update_settings():
         dims=["time", "ch"],
         axes={
             "time": AxisArray.TimeAxis(fs=fs, offset=0),
-            "ch": AxisArray.CoordinateAxis(data=np.arange(n_chans).astype(str), dims=["ch"]),
+            "ch": AxisArray.CoordinateAxis(
+                data=np.arange(n_chans).astype(str), dims=["ch"]
+            ),
         },
         key="test_butterworth_update_settings",
     )
 
     def _calc_power(msg, targ_freqs):
         """Calculate power at target frequencies for each channel."""
-        fft_result = np.abs(np.fft.rfft(msg.data, axis=0))**2
-        fft_freqs = np.fft.rfftfreq(len(msg.data), 1/fs)
-        return np.vstack([np.max(fft_result[np.abs(fft_freqs - f) < 1], axis=0) for f in targ_freqs])
+        fft_result = np.abs(np.fft.rfft(msg.data, axis=0)) ** 2
+        fft_freqs = np.fft.rfftfreq(len(msg.data), 1 / fs)
+        return np.vstack(
+            [np.max(fft_result[np.abs(fft_freqs - f) < 1], axis=0) for f in targ_freqs]
+        )
 
     power0 = _calc_power(msg_in, targ_freqs=freqs)
     assert np.argmax(power0[:, 0]) == 0  # 10Hz should be the strongest frequency in ch0
@@ -239,16 +243,19 @@ def test_butterworth_update_settings():
 
     # Test update_settings with complete new settings object, includes coef_type change.
     from ezmsg.sigproc.butterworthfilter import ButterworthFilterSettings
+
     new_settings = ButterworthFilterSettings(
         axis="time",
         order=2,
         cutoff=15.0,  # Lowpass at 15Hz
         cuton=None,
-        coef_type="ba"  # Change coefficient type
+        coef_type="ba",  # Change coefficient type
     )
 
     proc.update_settings(new_settings=new_settings)
     result4 = proc(msg_in)
     power4 = _calc_power(result4, targ_freqs=freqs)
-    assert 0.9 > (power4[0][0] / power0[0][0]) > 0.8  # 10Hz should be passed, but not as much
+    assert (
+        0.9 > (power4[0][0] / power0[0][0]) > 0.8
+    )  # 10Hz should be passed, but not as much
     assert power4[1][1] / power0[1][1] < 0.1  # 40Hz should be attenuated

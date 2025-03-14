@@ -79,17 +79,9 @@ def comb_design_fun(
             current_q = q_factor * i
 
         if filter_type == "notch":
-            sos = scipy.signal.iirnotch(
-                w0=freq,
-                Q=current_q,
-                fs=fs
-            )
+            sos = scipy.signal.iirnotch(w0=freq, Q=current_q, fs=fs)
         else:  # peak filter
-            sos = scipy.signal.iirpeak(
-                w0=freq,
-                Q=current_q,
-                fs=fs
-            )
+            sos = scipy.signal.iirpeak(w0=freq, Q=current_q, fs=fs)
         # Though .iirnotch and .iirpeak return b, a pairs, these are second order so
         #  we can use them directly as SOS sections.
         #  Check:
