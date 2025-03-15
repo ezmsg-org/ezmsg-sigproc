@@ -133,3 +133,13 @@ async def test_resample_project(irregular_messages):
     resample(irregular_messages[-1])
     result = next(resample)
     print(result)
+
+
+@pytest.mark.asyncio
+async def test_resample_no_input():
+    """Test calling next() on ResampleProcessor before receiving any input messages."""
+    # Create a ResampleProcessor with a specific rate
+    resample = ResampleProcessor(resample_rate=128.0)
+
+    null = next(resample)
+    assert np.prod(null.data.shape) == 0
