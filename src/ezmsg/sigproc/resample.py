@@ -103,7 +103,7 @@ class ResampleProcessor(
             last_update=time.time(),
         )
 
-    def _process(self, message: AxisArray) -> AxisArray:
+    def _process(self, message: AxisArray) -> None:
         # The incoming message will be added to the buffer.
         buf = self.state.signal_buffer
 
@@ -174,6 +174,9 @@ class ResampleProcessor(
 
     def __next__(self):
         buf = self.state.signal_buffer
+
+        if buf is None:
+            return AxisArray(data=np.array([]), dims=[""], axes={}, key="null")
 
         # buffer is empty or ref-driven && empty-reference; return the empty template
         if (buf.tvec.size == 0) or (
@@ -271,7 +274,7 @@ class ResampleProcessor(
         return result
 
     def send(self, message: AxisArray) -> AxisArray:
-        self.process(message)
+        self(message)
         return next(self)
 
 
