@@ -834,9 +834,10 @@ class CompositeProcessor(
         message: MessageInType | None,
     ) -> tuple[dict[str, tuple[typing.Any, int]], MessageOutType | None]:
         result = message
+        state = state or {}
         for k, proc in self._procs.items():
             if hasattr(proc, "stateful_op"):
-                state[k], result = proc.stateful_op(state[k], result)
+                state[k], result = proc.stateful_op(state.get(k, None), result)
             else:
                 result = proc(result)
         return state, result
