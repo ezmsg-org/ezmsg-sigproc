@@ -839,7 +839,7 @@ class CompositeProcessor(
             if hasattr(proc, "stateful_op"):
                 state[k], result = proc.stateful_op(state.get(k, None), result)
             else:
-                result = proc(result)
+                result = proc.send(result)
         return state, result
 
 
