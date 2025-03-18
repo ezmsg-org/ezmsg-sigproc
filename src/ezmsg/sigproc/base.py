@@ -446,10 +446,11 @@ class BaseStatefulProcessor(
 
     def stateful_op(
         self,
-        state: [StateType, int],
+        state: typing.Union[tuple[StateType, int], None],
         message: MessageInType,
     ) -> tuple[[StateType, int], typing.Optional[MessageOutType]]:
-        self.state, self._hash = state
+        if state is not None:
+            self.state, self._hash = state
         result = self(message)
         return (self.state, self._hash), result
 
