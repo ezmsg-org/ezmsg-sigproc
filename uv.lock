@@ -1,5 +1,15 @@
 version = 1
+revision = 1
 requires-python = ">=3.10.15"
+
+[[package]]
+name = "array-api-compat"
+version = "1.11.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ab/44/aa974c3b94b70af1231e28af176aaefd3fe2cd069ce55cbfb1e8d1348ed0/array_api_compat-1.11.1.tar.gz", hash = "sha256:9d80383f5a52a3adb09c3e0a062b0be168761e4b8d7079cfea1f7387fc2eae63", size = 49720 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b4/a3/819c6bb53506ce94b0dbf3acfc060c02e65d050f42bf6c6a4a73c25d134b/array_api_compat-1.11.1-py3-none-any.whl", hash = "sha256:cf5efc8e171a65694c8d316223edebc22161dce052e994c21a9cbb4deb3d056b", size = 53101 },
+]
 
 [[package]]
 name = "cfgv"
@@ -115,9 +125,9 @@ wheels = [
 
 [[package]]
 name = "ezmsg-sigproc"
-version = "1.8.2.dev104+g1cff27a.d20250314"
 source = { editable = "." }
 dependencies = [
+    { name = "array-api-compat" },
     { name = "ezmsg" },
     { name = "numba" },
     { name = "numpy" },
@@ -143,6 +153,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "array-api-compat", specifier = ">=1.11.1" },
     { name = "ezmsg", specifier = ">=3.6.0" },
     { name = "flake8", marker = "extra == 'test'", specifier = ">=7.1.1" },
     { name = "frozendict", marker = "extra == 'test'", specifier = ">=2.4.4" },
@@ -155,6 +166,7 @@ requires-dist = [
     { name = "scipy", specifier = ">=1.13.1" },
     { name = "sparse", specifier = ">=0.15.4" },
 ]
+provides-extras = ["test"]
 
 [package.metadata.requires-dev]
 dev = [

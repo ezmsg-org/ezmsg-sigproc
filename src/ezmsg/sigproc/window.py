@@ -6,6 +6,7 @@ import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
 import sparse
+from array_api_compat import is_pydata_sparse_namespace, get_namespace
 from ezmsg.util.messages.axisarray import (
     AxisArray,
     slice_along_axis,
@@ -145,6 +146,9 @@ class WindowTransformer(
         axis_idx = message.get_axis_idx(axis)
         axis_info = message.get_axis(axis)
         fs = 1.0 / axis_info.gain
+
+        xp = get_namespace(message.data)
+
         self._state.window_samples = int(self.settings.window_dur * fs)
         if self.settings.window_shift is not None:
             # If window_shift is None, we are in "1:1 mode" and window_shift_samples is not used.
@@ -164,9 +168,7 @@ class WindowTransformer(
             + (n_zero,)
             + message.data.shape[axis_idx + 1 :]
         )
-        zero_fun = (
-            sparse.zeros if isinstance(message.data, sparse.SparseArray) else np.zeros
-        )
+        zero_fun = sparse.zeros if is_pydata_sparse_namespace(xp) else xp.zeros
         self._state.buffer = zero_fun(init_buffer_shape, dtype=message.data.dtype)
 
         # Prepare reusable parts of output
@@ -189,10 +191,11 @@ class WindowTransformer(
         return super().__call__(message)
 
     def _process(self, message: AxisArray) -> AxisArray:
-        b_sparse = isinstance(message.data, sparse.SparseArray)
         axis = self.settings.axis or message.dims[0]
         axis_idx = message.get_axis_idx(axis)
         axis_info = message.get_axis(axis)
+
+        xp = get_namespace(message.data)
 
         # Add new data to buffer.
         # Currently, we concatenate the new time samples and clip the output.
@@ -201,13 +204,18 @@ class WindowTransformer(
         # is generally faster than np.roll and slicing anyway, but this could still
         # be a performance bottleneck for large memory arrays.
         # A circular buffer might be faster.
-        concat_fun = sparse.concatenate if b_sparse else np.concatenate
+        concat_fun = (
+            sparse.concatenate if is_pydata_sparse_namespace(xp) else xp.concatenate
+        )
         self._state.buffer = concat_fun(
             (self._state.buffer, message.data), axis=axis_idx
         )
 
         # Create a vector of buffer timestamps to track axis `offset` in output(s)
-        buffer_tvec = np.arange(self._state.buffer.shape[axis_idx]).astype(float)
+        if is_pydata_sparse_namespace(xp):
+            buffer_tvec = np.arange(self._state.buffer.shape[axis_idx]).astype(float)
+        else:
+            buffer_tvec = xp.arange(self._state.buffer.shape[axis_idx]).astype(float)
         # Adjust so first _new_ sample at index 0.
         buffer_tvec -= buffer_tvec[-message.data.shape[axis_idx]]
         # Convert form indices to 'units' (probably seconds).
@@ -251,7 +259,9 @@ class WindowTransformer(
         elif self._state.buffer.shape[axis_idx] >= self._state.window_samples:
             # Deterministic window shifts.
             sliding_win_fun = (
-                sparse_sliding_win_oneaxis if b_sparse else sliding_win_oneaxis
+                sparse_sliding_win_oneaxis
+                if is_pydata_sparse_namespace(xp)
+                else sliding_win_oneaxis
             )
             out_dat = sliding_win_fun(
                 self._state.buffer,
@@ -279,7 +289,7 @@ class WindowTransformer(
                 + (0, self._state.window_samples)
                 + message.data.shape[axis_idx + 1 :]
             )
-            out_dat = np.zeros(empty_data_shape, dtype=message.data.dtype)
+            out_dat = xp.zeros(empty_data_shape, dtype=message.data.dtype)
             # out_newaxis will have first timestamp in input... but mostly meaningless because output is size-zero.
             win_offset = axis_info.offset
 
@@ -314,6 +324,7 @@ class Window(
         """
         # TODO: The transfomer overwrites settings.newaxis from None to "win",
         #  then we no longer know if the user wants to trim out the newaxis from the unit.
+        xp = get_namespace(message.data)
         try:
             ret = self.processor(message)
             if ret.data.size > 0:
@@ -327,7 +338,10 @@ class Window(
                     # We need to split out_msg into multiple yields, dropping newaxis.
                     axis_idx = ret.get_axis_idx("win")
                     win_axis = ret.axes["win"]
-                    offsets = win_axis.value(np.arange(ret.data.shape[axis_idx]))
+                    if is_pydata_sparse_namespace(xp):
+                        offsets = win_axis.value(np.arange(ret.data.shape[axis_idx]))
+                    else:
+                        offsets = win_axis.value(xp.arange(ret.data.shape[axis_idx]))
                     for msg_ix in range(ret.data.shape[axis_idx]):
                         # Need to drop 'win' and replace self.SETTINGS.axis from axes.
                         _out_axes = {
