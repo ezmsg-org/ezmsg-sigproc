@@ -7,29 +7,9 @@ from frozendict import frozendict
 import pytest
 from ezmsg.util.messages.axisarray import AxisArray
 
-from ezmsg.sigproc.scaler import scaler, scaler_np, EWMA, ewma_step
+from ezmsg.sigproc.scaler import scaler, scaler_np, AdaptiveStandardScalerTransformer
 
 from tests.helpers.util import assert_messages_equal
-
-
-def test_ewma():
-    alpha = 0.6
-    n_times = 100
-    n_ch = 32
-    n_feat = 4
-    data = np.arange(1, n_times * n_ch * n_feat + 1, dtype=float).reshape(
-        n_times, n_ch, n_feat
-    )
-
-    # Expected
-    expected = [data[0]]
-    for ix, dat in enumerate(data):
-        expected.append(ewma_step(dat, expected[-1], alpha))
-    expected = np.stack(expected)[1:]
-
-    ewma = EWMA(alpha=alpha)
-    res = ewma.compute(data)
-    assert np.allclose(res, expected)
 
 
 @pytest.fixture
@@ -64,13 +44,16 @@ def test_adaptive_standard_scaler_river(fixture_arrays):
     assert_messages_equal([test_input], backup)
 
 
-def test_scaler_np(fixture_arrays):
+def test_scaler(fixture_arrays):
     data, expected_result = fixture_arrays
     chunker = array_chunker(data, 4, fs=100.0)
     test_input = list(chunker)
     backup = copy.deepcopy(test_input)
-
     tau = 0.010913566679372915
+
+    """
+    Test legacy interface. Should be deprecated.
+    """
     gen = scaler_np(time_constant=tau, axis="time")
     outputs = []
     for chunk in test_input:
@@ -78,3 +61,13 @@ def test_scaler_np(fixture_arrays):
     output = AxisArray.concatenate(*outputs, dim="time")
     assert np.allclose(output.data, expected_result, atol=1e-3)
     assert_messages_equal(test_input, backup)
+
+    """
+    Test new interface
+    """
+    xformer = AdaptiveStandardScalerTransformer(time_constant=tau, axis="time")
+    outputs = []
+    for chunk in test_input:
+        outputs.append(xformer(chunk))
+    output = AxisArray.concatenate(*outputs, dim="time")
+    assert np.allclose(output.data, expected_result, atol=1e-3)
