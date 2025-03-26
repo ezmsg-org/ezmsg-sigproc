@@ -1,3 +1,4 @@
+import asyncio
 import dataclasses
 import time
 import typing
@@ -293,3 +294,5 @@ class ResampleUnit(BaseConsumerUnit[ResampleSettings, AxisArray, ResampleProcess
             result: AxisArray = next(self.processor)
             if np.prod(result.data.shape) > 0:
                 yield self.OUTPUT_SIGNAL, result
+            else:
+                await asyncio.sleep(0.001)
