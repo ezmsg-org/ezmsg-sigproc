@@ -168,8 +168,7 @@ class WindowTransformer(
             + (n_zero,)
             + message.data.shape[axis_idx + 1 :]
         )
-        zero_fun = sparse.zeros if is_pydata_sparse_namespace(xp) else xp.zeros
-        self._state.buffer = zero_fun(init_buffer_shape, dtype=message.data.dtype)
+        self._state.buffer = xp.zeros(init_buffer_shape, dtype=message.data.dtype)
 
         # Prepare reusable parts of output
         if self._state.out_newaxis is None:
@@ -204,18 +203,13 @@ class WindowTransformer(
         # is generally faster than np.roll and slicing anyway, but this could still
         # be a performance bottleneck for large memory arrays.
         # A circular buffer might be faster.
-        concat_fun = (
-            sparse.concatenate if is_pydata_sparse_namespace(xp) else xp.concatenate
-        )
-        self._state.buffer = concat_fun(
+        self._state.buffer = xp.concatenate(
             (self._state.buffer, message.data), axis=axis_idx
         )
 
         # Create a vector of buffer timestamps to track axis `offset` in output(s)
-        if is_pydata_sparse_namespace(xp):
-            buffer_tvec = np.arange(self._state.buffer.shape[axis_idx]).astype(float)
-        else:
-            buffer_tvec = xp.arange(self._state.buffer.shape[axis_idx]).astype(float)
+        buffer_tvec = xp.asarray(range(self._state.buffer.shape[axis_idx]), dtype=float)
+
         # Adjust so first _new_ sample at index 0.
         buffer_tvec -= buffer_tvec[-message.data.shape[axis_idx]]
         # Convert form indices to 'units' (probably seconds).
@@ -269,9 +263,9 @@ class WindowTransformer(
                 axis_idx,
                 step=self._state.window_shift_samples,
             )
-            offset_view = sliding_win_oneaxis(
-                buffer_tvec, self._state.window_samples, 0
-            )[:: self._state.window_shift_samples]
+            offset_view = sliding_win_fun(buffer_tvec, self._state.window_samples, 0)[
+                :: self._state.window_shift_samples
+            ]
             win_offset = offset_view[0, 0]
 
             # Drop expired beginning of buffer and update shift_deficit
@@ -338,10 +332,9 @@ class Window(
                     # We need to split out_msg into multiple yields, dropping newaxis.
                     axis_idx = ret.get_axis_idx("win")
                     win_axis = ret.axes["win"]
-                    if is_pydata_sparse_namespace(xp):
-                        offsets = win_axis.value(np.arange(ret.data.shape[axis_idx]))
-                    else:
-                        offsets = win_axis.value(xp.arange(ret.data.shape[axis_idx]))
+                    offsets = win_axis.value(
+                        xp.asarray(range(ret.data.shape[axis_idx]))
+                    )
                     for msg_ix in range(ret.data.shape[axis_idx]):
                         # Need to drop 'win' and replace self.SETTINGS.axis from axes.
                         _out_axes = {
