@@ -5,15 +5,7 @@ from ezmsg.util.messages.axisarray import AxisArray
 
 from ezmsg.sigproc.filterbank import filterbank, FilterbankMode
 
-
-def gaussian(x, x0, sigma):
-    return np.exp(-np.power((x - x0) / sigma, 2.0) / 2.0)
-
-
-def make_chirp(t, t0, a):
-    frequency = (a * (t + t0)) ** 2
-    chirp = np.sin(2 * np.pi * frequency * t)
-    return chirp, frequency
+from tests.helpers.util import gaussian, make_chirp
 
 
 def gen_signal(fs, dur):

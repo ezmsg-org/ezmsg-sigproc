@@ -7,7 +7,7 @@ from ezmsg.util.messages.axisarray import AxisArray
 
 from ezmsg.sigproc.aggregate import ranged_aggregate, AggregationFunction
 
-from util import assert_messages_equal
+from tests.helpers.util import assert_messages_equal
 
 
 def get_msg_gen(n_chans=20, n_freqs=100, data_dur=30.0, fs=1024.0, key=""):
