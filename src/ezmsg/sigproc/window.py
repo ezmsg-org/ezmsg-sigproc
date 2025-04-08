@@ -3,7 +3,6 @@ import traceback
 import typing
 
 import ezmsg.core as ez
-import numpy as np
 import numpy.typing as npt
 import sparse
 from array_api_compat import is_pydata_sparse_namespace, get_namespace
@@ -173,7 +172,9 @@ class WindowTransformer(
         # Prepare reusable parts of output
         if self._state.out_newaxis is None:
             self._state.out_dims = (
-                message.dims[:axis_idx] + [_newaxis] + message.dims[axis_idx:]
+                list(message.dims[:axis_idx])
+                + [_newaxis]
+                + list(message.dims[axis_idx:])
             )
             self._state.out_newaxis = replace(
                 axis_info,
