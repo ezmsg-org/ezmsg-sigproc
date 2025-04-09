@@ -14,7 +14,7 @@ from .base import GenAxisArray
 
 @consumer
 def downsample(
-    axis: str | None = None, target_rate: float | None = None
+    axis: str | None = None, target_rate: float | None = None, factor: int | None = None
 ) -> typing.Generator[AxisArray, AxisArray, None]:
     """
     Construct a generator that yields a downsampled version of the data .send() to it.
@@ -28,6 +28,7 @@ def downsample(
             Note: The axis must exist in the message .axes and be of type AxisArray.LinearAxis.
         target_rate: Desired rate after downsampling. The actual rate will be the nearest integer factor of the
             input rate that is the same or higher than the target rate.
+        factor: Explicitly specify downsample factor.  If specified, target_rate is ignored.
 
     Returns:
         A primed generator object ready to receive an :obj:`AxisArray` via `.send(axis_array)`
@@ -39,7 +40,7 @@ def downsample(
     msg_out = AxisArray(np.array([]), dims=[""])
 
     # state variables
-    factor: int = 0  # The integer downsampling factor. It will be determined based on the target rate.
+    q: int = 0  # The integer downsampling factor. It will be determined based on the target rate.
     s_idx: int = 0  # Index of the next msg's first sample into the virtual rotating ds_factor counter.
 
     check_input = {"gain": None, "key": None}
@@ -61,19 +62,21 @@ def downsample(
             check_input["key"] = msg_in.key
             # Reset state variables
             s_idx = 0
-            if target_rate is None:
-                factor = 1
+            if factor is not None:
+                q = factor
+            elif target_rate is None:
+                q = 1
             else:
-                factor = int(1 / (axis_info.gain * target_rate))
-            if factor < 1:
+                q = int(1 / (axis_info.gain * target_rate))
+            if q < 1:
                 ez.logger.warning(
                     f"Target rate {target_rate} cannot be achieved with input rate of {1/axis_info.gain}."
                     "Setting factor to 1."
                 )
-                factor = 1
+                q = 1
 
         n_samples = msg_in.data.shape[axis_idx]
-        samples = np.arange(s_idx, s_idx + n_samples) % factor
+        samples = np.arange(s_idx, s_idx + n_samples) % q
         if n_samples > 0:
             # Update state for next iteration.
             s_idx = samples[-1] + 1
@@ -92,7 +95,7 @@ def downsample(
                 **msg_in.axes,
                 axis: replace(
                     axis_info,
-                    gain=axis_info.gain * factor,
+                    gain=axis_info.gain * q,
                     offset=axis_info.offset + axis_info.gain * n_step,
                 ),
             },
@@ -107,6 +110,7 @@ class DownsampleSettings(ez.Settings):
 
     axis: str | None = None
     target_rate: float | None = None
+    factor: int | None = None
 
 
 class Downsample(GenAxisArray):
@@ -116,5 +120,7 @@ class Downsample(GenAxisArray):
 
     def construct_generator(self):
         self.STATE.gen = downsample(
-            axis=self.SETTINGS.axis, target_rate=self.SETTINGS.target_rate
+            axis=self.SETTINGS.axis,
+            target_rate=self.SETTINGS.target_rate,
+            factor=self.SETTINGS.factor,
         )
