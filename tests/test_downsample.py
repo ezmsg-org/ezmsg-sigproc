@@ -21,7 +21,8 @@ from ezmsg.util.debuglog import DebugLog
 
 @pytest.mark.parametrize("block_size", [1, 5, 10, 20])
 @pytest.mark.parametrize("target_rate", [19.0, 9.5, 6.3])
-def test_downsample_core(block_size: int, target_rate: float):
+@pytest.mark.parametrize("factor", [None, 1, 2])
+def test_downsample_core(block_size: int, target_rate: float, factor: int | None):
     in_fs = 19.0
     test_dur = 4.0
     n_channels = 2
@@ -60,7 +61,7 @@ def test_downsample_core(block_size: int, target_rate: float):
     in_msgs = list(msg_generator())
     backup = [copy.deepcopy(msg) for msg in in_msgs]
 
-    proc = downsample(axis="time", target_rate=target_rate)
+    proc = downsample(axis="time", target_rate=target_rate, factor=factor)
     out_msgs = []
     for msg in in_msgs:
         res = proc.send(msg)
@@ -70,7 +71,7 @@ def test_downsample_core(block_size: int, target_rate: float):
     assert_messages_equal(in_msgs, backup)
 
     # Assert correctness of gain
-    expected_factor: int = int(in_fs // target_rate)
+    expected_factor: int = int(in_fs // target_rate) if factor is None else factor
     assert all(msg.axes["time"].gain == expected_factor / in_fs for msg in out_msgs)
 
     # Assert messages have the correct timestamps
@@ -132,7 +133,13 @@ class DownsampleSystem(ez.Collection):
 
 @pytest.mark.parametrize("block_size", [10])
 @pytest.mark.parametrize("target_rate", [6.3])
-def test_downsample_system(block_size: int, target_rate: float, test_name: str | None = None):
+@pytest.mark.parametrize("factor", [None, 2])
+def test_downsample_system(
+    block_size: int,
+    target_rate: float,
+    factor: int | None,
+    test_name: str | None = None,
+):
     in_fs = 19.0
     num_msgs = int(4.0 / (block_size / in_fs))  # Ensure 4 seconds of data
 
@@ -146,7 +153,7 @@ def test_downsample_system(block_size: int, target_rate: float, test_name: str |
             fs=in_fs,
             dispatch_rate=20.0,
         ),
-        down_settings=DownsampleSettings(target_rate=target_rate),
+        down_settings=DownsampleSettings(target_rate=target_rate, factor=factor),
         log_settings=MessageLoggerSettings(output=test_filename),
         term_settings=TerminateTestSettings(time=1.0),
     )
@@ -160,7 +167,7 @@ def test_downsample_system(block_size: int, target_rate: float, test_name: str |
     ez.logger.info(f"Analyzing recording of { len( messages ) } messages...")
 
     # Check fs
-    expected_factor: int = int(in_fs // target_rate)
+    expected_factor: int = int(in_fs // target_rate) if factor is None else factor
     out_fs = in_fs / expected_factor
     assert np.allclose(
         np.array([1 / msg.axes["time"].gain for msg in messages]),
