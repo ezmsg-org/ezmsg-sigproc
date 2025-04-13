@@ -12,7 +12,8 @@ from tests.helpers.util import assert_messages_equal
 
 @pytest.mark.parametrize("block_size", [1, 5, 10, 20])
 @pytest.mark.parametrize("target_rate", [19.0, 9.5, 6.3])
-def test_downsample_core(block_size: int, target_rate: float):
+@pytest.mark.parametrize("factor", [None, 1, 2])
+def test_downsample_core(block_size: int, target_rate: float, factor: int | None):
     in_fs = 19.0
     test_dur = 4.0
     n_channels = 2
@@ -51,7 +52,7 @@ def test_downsample_core(block_size: int, target_rate: float):
     in_msgs = list(msg_generator())
     backup = [copy.deepcopy(msg) for msg in in_msgs]
 
-    proc = DownsampleTransformer(axis="time", target_rate=target_rate)
+    proc = DownsampleTransformer(axis="time", target_rate=target_rate, factor=factor)
     out_msgs = []
     for msg in in_msgs:
         res = proc(msg)
@@ -61,7 +62,7 @@ def test_downsample_core(block_size: int, target_rate: float):
     assert_messages_equal(in_msgs, backup)
 
     # Assert correctness of gain
-    expected_factor: int = int(in_fs // target_rate)
+    expected_factor: int = int(in_fs // target_rate) if factor is None else factor
     assert all(msg.axes["time"].gain == expected_factor / in_fs for msg in out_msgs)
 
     # Assert messages have the correct timestamps

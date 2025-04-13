@@ -76,8 +76,8 @@ class DownsampleTransformer(
 
         n_samples = message.data.shape[axis_idx]
         samples = (
-                np.arange(self.state.s_idx, self.state.s_idx + n_samples)
-                % self._state.q)
+            np.arange(self.state.s_idx, self.state.s_idx + n_samples) % self._state.q
+        )
         if n_samples > 0:
             # Update state for next iteration.
             self._state.s_idx = samples[-1] + 1
@@ -111,6 +111,10 @@ class Downsample(
 
 
 def downsample(
-    axis: str = "time", target_rate: float | None = None, factor: int | None = None,
+    axis: str = "time",
+    target_rate: float | None = None,
+    factor: int | None = None,
 ) -> DownsampleTransformer:
-    return DownsampleTransformer(DownsampleSettings(axis=axis, target_rate=target_rate, factor=factor))
+    return DownsampleTransformer(
+        DownsampleSettings(axis=axis, target_rate=target_rate, factor=factor)
+    )
