@@ -171,7 +171,9 @@ class EWMATransformer(
         self._state.alpha = _alpha_from_tau(
             self.settings.time_constant, message.axes[axis].gain
         )
-        sub_dat = slice_along_axis(message.data, slice(None, 1, None), axis=message.get_axis_idx(axis))
+        sub_dat = slice_along_axis(
+            message.data, slice(None, 1, None), axis=message.get_axis_idx(axis)
+        )
         self._state.zi = (1 - self._state.alpha) * sub_dat
 
     def _process(self, message: npt.NDArray) -> npt.NDArray:
