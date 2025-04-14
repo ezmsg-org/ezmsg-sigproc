@@ -1,5 +1,3 @@
-import enum
-
 import numpy as np
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray, replace
@@ -31,7 +29,6 @@ class QuantizeSettings(ez.Settings):
     """
 
 
-
 class QuantizeTransformer(BaseTransformer[QuantizeSettings, AxisArray, AxisArray]):
     def _process(
         self,
@@ -50,7 +47,9 @@ class QuantizeTransformer(BaseTransformer[QuantizeSettings, AxisArray, AxisArray
             dtype = np.uint64
 
         data = message.data.clip(self.settings.min_val, self.settings.max_val)
-        data = (data - self.settings.min_val) / (self.settings.max_val - self.settings.min_val)
+        data = (data - self.settings.min_val) / (
+            self.settings.max_val - self.settings.min_val
+        )
 
         # Scale to the quantized range [0, 2^bits - 1]
         scale_factor = 2**self.settings.bits - 1

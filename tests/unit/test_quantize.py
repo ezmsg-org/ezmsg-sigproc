@@ -20,21 +20,24 @@ def test_quantize(bits: int):
     input_msg = AxisArray(
         data=data,
         dims=["time", "channel"],
-        axes=frozendict({
-            "time": AxisArray.TimeAxis(fs=100.0, offset=0.0),
-            "channel": AxisArray.CoordinateAxis(
-                data=np.array([f"Ch{i}" for i in range(5)]),
-                dims=["channel"]
-            )
-        }),
-        key="test_quantize"
+        axes=frozendict(
+            {
+                "time": AxisArray.TimeAxis(fs=100.0, offset=0.0),
+                "channel": AxisArray.CoordinateAxis(
+                    data=np.array([f"Ch{i}" for i in range(5)]), dims=["channel"]
+                ),
+            }
+        ),
+        key="test_quantize",
     )
 
     # Create a backup for comparison
     backup = copy.deepcopy(input_msg)
 
     # Create and apply the quantizer
-    quantizer = QuantizeTransformer(min_val=data_range[0], max_val=data_range[1], bits=bits)
+    quantizer = QuantizeTransformer(
+        min_val=data_range[0], max_val=data_range[1], bits=bits
+    )
     output_msg = quantizer(input_msg)
 
     # Verify original message wasn't modified
@@ -58,8 +61,8 @@ def test_quantize(bits: int):
     # The first element should be close to 0 (minimum)
     assert output_msg.data[0, 0] == 0
     if bits <= 1:
-        assert np.min(output_msg.data) == False
-        assert np.max(output_msg.data) == True
+        assert not np.min(output_msg.data)
+        assert np.max(output_msg.data)
     else:
         # Verify output range is [0, 255]
         assert np.min(output_msg.data) >= 0
