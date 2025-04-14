@@ -10,11 +10,14 @@ from ezmsg.sigproc.quantize import QuantizeTransformer
 from tests.helpers.util import assert_messages_equal
 
 
-@pytest.mark.parametrize("bits", [1, 2, 4, 8, 16, 32, 64])
+@pytest.mark.parametrize("bits", [64, 1, 2, 4, 8, 16, 32, 64])
 def test_quantize(bits: int):
-    data_range = (-1e9, 1e9)
-    # Create sample data with values ranging from -2000 to +2000
-    data = np.linspace(data_range[0], data_range[1], 100).reshape(20, 5)
+    data_range = [-8_192.0, 8_192.0]
+    min_step = (data_range[1] - data_range[0]) / 2 ** bits
+    min_step = max(min_step, 2e-12)  # Practically, this is the minimum step size
+    data = np.array([
+        [data_range[0], data_range[0] + min_step, -min_step, 0, min_step, data_range[1] - min_step, data_range[1]]
+    ])
 
     # Create an AxisArray message
     input_msg = AxisArray(
@@ -24,7 +27,7 @@ def test_quantize(bits: int):
             {
                 "time": AxisArray.TimeAxis(fs=100.0, offset=0.0),
                 "channel": AxisArray.CoordinateAxis(
-                    data=np.array([f"Ch{i}" for i in range(5)]), dims=["channel"]
+                    data=np.array([f"Ch{i}" for i in range(7)]), dims=["channel"]
                 ),
             }
         ),
@@ -58,18 +61,13 @@ def test_quantize(bits: int):
             assert output_msg.data.dtype == np.uint64
 
     # Verify the quantization mapping
-    # The first element should be close to 0 (minimum)
-    assert output_msg.data[0, 0] == 0
     if bits <= 1:
         assert not np.min(output_msg.data)
         assert np.max(output_msg.data)
     else:
-        # Verify output range is [0, 255]
-        assert np.min(output_msg.data) >= 0
-        assert np.max(output_msg.data) == 2**bits - 1
-        assert output_msg.data[-1, -1] == 2**bits - 1
-
-    # # Middle element should be close to 127/128
-    # mid_index = len(data) // 2
-    # mid_value = output_msg.data.flatten()[mid_index]
-    # assert 120 <= mid_value <= 135
+        assert output_msg.data[0, 0] == 0
+        assert output_msg.data[0, 3] == 2 ** (bits - 1)
+        assert output_msg.data[0, 6] == 2 ** bits - 1
+        if bits != 64:
+            assert output_msg.data[0, 1] == 1
+            assert output_msg.data[0, 5] == 2 ** bits - 2
