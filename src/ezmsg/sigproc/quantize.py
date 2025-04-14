@@ -53,7 +53,7 @@ class QuantizeTransformer(BaseTransformer[QuantizeSettings, AxisArray, AxisArray
 
         # Scale to the quantized range [0, 2^bits - 1]
         scale_factor = 2**self.settings.bits - 1
-        data = np.round(data * scale_factor).astype(dtype)
+        data = np.rint(data * scale_factor).astype(dtype)
 
         # Create a new AxisArray with the quantized data
         return replace(message, data=data)
