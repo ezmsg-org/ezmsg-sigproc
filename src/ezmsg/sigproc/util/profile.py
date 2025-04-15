@@ -44,12 +44,13 @@ def _setup_logger(append: bool = False) -> logging.Logger:
     _logger.addHandler(fh)
 
     # Add the first row without formatting.
-    _logger.debug(",".join(["Time", "Source", "Topic", "SampleTime", "PerfCounter", "Elapsed"]))
+    _logger.debug(
+        ",".join(["Time", "Source", "Topic", "SampleTime", "PerfCounter", "Elapsed"])
+    )
 
     # Set the log message format
     formatter = logging.Formatter(
-        "%(asctime)s,%(message)s",
-        datefmt="%Y-%m-%dT%H:%M:%S%z"
+        "%(asctime)s,%(message)s", datefmt="%Y-%m-%dT%H:%M:%S%z"
     )
     fh.setFormatter(formatter)
 
@@ -89,18 +90,31 @@ def profile_method(trace_oldest: bool = True):
     Returns:
         Callable: The decorated function with profiling.
     """
+
     def profiling_decorator(func: typing.Callable):
         @functools.wraps(func)
         def wrapped_func(caller, *args, **kwargs):
             start = time.perf_counter()
             res = func(caller, *args, **kwargs)
             stop = time.perf_counter()
-            source = '.'.join((caller.__class__.__module__, caller.__class__.__name__))
+            source = ".".join((caller.__class__.__module__, caller.__class__.__name__))
             topic = f"{caller.address}"
             samp_time = _process_obj(res, trace_oldest=trace_oldest)
-            logger.debug(",".join([source, topic, f"{samp_time}", f"{stop}", f"{(stop - start) * 1e3:0.4f}"]))
+            logger.debug(
+                ",".join(
+                    [
+                        source,
+                        topic,
+                        f"{samp_time}",
+                        f"{stop}",
+                        f"{(stop - start) * 1e3:0.4f}",
+                    ]
+                )
+            )
             return res
+
         return wrapped_func if logger.level == logging.DEBUG else func
+
     return profiling_decorator
 
 
@@ -115,17 +129,30 @@ def profile_subpub(trace_oldest: bool = True):
     Returns:
         Callable: The decorated async task with profiling.
     """
+
     def profiling_decorator(func: typing.Callable):
         @functools.wraps(func)
         async def wrapped_task(unit: ez.Unit, msg: typing.Any = None) -> None:
-            source = '.'.join((unit.__class__.__module__, unit.__class__.__name__))
+            source = ".".join((unit.__class__.__module__, unit.__class__.__name__))
             topic = f"{unit.address}"
             start = time.perf_counter()
             async for stream, obj in func(unit, msg):
                 stop = time.perf_counter()
                 samp_time = _process_obj(obj, trace_oldest=trace_oldest)
-                logger.debug(",".join([source, topic, f"{samp_time}", f"{stop}", f"{(stop - start) * 1e3:0.4f}"]))
+                logger.debug(
+                    ",".join(
+                        [
+                            source,
+                            topic,
+                            f"{samp_time}",
+                            f"{stop}",
+                            f"{(stop - start) * 1e3:0.4f}",
+                        ]
+                    )
+                )
                 start = stop
                 yield stream, obj
+
         return wrapped_task if logger.level == logging.DEBUG else func
+
     return profiling_decorator
