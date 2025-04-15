@@ -10,14 +10,24 @@ from ezmsg.sigproc.quantize import QuantizeTransformer
 from tests.helpers.util import assert_messages_equal
 
 
-@pytest.mark.parametrize("bits", [64, 1, 2, 4, 8, 16, 32, 64])
+@pytest.mark.parametrize("bits", [1, 2, 4, 8, 16, 32, 64])
 def test_quantize(bits: int):
     data_range = [-8_192.0, 8_192.0]
-    min_step = (data_range[1] - data_range[0]) / 2 ** bits
+    min_step = (data_range[1] - data_range[0]) / 2**bits
     min_step = max(min_step, 2e-12)  # Practically, this is the minimum step size
-    data = np.array([
-        [data_range[0], data_range[0] + min_step, -min_step, 0, min_step, data_range[1] - min_step, data_range[1]]
-    ])
+    data = np.array(
+        [
+            [
+                data_range[0],
+                data_range[0] + min_step,
+                -min_step,
+                0,
+                min_step,
+                data_range[1] - min_step,
+                data_range[1],
+            ]
+        ]
+    )
 
     # Create an AxisArray message
     input_msg = AxisArray(
@@ -67,7 +77,13 @@ def test_quantize(bits: int):
     else:
         assert output_msg.data[0, 0] == 0
         assert output_msg.data[0, 3] == 2 ** (bits - 1)
-        assert output_msg.data[0, 6] == 2 ** bits - 1
-        if bits != 64:
+        if bits == 64:
+            # 64-bit quantization behaves strangely because float64
+            #  does not map to uint64 correctly. The QuantizeTransformer
+            #  does some clipping to prevent this, so here we just verify
+            #  that the number is very large.
+            assert output_msg.data[0, 6] > 2**63
+        else:
             assert output_msg.data[0, 1] == 1
-            assert output_msg.data[0, 5] == 2 ** bits - 2
+            assert output_msg.data[0, 5] == 2**bits - 2
+            assert output_msg.data[0, 6] == 2**bits - 1
