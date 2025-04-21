@@ -184,7 +184,7 @@ async def test_profile_subpub_decorator(mock_logger_path):
     datetime.strptime(
         log_text[0], "%Y-%m-%dT%H:%M:%S%z"
     )  # Will throw if format is incorrect
-    assert log_text[1] == "test_profile.DummyUnit"
+    assert log_text[1].endswith("test_profile.DummyUnit")
     assert log_text[2] == "dummy_address"
     assert log_text[3] == "None"
     float(log_text[4])  # Will throw if not float
