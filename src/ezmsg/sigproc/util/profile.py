@@ -8,6 +8,9 @@ import typing
 import ezmsg.core as ez
 
 
+HEADER = "Time,Source,Topic,SampleTime,PerfCounter,Elapsed"
+
+
 def get_logger_path() -> Path:
     # Retrieve the logfile name from the environment variable
     logfile = os.environ.get("EZMSG_PROFILE", None)
@@ -26,9 +29,23 @@ def _setup_logger(append: bool = False) -> logging.Logger:
     logpath = get_logger_path()
     logpath.parent.mkdir(parents=True, exist_ok=True)
 
-    if not append:
-        # Remove the file if it exists
-        logpath.unlink(missing_ok=True)
+    write_header = True
+    if logpath.exists() and logpath.is_file():
+        if append:
+            with open(logpath) as f:
+                first_line = f.readline().rstrip()
+            if first_line == HEADER:
+                write_header = False
+            else:
+                # Remove the file if appending, but headers do not match
+                ezmsg_logger = logging.getLogger("ezmsg")
+                ezmsg_logger.warning(
+                    "Profiling header mismatch: please make sure to use the same version of ezmsg for all processes."
+                )
+                logpath.unlink()
+        else:
+            # Remove the file if not appending
+            logpath.unlink()
 
     # Create a logger with the name "ezprofile"
     _logger = logging.getLogger("ezprofile")
@@ -43,10 +60,9 @@ def _setup_logger(append: bool = False) -> logging.Logger:
     # Add the file handler to the logger
     _logger.addHandler(fh)
 
-    # Add the first row without formatting.
-    _logger.debug(
-        ",".join(["Time", "Source", "Topic", "SampleTime", "PerfCounter", "Elapsed"])
-    )
+    # Add the header if writing to new file or if header matched header in file.
+    if write_header:
+        _logger.debug(HEADER)
 
     # Set the log message format
     formatter = logging.Formatter(
@@ -132,7 +148,7 @@ def profile_subpub(trace_oldest: bool = True):
 
     def profiling_decorator(func: typing.Callable):
         @functools.wraps(func)
-        async def wrapped_task(unit: ez.Unit, msg: typing.Any = None) -> None:
+        async def wrapped_task(unit: ez.Unit, msg: typing.Any = None):
             source = ".".join((unit.__class__.__module__, unit.__class__.__name__))
             topic = f"{unit.address}"
             start = time.perf_counter()
