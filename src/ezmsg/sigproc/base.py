@@ -11,6 +11,8 @@ import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.generator import GenState
 
+from ezmsg.sigproc.util.typeresolution import _check_message_type_compatibility
+
 from .util.profile import profile_subpub
 from .util.message import SampleMessage
 from .util.asio import run_coroutine_sync
@@ -659,61 +661,6 @@ def _get_processor_message_type(
     return proc.__class__.get_message_type(dir)
 
 
-def _check_message_type_compatibility(type1: type, type2: type) -> bool:
-    """
-    Check if two types are compatible for message passing.
-
-    Returns True if:
-    - Both are None
-    - Either is typing.Any
-    - One is None and the other is typing.Optional
-    - type1 is a subclass of type2, or of the inner type if type2 is Optional
-
-    Args:
-        type1: First type to compare
-        type2: Second type to compare
-
-    Returns:
-        bool: True if the types are compatible, False otherwise
-    """
-    # Both None is compatible
-    if type1 is None and type2 is None:
-        return True
-
-    # If either is Any, they are compatible
-    if type1 is typing.Any or type2 is typing.Any:
-        return True
-
-    # Handle None with Optional
-    if type1 is None:
-        return (
-            hasattr(type2, "__origin__")
-            and type2.__origin__ is typing.Union
-            and type(None) in typing.get_args(type2)
-        )
-    if type2 is None:
-        return (
-            hasattr(type1, "__origin__")
-            and type1.__origin__ is typing.Union
-            and type(None) in typing.get_args(type1)
-        )
-
-    # Handle Optional types
-    if (
-        hasattr(type2, "__origin__")
-        and type2.__origin__ is typing.Union
-        and type(None) in typing.get_args(type2)
-    ):
-        # Extract the non-None type from Optional
-        non_none_type = next(
-            arg for arg in typing.get_args(type2) if arg is not type(None)
-        )
-        return issubclass(type1, non_none_type)
-
-    # Regular issubclass check
-    return issubclass(type1, type2)
-
-
 class CompositeProcessor(
     BaseProcessor[SettingsType, MessageInType, MessageOutType],
     typing.Generic[SettingsType, MessageInType, MessageOutType],
@@ -747,7 +694,7 @@ class CompositeProcessor(
             )
 
         out_type = _get_processor_message_type(procs[-1], "out")
-        if not _check_message_type_compatibility(expected_out_type, out_type):
+        if not _check_message_type_compatibility(out_type, expected_out_type):
             raise TypeError(
                 f"Output type mismatch: Composite processor wants to return {expected_out_type}, "
                 f"but its last processor returns {out_type}"
