@@ -2,7 +2,7 @@ import dataclasses
 import pickle
 import pytest
 from types import NoneType
-import typing
+from typing import Any, Generator, Optional, Union
 from unittest.mock import MagicMock
 
 from ezmsg.sigproc.base import (
@@ -159,7 +159,7 @@ class ValidSingleCompositeProcessor(
     CompositeProcessor[MockSettings, MockMessageA, MockMessageB]
 ):
     @staticmethod
-    def _initialize_processors(settings: MockSettings) -> dict[str, typing.Any]:
+    def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
         return {"processor": MockProcessor(settings=settings)}
 
 
@@ -167,7 +167,7 @@ class ValidMultipleCompositeProcessor(
     CompositeProcessor[MockSettings, MockMessageA, MockMessageB]
 ):
     @staticmethod
-    def _initialize_processors(settings: MockSettings) -> dict[str, typing.Any]:
+    def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
         return {
             "processor": MockProcessor(settings=settings),
             "stateful_processor": MockStatefulProcessor(settings=settings),
@@ -178,7 +178,7 @@ class EmptyCompositeProcessor(
     CompositeProcessor[MockSettings, MockMessageA, MockMessageB]
 ):
     @staticmethod
-    def _initialize_processors(settings: MockSettings) -> dict[str, typing.Any]:
+    def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
         return {}
 
 
@@ -186,7 +186,7 @@ class InvalidOutputCompositeProcessor(
     CompositeProcessor[MockSettings, MockMessageA, MockMessageB]
 ):
     @staticmethod
-    def _initialize_processors(settings: MockSettings) -> dict[str, typing.Any]:
+    def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
         return {"transformer": MockTransformer(settings=settings)}
 
 
@@ -194,7 +194,7 @@ class InvalidInputCompositeProcessor(
     CompositeProcessor[MockSettings, None, MockMessageC]
 ):
     @staticmethod
-    def _initialize_processors(settings: MockSettings) -> dict[str, typing.Any]:
+    def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
         return {"transformer": MockTransformer(settings=settings)}
 
 
@@ -202,7 +202,7 @@ class InvalidProducerNotFirstCompositeProcessor(
     CompositeProcessor[MockSettings, MockMessageA, MockMessageA]
 ):
     @staticmethod
-    def _initialize_processors(settings: MockSettings) -> dict[str, typing.Any]:
+    def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
         return {
             "processor": MockProcessor(settings=settings),
             "producer": MockProducer(settings=settings),
@@ -213,7 +213,7 @@ class InvalidConsumerNotLastCompositeProcessor(
     CompositeProcessor[MockSettings, MockMessageB, MockMessageC]
 ):
     @staticmethod
-    def _initialize_processors(settings: MockSettings) -> dict[str, typing.Any]:
+    def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
         return {
             "consumer": MockConsumer(settings=settings),
             "transformer": MockTransformer(settings=settings),
@@ -224,7 +224,7 @@ class TypeMismatchCompositeProcessor(
     CompositeProcessor[MockSettings, MockMessageA, None]
 ):
     @staticmethod
-    def _initialize_processors(settings: MockSettings) -> dict[str, typing.Any]:
+    def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
         return {
             "transformer": MockTransformer(settings=settings),
             "consumer": MockConsumer(settings=settings),
@@ -233,7 +233,7 @@ class TypeMismatchCompositeProcessor(
 
 class ChainedCompositeProcessor(CompositeProcessor[MockSettings, MockMessageA, None]):
     @staticmethod
-    def _initialize_processors(settings: MockSettings) -> dict[str, typing.Any]:
+    def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
         return {
             "processor": MockProcessor(settings=settings),
             "stateful_consumer": MockStatefulConsumer(settings=settings),
@@ -244,7 +244,7 @@ class ChainedWithProducerCompositeProcessor(
     CompositeProcessor[MockSettings, NoneType, MockMessageC]
 ):
     @staticmethod
-    def _initialize_processors(settings: MockSettings) -> dict[str, typing.Any]:
+    def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
         return {
             "stateful_producer": MockStatefulProducer(settings=settings),
             "stateful_transformer": MockStatefulTransformer(settings=settings),
@@ -255,7 +255,7 @@ class ChainedCompositeProcessorWithDeepProcessors(
     CompositeProcessor[MockSettings, NoneType, MockMessageC]
 ):
     @staticmethod
-    def _initialize_processors(settings: MockSettings) -> dict[str, typing.Any]:
+    def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
         return {
             "stateful_producer": MockStatefulProducer(settings=settings),
             "deep_processor": DeepMockProcessor(settings=settings),
@@ -263,7 +263,7 @@ class ChainedCompositeProcessorWithDeepProcessors(
         }
 
 
-def mock_generator() -> typing.Generator[MockMessageA, MockMessageA, None]:
+def mock_generator() -> Generator[MockMessageA, MockMessageA, None]:
     """A mock generator function for testing purposes."""
     yield MockMessageA()
 
@@ -393,36 +393,92 @@ class TestHelperFunctions:
 
         # Test with None and Any
         assert _check_message_type_compatibility(None, None)
-        assert _check_message_type_compatibility(
-            NoneType, None
-        )  # currently not supported
-        assert _check_message_type_compatibility(
-            None, NoneType
-        )  # currently not supported
-        assert _check_message_type_compatibility(MockMessageA, typing.Any)
-        assert _check_message_type_compatibility(typing.Any, MockMessageA)
-        assert _check_message_type_compatibility(None, typing.Any)
-        assert _check_message_type_compatibility(typing.Any, None)
+        assert _check_message_type_compatibility(NoneType, None)
+        assert _check_message_type_compatibility(None, NoneType)
+        assert _check_message_type_compatibility(MockMessageA, Any)
+        assert _check_message_type_compatibility(Any, MockMessageA)
+        assert _check_message_type_compatibility(None, Any)
+        assert _check_message_type_compatibility(Any, None)
 
         # Test with Optional types
+        assert _check_message_type_compatibility(MockMessageA, Optional[MockMessageA])
+        assert _check_message_type_compatibility(MockMessageB, Optional[MockMessageA])
+        assert _check_message_type_compatibility(None, Optional[MockMessageA])
+        assert _check_message_type_compatibility(NoneType, Optional[MockMessageA])
         assert _check_message_type_compatibility(
-            MockMessageA, typing.Optional[MockMessageA]
+            Optional[MockMessageA], Optional[MockMessageA]
         )
-        assert _check_message_type_compatibility(
-            MockMessageB, typing.Optional[MockMessageA]
+        assert not _check_message_type_compatibility(Optional[MockMessageA], None)
+        assert not _check_message_type_compatibility(Optional[MockMessageA], NoneType)
+        assert not _check_message_type_compatibility(
+            Optional[MockMessageA], MockMessageA
         )
-        assert _check_message_type_compatibility(None, typing.Optional[MockMessageA])
-        assert _check_message_type_compatibility(
-            NoneType, typing.Optional[MockMessageA]
+        assert not _check_message_type_compatibility(
+            MockMessageA, Optional[MockMessageB]
+        )
+        assert not _check_message_type_compatibility(
+            MockMessageC, Optional[MockMessageA]
         )
 
-        # Test with incompatible Types and Optional
+        # Test with Union types
+        assert _check_message_type_compatibility(MockMessageA, Union[MockMessageA, int])
+        assert _check_message_type_compatibility(MockMessageB, Union[MockMessageA, int])
+        assert _check_message_type_compatibility(None, Union[MockMessageA, None])
+        assert _check_message_type_compatibility(NoneType, Union[MockMessageA, None])
+        assert _check_message_type_compatibility(
+            Union[MockMessageA, int], Union[MockMessageA, int]
+        )
+        assert _check_message_type_compatibility(
+            Union[MockMessageA, None], Optional[MockMessageA]
+        )
+        assert _check_message_type_compatibility(
+            Optional[MockMessageA], Union[MockMessageA, None]
+        )
+        assert _check_message_type_compatibility(
+            Union[MockMessageB, int], Union[MockMessageA, int, MockMessageC]
+        )
+        assert not _check_message_type_compatibility(Union[MockMessageA, None], None)
         assert not _check_message_type_compatibility(
-            MockMessageA, typing.Optional[MockMessageB]
+            Union[MockMessageA, None], NoneType
         )
         assert not _check_message_type_compatibility(
-            MockMessageC, typing.Optional[MockMessageA]
+            Union[MockMessageA, int], MockMessageA
         )
+        assert not _check_message_type_compatibility(
+            Union[MockMessageA, int, MockMessageC], Union[MockMessageA, int]
+        )
+        assert not _check_message_type_compatibility(
+            MockMessageC, Union[MockMessageA, int]
+        )
+
+        # Test with Union types using |
+        assert _check_message_type_compatibility(MockMessageA, MockMessageA | int)
+        assert _check_message_type_compatibility(MockMessageB, MockMessageA | int)
+        assert _check_message_type_compatibility(None, MockMessageA | None)
+        assert _check_message_type_compatibility(NoneType, MockMessageA | None)
+        assert _check_message_type_compatibility(MockMessageA | int, MockMessageA | int)
+        assert _check_message_type_compatibility(
+            MockMessageB | bool, Union[MockMessageA, int]
+        )
+        assert _check_message_type_compatibility(
+            Union[MockMessageB, bool], MockMessageA | int
+        )
+        assert _check_message_type_compatibility(
+            MockMessageA | None, Optional[MockMessageA]
+        )
+        assert _check_message_type_compatibility(
+            Optional[MockMessageA], MockMessageA | None
+        )
+        assert _check_message_type_compatibility(
+            MockMessageB | int, MockMessageA | int | MockMessageC
+        )
+        assert not _check_message_type_compatibility(MockMessageA | None, None)
+        assert not _check_message_type_compatibility(MockMessageA | None, NoneType)
+        assert not _check_message_type_compatibility(MockMessageA | int, MockMessageA)
+        assert not _check_message_type_compatibility(
+            MockMessageA | int | MockMessageC, MockMessageA | int
+        )
+        assert not _check_message_type_compatibility(MockMessageC, MockMessageA | int)
 
 
 # -- Tests for BaseProcessor and derived classes --
