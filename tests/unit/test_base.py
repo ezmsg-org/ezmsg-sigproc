@@ -2,13 +2,15 @@ import dataclasses
 import pickle
 import pytest
 from types import NoneType
-from typing import Any, Generator, Optional, Union
+from typing import Any, Generator
 from unittest.mock import MagicMock
 
 from ezmsg.sigproc.base import (
-    _get_state_type,
+    _get_base_processor_message_in_type,
+    _get_base_processor_message_out_type,
+    _get_base_processor_settings_type,
+    _get_base_processor_state_type,
     _get_processor_message_type,
-    _check_message_type_compatibility,
     processor_state,
     BaseProcessor,
     BaseProducer,
@@ -23,6 +25,8 @@ from ezmsg.sigproc.base import (
     CompositeProcessor,
     SampleMessage,
 )
+from ezmsg.sigproc.cheby import ChebyshevFilterTransformer
+from ezmsg.sigproc.filter import FilterByDesignState
 
 # -- Mock Classes for Testing --
 
@@ -301,6 +305,133 @@ class TestHelperFunctions:
         state1.iterations = 10
         assert hash(state1) != hash(state2)
 
+    def test_get_base_processor_settings_type(self):
+        # Test with regular processor classes
+        assert _get_base_processor_settings_type(MockProcessor) == MockSettings
+        assert _get_base_processor_settings_type(MockProducer) == MockSettings
+        assert _get_base_processor_settings_type(MockConsumer) == MockSettings
+        assert _get_base_processor_settings_type(MockTransformer) == MockSettings
+
+        # Test with stateful processor classes
+        assert _get_base_processor_settings_type(MockStatefulProcessor) == MockSettings
+        assert _get_base_processor_settings_type(MockStatefulProducer) == MockSettings
+        assert _get_base_processor_settings_type(MockStatefulConsumer) == MockSettings
+        assert (
+            _get_base_processor_settings_type(MockStatefulTransformer) == MockSettings
+        )
+
+        # Test with derived classes
+        assert _get_base_processor_settings_type(DeepMockProcessor) == MockSettings
+        assert _get_base_processor_settings_type(DeepMockTransformer) == MockSettings
+        assert _get_base_processor_settings_type(DeeperMockTransformer) == MockSettings
+
+        # Test with composite processor
+        assert (
+            _get_base_processor_settings_type(ValidSingleCompositeProcessor)
+            == MockSettings
+        )
+
+        # Test with no settings type should raise exception
+        class NoSettingsTypeClass:
+            pass
+
+        with pytest.raises(TypeError, match="Could not resolve settings type"):
+            _get_base_processor_settings_type(NoSettingsTypeClass)
+
+    def test_get_base_processor_message_in_type(self):
+        # Test with processor classes that have input types
+        assert _get_base_processor_message_in_type(MockProcessor) == MockMessageA
+        assert _get_base_processor_message_in_type(MockConsumer) == MockMessageB
+        assert _get_base_processor_message_in_type(MockTransformer) == MockMessageA
+        assert (
+            _get_base_processor_message_in_type(MockStatefulProcessor) == MockMessageA
+        )
+        assert _get_base_processor_message_in_type(MockStatefulConsumer) == MockMessageB
+        assert (
+            _get_base_processor_message_in_type(MockStatefulTransformer) == MockMessageA
+        )
+        assert (
+            _get_base_processor_message_in_type(MockAdaptiveTransformer) == MockMessageA
+        )
+        assert _get_base_processor_message_in_type(MockAsyncTransformer) == MockMessageA
+
+        # Test with derived classes
+        assert _get_base_processor_message_in_type(DeepMockProcessor) == MockMessageA
+        assert _get_base_processor_message_in_type(DeepMockTransformer) == MockMessageA
+        assert (
+            _get_base_processor_message_in_type(DeeperMockTransformer) == MockMessageA
+        )
+
+        # Test with composite processor
+        assert (
+            _get_base_processor_message_in_type(ValidSingleCompositeProcessor)
+            == MockMessageA
+        )
+        assert (
+            _get_base_processor_message_in_type(ChainedCompositeProcessor)
+            == MockMessageA
+        )
+
+        # Test with producers (should throw)
+        with pytest.raises(TypeError, match="Could not resolve ~MessageInType"):
+            _get_base_processor_message_in_type(MockProducer)
+        with pytest.raises(TypeError, match="Could not resolve ~MessageInType"):
+            _get_base_processor_message_in_type(MockStatefulProducer)
+
+        # Test with no message in type should raise exception
+        class NoMessageInTypeClass:
+            pass
+
+        with pytest.raises(TypeError, match="Could not resolve ~MessageInType"):
+            _get_base_processor_message_in_type(NoMessageInTypeClass)
+
+    def test_get_base_processor_message_out_type(self):
+        # Test with processor classes that have output types
+        assert _get_base_processor_message_out_type(MockProcessor) == MockMessageB
+        assert _get_base_processor_message_out_type(MockProducer) == MockMessageA
+        assert _get_base_processor_message_out_type(MockTransformer) == MockMessageC
+        assert (
+            _get_base_processor_message_out_type(MockStatefulProcessor) == MockMessageB
+        )
+        assert (
+            _get_base_processor_message_out_type(MockStatefulProducer) == MockMessageA
+        )
+        assert (
+            _get_base_processor_message_out_type(MockStatefulTransformer)
+            == MockMessageC
+        )
+        assert (
+            _get_base_processor_message_out_type(MockAdaptiveTransformer)
+            == MockMessageB
+        )
+        assert (
+            _get_base_processor_message_out_type(MockAsyncTransformer) == MockMessageB
+        )
+
+        # Test with derived classes
+        assert _get_base_processor_message_out_type(DeepMockProcessor) == MockMessageB
+        assert _get_base_processor_message_out_type(DeepMockTransformer) == MockMessageC
+        assert (
+            _get_base_processor_message_out_type(DeeperMockTransformer) == MockMessageC
+        )
+
+        # Test with composite processor
+        assert (
+            _get_base_processor_message_out_type(ValidSingleCompositeProcessor)
+            == MockMessageB
+        )
+
+        # Test with consumers (should be None)
+        assert _get_base_processor_message_out_type(MockConsumer) is NoneType
+        assert _get_base_processor_message_out_type(MockStatefulConsumer) is NoneType
+
+        # Test with no message out type should raise exception
+        class NoMessageOutTypeClass:
+            pass
+
+        with pytest.raises(TypeError, match="Could not resolve ~MessageOutType"):
+            _get_base_processor_message_out_type(NoMessageOutTypeClass)
+
     # Test _unify_settings function through the MockProcessor class __init__
     def test_unify_settings_with_provided_settings(self):
         settings = MockSettings(param1=20)
@@ -333,23 +464,33 @@ class TestHelperFunctions:
         assert obj.settings.param1 == 10
         assert obj.settings.param2 == "test"
 
-    def test_get_state_type(self):
+    def test_get_base_processor_state_type(self):
         # Test with class that has state type
-        assert _get_state_type(MockStatefulProcessor) == MockState
-        assert _get_state_type(DeepMockStatefulProcessor) == MockState
-        assert _get_state_type(MockStatefulProducer) == MockState
-        assert _get_state_type(MockStatefulConsumer) == MockState
-        assert _get_state_type(MockStatefulTransformer) == MockState
-        assert _get_state_type(MockAdaptiveTransformer) == MockState
-        assert _get_state_type(MockAsyncTransformer) == MockState
+        assert _get_base_processor_state_type(MockStatefulProcessor) == MockState
+        assert _get_base_processor_state_type(DeepMockStatefulProcessor) == MockState
+        assert _get_base_processor_state_type(MockStatefulProducer) == MockState
+        assert _get_base_processor_state_type(MockStatefulConsumer) == MockState
+        assert _get_base_processor_state_type(MockStatefulTransformer) == MockState
+        assert _get_base_processor_state_type(MockAdaptiveTransformer) == MockState
+        assert _get_base_processor_state_type(MockAsyncTransformer) == MockState
+        assert (
+            _get_base_processor_state_type(ChebyshevFilterTransformer)
+            == FilterByDesignState
+        )
 
         # Test with class that doesn't have state type
-        assert _get_state_type(MockProcessor) is None
-        assert _get_state_type(DeepMockProcessor) is None
-        assert _get_state_type(MockProducer) is None
-        assert _get_state_type(MockConsumer) is None
-        assert _get_state_type(MockTransformer) is None
-        assert _get_state_type(ValidMultipleCompositeProcessor) is None
+        with pytest.raises(Exception, match="Could not resolve state type"):
+            _get_base_processor_state_type(MockProcessor)
+        with pytest.raises(Exception, match="Could not resolve state type"):
+            _get_base_processor_state_type(DeepMockProcessor)
+        with pytest.raises(Exception, match="Could not resolve state type"):
+            _get_base_processor_state_type(MockProducer)
+        with pytest.raises(Exception, match="Could not resolve state type"):
+            _get_base_processor_state_type(MockConsumer)
+        with pytest.raises(Exception, match="Could not resolve state type"):
+            _get_base_processor_state_type(MockTransformer)
+        with pytest.raises(Exception, match="Could not resolve state type"):
+            _get_base_processor_state_type(ValidMultipleCompositeProcessor)
 
     def test_get_processor_message_type(self):
         processor = MockProcessor(MockSettings())
@@ -375,110 +516,9 @@ class TestHelperFunctions:
         assert _get_processor_message_type(deep_transformer, "in") == MockMessageA
         assert _get_processor_message_type(deep_transformer, "out") == MockMessageC
 
-        # # Test with invalid direction (currently not supported)
-        # with pytest.raises(ValueError, match="Invalid direction"):
-        #     _get_processor_message_type(processor, "invalid")
-
-    def test_check_message_type_compatibility(self):
-        # Test compatible types (subclass)
-        assert _check_message_type_compatibility(MockMessageB, MockMessageA)
-
-        # Test incompatible types
-        assert not _check_message_type_compatibility(MockMessageC, MockMessageA)
-        assert not _check_message_type_compatibility(MockMessageA, MockMessageB)
-        assert not _check_message_type_compatibility(None, MockMessageA)
-        assert not _check_message_type_compatibility(MockMessageA, None)
-        assert not _check_message_type_compatibility(NoneType, MockMessageA)
-        assert not _check_message_type_compatibility(MockMessageA, NoneType)
-
-        # Test with None and Any
-        assert _check_message_type_compatibility(None, None)
-        assert _check_message_type_compatibility(NoneType, None)
-        assert _check_message_type_compatibility(None, NoneType)
-        assert _check_message_type_compatibility(MockMessageA, Any)
-        assert _check_message_type_compatibility(Any, MockMessageA)
-        assert _check_message_type_compatibility(None, Any)
-        assert _check_message_type_compatibility(Any, None)
-
-        # Test with Optional types
-        assert _check_message_type_compatibility(MockMessageA, Optional[MockMessageA])
-        assert _check_message_type_compatibility(MockMessageB, Optional[MockMessageA])
-        assert _check_message_type_compatibility(None, Optional[MockMessageA])
-        assert _check_message_type_compatibility(NoneType, Optional[MockMessageA])
-        assert _check_message_type_compatibility(
-            Optional[MockMessageA], Optional[MockMessageA]
-        )
-        assert not _check_message_type_compatibility(Optional[MockMessageA], None)
-        assert not _check_message_type_compatibility(Optional[MockMessageA], NoneType)
-        assert not _check_message_type_compatibility(
-            Optional[MockMessageA], MockMessageA
-        )
-        assert not _check_message_type_compatibility(
-            MockMessageA, Optional[MockMessageB]
-        )
-        assert not _check_message_type_compatibility(
-            MockMessageC, Optional[MockMessageA]
-        )
-
-        # Test with Union types
-        assert _check_message_type_compatibility(MockMessageA, Union[MockMessageA, int])
-        assert _check_message_type_compatibility(MockMessageB, Union[MockMessageA, int])
-        assert _check_message_type_compatibility(None, Union[MockMessageA, None])
-        assert _check_message_type_compatibility(NoneType, Union[MockMessageA, None])
-        assert _check_message_type_compatibility(
-            Union[MockMessageA, int], Union[MockMessageA, int]
-        )
-        assert _check_message_type_compatibility(
-            Union[MockMessageA, None], Optional[MockMessageA]
-        )
-        assert _check_message_type_compatibility(
-            Optional[MockMessageA], Union[MockMessageA, None]
-        )
-        assert _check_message_type_compatibility(
-            Union[MockMessageB, int], Union[MockMessageA, int, MockMessageC]
-        )
-        assert not _check_message_type_compatibility(Union[MockMessageA, None], None)
-        assert not _check_message_type_compatibility(
-            Union[MockMessageA, None], NoneType
-        )
-        assert not _check_message_type_compatibility(
-            Union[MockMessageA, int], MockMessageA
-        )
-        assert not _check_message_type_compatibility(
-            Union[MockMessageA, int, MockMessageC], Union[MockMessageA, int]
-        )
-        assert not _check_message_type_compatibility(
-            MockMessageC, Union[MockMessageA, int]
-        )
-
-        # Test with Union types using |
-        assert _check_message_type_compatibility(MockMessageA, MockMessageA | int)
-        assert _check_message_type_compatibility(MockMessageB, MockMessageA | int)
-        assert _check_message_type_compatibility(None, MockMessageA | None)
-        assert _check_message_type_compatibility(NoneType, MockMessageA | None)
-        assert _check_message_type_compatibility(MockMessageA | int, MockMessageA | int)
-        assert _check_message_type_compatibility(
-            MockMessageB | bool, Union[MockMessageA, int]
-        )
-        assert _check_message_type_compatibility(
-            Union[MockMessageB, bool], MockMessageA | int
-        )
-        assert _check_message_type_compatibility(
-            MockMessageA | None, Optional[MockMessageA]
-        )
-        assert _check_message_type_compatibility(
-            Optional[MockMessageA], MockMessageA | None
-        )
-        assert _check_message_type_compatibility(
-            MockMessageB | int, MockMessageA | int | MockMessageC
-        )
-        assert not _check_message_type_compatibility(MockMessageA | None, None)
-        assert not _check_message_type_compatibility(MockMessageA | None, NoneType)
-        assert not _check_message_type_compatibility(MockMessageA | int, MockMessageA)
-        assert not _check_message_type_compatibility(
-            MockMessageA | int | MockMessageC, MockMessageA | int
-        )
-        assert not _check_message_type_compatibility(MockMessageC, MockMessageA | int)
+        # Test with invalid direction (currently not supported)
+        with pytest.raises(ValueError, match="Invalid direction"):
+            _get_processor_message_type(processor, "invalid")
 
 
 # -- Tests for BaseProcessor and derived classes --
@@ -518,12 +558,6 @@ class TestBaseProcessor:
         processor = MockProcessor()
         result = await processor.asend(MockMessageA())
         assert isinstance(result, MockMessageB)
-
-    # # currently does not throw
-    # def test_invalid_call(self):
-    #     processor = MockProcessor()
-    #     with pytest.raises(TypeError):
-    #         processor(MockMessageC())
 
 
 class TestBaseConsumer:
@@ -784,26 +818,22 @@ class TestCompositeProcessor:
             InvalidConsumerNotLastCompositeProcessor()
 
     def test_type_mismatch_between_processors(self):
-        # Currently throws wrong error due to issue with None/NoneType
         with pytest.raises(
             TypeError, match="Message type mismatch between processors 0 and 1"
         ):
             TypeMismatchCompositeProcessor()
 
     def test_chained_processors(self):
-        # should not throw - currently does
         processor = ChainedCompositeProcessor()
         result = processor(MockMessageA())
         assert isinstance(result, NoneType)
 
     def test_chained_processors_with_producer_first(self):
-        # should not throw - currently does
         processor = ChainedWithProducerCompositeProcessor()
         result = processor(None)
         assert isinstance(result, MockMessageC)
 
     def test_chained_processors_with_deep_classes(self):
-        # should not throw - currently does
         processor = ChainedCompositeProcessorWithDeepProcessors()
         result = processor(None)
         assert isinstance(result, MockMessageC)
