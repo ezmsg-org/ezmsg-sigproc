@@ -11,7 +11,10 @@ import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.generator import GenState
 
-from ezmsg.sigproc.util.typeresolution import _check_message_type_compatibility
+from ezmsg.sigproc.util.typeresolution import (
+    check_message_type_compatibility,
+    resolve_typevar,
+)
 
 from .util.profile import profile_subpub
 from .util.message import SampleMessage
@@ -178,10 +181,30 @@ class AdaptiveTransformer(
 # --- Base implementation classes for processors ---
 
 
+def _get_base_processor_settings_type(cls: type) -> type:
+    try:
+        return resolve_typevar(cls, SettingsType)
+    except TypeError as e:
+        raise TypeError(
+            f"Could not resolve settings type for {cls}. "
+            f"Ensure that the class is properly annotated with a SettingsType."
+        ) from e
+
+
+def _get_base_processor_message_in_type(cls: type) -> type:
+    return resolve_typevar(cls, MessageInType)
+
+
+def _get_base_processor_message_out_type(cls: type) -> type:
+    return resolve_typevar(cls, MessageOutType)
+
+
 def _unify_settings(
-    obj: typing.Any, settings: SettingsType, *args, **kwargs
+    obj: typing.Any, settings: typing.Optional[SettingsType], *args, **kwargs
 ) -> SettingsType:
-    settings_type = typing.get_args(obj.__orig_bases__[0])[0]
+    """Helper function to unify settings for processor initialization."""
+    settings_type = _get_base_processor_settings_type(obj.__class__)
+
     if settings is None:
         if len(args) > 0 and isinstance(args[0], settings_type):
             settings = args[0]
@@ -189,7 +212,8 @@ def _unify_settings(
             settings = settings_type(*args, **kwargs)
         else:
             settings = settings_type()
-    return settings
+
+    return settings  # type: ignore
 
 
 class BaseProcessor(ABC, typing.Generic[SettingsType, MessageInType, MessageOutType]):
@@ -206,11 +230,18 @@ class BaseProcessor(ABC, typing.Generic[SettingsType, MessageInType, MessageOutT
 
     @classmethod
     def get_settings_type(cls) -> typing.Type[SettingsType]:
-        return typing.get_args(cls.__orig_bases__[0])[0]
+        return _get_base_processor_settings_type(cls)
 
     @classmethod
-    def get_message_type(cls, dir: str) -> typing.Type[MessageInType | MessageOutType]:
-        return typing.get_args(cls.__orig_bases__[0])[1 if dir == "in" else 2]
+    def get_message_type(
+        cls, dir: str
+    ) -> typing.Optional[typing.Type[MessageInType] | typing.Type[MessageOutType]]:
+        if dir == "in":
+            return _get_base_processor_message_in_type(cls)
+        elif dir == "out":
+            return _get_base_processor_message_out_type(cls)
+        else:
+            raise ValueError(f"Invalid direction: {dir}. Use 'in' or 'out'.")
 
     def __init__(self, *args, settings: typing.Optional[SettingsType] = None, **kwargs):
         self.settings = _unify_settings(self, settings, *args, **kwargs)
@@ -261,13 +292,16 @@ class BaseProducer(ABC, typing.Generic[SettingsType, MessageOutType]):
 
     @classmethod
     def get_settings_type(cls) -> typing.Type[SettingsType]:
-        return typing.get_args(cls.__orig_bases__[0])[0]
+        return _get_base_processor_settings_type(cls)
 
     @classmethod
-    def get_message_type(cls, dir: str) -> typing.Type[MessageOutType]:
+    def get_message_type(cls, dir: str) -> typing.Optional[typing.Type[MessageOutType]]:
         if dir == "out":
-            return typing.get_args(cls.__orig_bases__[0])[1]
-        return None
+            return _get_base_processor_message_out_type(cls)
+        elif dir == "in":
+            return None
+        else:
+            raise ValueError(f"Invalid direction: {dir}. Use 'in' or 'out'.")
 
     def __init__(self, *args, settings: typing.Optional[SettingsType] = None, **kwargs):
         self.settings = _unify_settings(self, settings, *args, **kwargs)
@@ -306,10 +340,13 @@ class BaseConsumer(
     """
 
     @classmethod
-    def get_message_type(cls, dir: str) -> typing.Type[MessageInType]:
+    def get_message_type(cls, dir: str) -> typing.Optional[typing.Type[MessageInType]]:
         if dir == "in":
-            return typing.get_args(cls.__orig_bases__[0])[1]
-        return None
+            return _get_base_processor_message_in_type(cls)
+        elif dir == "out":
+            return None
+        else:
+            raise ValueError(f"Invalid direction: {dir}. Use 'in' or 'out'.")
 
     @abstractmethod
     def _process(self, message: MessageInType) -> None: ...
@@ -349,19 +386,14 @@ class BaseTransformer(
         return await super().__acall__(message)
 
 
-def _get_state_type(cls):
-    for base in cls.__mro__:
-        if hasattr(base, "__orig_bases__"):
-            for orig_base in base.__orig_bases__:
-                if hasattr(orig_base, "__origin__"):
-                    args = typing.get_args(orig_base)
-                    if (
-                        args
-                        and hasattr(args[-1], "__name__")
-                        and "state" in args[-1].__name__.lower()
-                    ):
-                        return args[-1]
-    return None
+def _get_base_processor_state_type(cls: type) -> type:
+    try:
+        return resolve_typevar(cls, StateType)
+    except TypeError as e:
+        raise TypeError(
+            f"Could not resolve state type for {cls}. "
+            f"Ensure that the class is properly annotated with a StateType."
+        ) from e
 
 
 class BaseStatefulProcessor(
@@ -378,7 +410,7 @@ class BaseStatefulProcessor(
 
     @classmethod
     def get_state_type(cls):
-        return _get_state_type(cls)
+        return _get_base_processor_state_type(cls)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -473,7 +505,7 @@ class BaseStatefulProducer(
 
     @classmethod
     def get_state_type(cls):
-        return _get_state_type(cls)
+        return _get_base_processor_state_type(cls)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)  # .settings
@@ -525,10 +557,13 @@ class BaseStatefulConsumer(
     """
 
     @classmethod
-    def get_message_type(cls, dir: str) -> typing.Type[MessageInType]:
+    def get_message_type(cls, dir: str) -> typing.Optional[typing.Type[MessageInType]]:
         if dir == "in":
-            return typing.get_args(cls.__orig_bases__[0])[1]
-        return None
+            return _get_base_processor_message_in_type(cls)
+        elif dir == "out":
+            return None
+        else:
+            raise ValueError(f"Invalid direction: {dir}. Use 'in' or 'out'.")
 
     @abstractmethod
     def _process(self, message: MessageInType) -> None: ...
@@ -687,14 +722,14 @@ class CompositeProcessor(
 
         procs = [_ for _ in self._procs.values() if _ is not None]
         in_type = _get_processor_message_type(procs[0], "in")
-        if not _check_message_type_compatibility(expected_in_type, in_type):
+        if not check_message_type_compatibility(expected_in_type, in_type):
             raise TypeError(
                 f"Input type mismatch: Composite processor expects {expected_in_type}, "
                 f"but its first processor accepts {in_type}"
             )
 
         out_type = _get_processor_message_type(procs[-1], "out")
-        if not _check_message_type_compatibility(out_type, expected_out_type):
+        if not check_message_type_compatibility(out_type, expected_out_type):
             raise TypeError(
                 f"Output type mismatch: Composite processor wants to return {expected_out_type}, "
                 f"but its last processor returns {out_type}"
@@ -705,7 +740,7 @@ class CompositeProcessor(
             current_out_type = _get_processor_message_type(procs[i], "out")
             next_in_type = _get_processor_message_type(procs[i + 1], "in")
 
-            if not _check_message_type_compatibility(current_out_type, next_in_type):
+            if not check_message_type_compatibility(current_out_type, next_in_type):
                 raise TypeError(
                     f"Message type mismatch between processors {i} and {i + 1}: "
                     f"{procs[i].__class__.__name__} outputs {current_out_type}, "
@@ -811,6 +846,22 @@ AdaptiveTransformerType = typing.TypeVar(
 )
 
 
+def get_base_producer_type(cls: type) -> type:
+    return resolve_typevar(cls, ProducerType)
+
+
+def get_base_consumer_type(cls: type) -> type:
+    return resolve_typevar(cls, ConsumerType)
+
+
+def get_base_transformer_type(cls: type) -> type:
+    return resolve_typevar(cls, TransformerType)
+
+
+def get_base_adaptive_transformer_type(cls: type) -> type:
+    return resolve_typevar(cls, AdaptiveTransformerType)
+
+
 # --- Base classes for ezmsg Unit with specific processing capabilities ---
 class BaseProducerUnit(
     ez.Unit, typing.Generic[SettingsType, MessageOutType, ProducerType]
@@ -841,7 +892,7 @@ class BaseProducerUnit(
     def create_producer(self):
         # self.producer: ProducerType
         """Create the producer instance from settings."""
-        producer_type = typing.get_args(self.__orig_bases__[0])[-1]
+        producer_type = get_base_producer_type(self.__class__)
         self.producer = producer_type(settings=self.SETTINGS)
 
     @ez.subscriber(INPUT_SETTINGS)
@@ -891,11 +942,10 @@ class BaseConsumerUnit(
         self.create_processor()
 
     def create_processor(self):
-        # self.processor: StatefulProcessor[SettingsType, MessageInType, StateType]
-        """Create the transformer instance from settings."""
-        processor_type = typing.get_args(self.__orig_bases__[0])[-1]
-        # return transformer_type(**dataclasses.asdict(self.SETTINGS))
-        self.processor = processor_type(settings=self.SETTINGS)
+        # self.processor: ConsumerType[SettingsType, MessageInType, StateType]
+        """Create the consumer instance from settings."""
+        consumer_type = get_base_consumer_type(self.__class__)
+        self.processor = consumer_type(settings=self.SETTINGS)
 
     @ez.subscriber(INPUT_SETTINGS)
     async def on_settings(self, msg: SettingsType) -> None:
@@ -944,6 +994,14 @@ class BaseTransformerUnit(
 
     OUTPUT_SIGNAL = ez.OutputStream(MessageOutType)
 
+    @typing.override
+    def create_processor(self):
+        # self.processor: TransformerType[SettingsType, MessageInType, MessageOutType, StateType]
+        """Create the transformer instance from settings."""
+        transformer_type = get_base_transformer_type(self.__class__)
+        self.processor = transformer_type(settings=self.SETTINGS)
+
+    @typing.override
     @ez.subscriber(BaseConsumerUnit.INPUT_SIGNAL, zero_copy=True)
     @ez.publisher(OUTPUT_SIGNAL)
     @profile_subpub(trace_oldest=False)
@@ -962,6 +1020,13 @@ class BaseAdaptiveTransformerUnit(
     ],
 ):
     INPUT_SAMPLE = ez.InputStream(SampleMessage)
+
+    @typing.override
+    def create_processor(self):
+        # self.processor: AdaptiveTransformerType[SettingsType, MessageInType, MessageOutType, StateType]
+        """Create the adaptive transformer instance from settings."""
+        adaptive_transformer_type = get_base_adaptive_transformer_type(self.__class__)
+        self.processor = adaptive_transformer_type(settings=self.SETTINGS)
 
     @ez.subscriber(INPUT_SAMPLE)
     async def on_sample(self, msg: SampleMessage) -> None:
