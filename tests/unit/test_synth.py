@@ -15,7 +15,7 @@ from ezmsg.sigproc.synth import (
 
 
 # TEST CLOCK
-@pytest.mark.parametrize("dispatch_rate", [None, 2.0, 20.0])
+@pytest.mark.parametrize("dispatch_rate", [None, 1.0, 2.0, 5.0, 10.0, 20.0])
 def test_clock_gen(dispatch_rate: float | None):
     run_time = 1.0
     n_target = int(np.ceil(dispatch_rate * run_time)) if dispatch_rate else 100

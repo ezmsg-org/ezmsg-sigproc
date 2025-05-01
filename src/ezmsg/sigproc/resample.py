@@ -141,7 +141,7 @@ class ResampleProcessor(
         buf.tvec = np.hstack((buf.tvec, in_tvec))
         buf.last_update = time.time()
 
-    def push_reference(self, message: AxisArray):
+    def push_reference(self, message: AxisArray) -> None:
         ax = message.axes[self.settings.axis]
         ax_idx = message.get_axis_idx(self.settings.axis)
         n_new = message.data.shape[ax_idx]
@@ -173,7 +173,7 @@ class ResampleProcessor(
                 ref_tvec = self.state.ref_axis[0].data[:2]
             self.state.last_t_out = 2 * ref_tvec[0] - ref_tvec[1]
 
-    def __next__(self):
+    def __next__(self) -> AxisArray:
         buf = self.state.signal_buffer
 
         if buf is None:
