@@ -24,3 +24,8 @@ class SampleMessage:
 
     sample: AxisArray
     """The data sampled around the trigger."""
+
+
+def is_sample_message(message: typing.Any) -> typing.TypeGuard[SampleMessage]:
+    """Check if the message is a SampleMessage."""
+    return hasattr(message, "trigger")

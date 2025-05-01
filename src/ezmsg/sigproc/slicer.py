@@ -71,7 +71,7 @@ class SlicerSettings(ez.Settings):
 
 @processor_state
 class SlicerState:
-    slice: slice | npt.NDArray | None = None
+    slice_: slice | int | npt.NDArray | None = None
     new_axis: AxisBase | None = None
     b_change_dims: bool = False
 
@@ -93,12 +93,12 @@ class SlicerTransformer(
         # Calculate the slice
         _slices = parse_slice(self.settings.selection, message.axes.get(axis, None))
         if len(_slices) == 1:
-            self._state.slice = _slices[0]
-            self._state.b_change_dims = isinstance(self._state.slice, int)
+            self._state.slice_ = _slices[0]
+            self._state.b_change_dims = isinstance(self._state.slice_, int)
         else:
             indices = np.arange(message.data.shape[axis_idx])
             indices = np.hstack([indices[_] for _ in _slices])
-            self._state.slice = np.s_[indices]
+            self._state.slice_ = np.s_[indices]
 
         # Create the output axis
         if (
@@ -108,9 +108,9 @@ class SlicerTransformer(
         ):
             in_data = np.array(message.axes[axis].data)
             if self._state.b_change_dims:
-                out_data = in_data[self._state.slice : self._state.slice + 1]
+                out_data = in_data[self._state.slice_ : self._state.slice_ + 1]
             else:
-                out_data = in_data[self._state.slice]
+                out_data = in_data[self._state.slice_]
             self._state.new_axis = replace(message.axes[axis], data=out_data)
 
     def _process(self, message: AxisArray) -> AxisArray:
@@ -133,7 +133,7 @@ class SlicerTransformer(
 
         return replace(
             message,
-            data=slice_along_axis(message.data, self._state.slice, axis_idx),
+            data=slice_along_axis(message.data, self._state.slice_, axis_idx),
             **replace_kwargs,
         )
 

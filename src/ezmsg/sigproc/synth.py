@@ -65,10 +65,10 @@ class AddProcessor:
         return run_coroutine_sync(self.__acall__())
 
     # Aliases for legacy interface
-    async def __anext__(self):
+    async def __anext__(self) -> AxisArray:
         return await self.__acall__()
 
-    def __next__(self):
+    def __next__(self) -> AxisArray:
         return self.__call__()
 
 
@@ -251,10 +251,13 @@ class CounterProducer(BaseStatefulProducer[CounterSettings, AxisArray, CounterSt
     # TODO: Adapt this to use ezmsg.util.rate?
 
     @classmethod
-    def get_message_type(cls, dir: str) -> typing.Type[typing.Optional[AxisArray]]:
+    def get_message_type(cls, dir: str) -> type[typing.Optional[AxisArray]]:
         if dir == "in":
             return typing.Optional[AxisArray]
-        return AxisArray
+        elif dir == "out":
+            return AxisArray
+        else:
+            raise ValueError(f"Invalid direction: {dir}. Use 'in' or 'out'.")
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -492,11 +495,11 @@ class RandomTransformer(BaseTransformer[RandomGeneratorSettings, AxisArray, Axis
     ):
         super().__init__(*args, settings=settings, **kwargs)
 
-    def _process(self, msg: AxisArray) -> AxisArray:
+    def _process(self, message: AxisArray) -> AxisArray:
         random_data = np.random.normal(
-            size=msg.shape, loc=self.settings.loc, scale=self.settings.scale
+            size=message.shape, loc=self.settings.loc, scale=self.settings.scale
         )
-        return replace(msg, data=random_data)
+        return replace(message, data=random_data)
 
 
 class RandomGenerator(

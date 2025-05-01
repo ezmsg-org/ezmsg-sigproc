@@ -5,6 +5,7 @@ import functools
 import math
 import pickle
 import traceback
+from types import GeneratorType
 import typing
 
 import ezmsg.core as ez
@@ -17,7 +18,7 @@ from ezmsg.sigproc.util.typeresolution import (
 )
 
 from .util.profile import profile_subpub
-from .util.message import SampleMessage
+from .util.message import SampleMessage, is_sample_message
 from .util.asio import run_coroutine_sync
 
 
@@ -28,9 +29,9 @@ processor_state = functools.partial(
 )
 
 # --- Type variables for protocols and processors ---
-MessageInType = typing.TypeVar("MessageInType")
-MessageOutType = typing.TypeVar("MessageOutType")
-SettingsType = typing.TypeVar("SettingsType")
+MessageInType = typing.TypeVar("MessageInType", infer_variance=True)
+MessageOutType = typing.TypeVar("MessageOutType", infer_variance=True)
+SettingsType = typing.TypeVar("SettingsType", infer_variance=True)
 StateType = typing.TypeVar("StateType")
 
 
@@ -46,10 +47,8 @@ class Processor(typing.Protocol[SettingsType, MessageInType, MessageOutType]):
      but to support earlier versions we need to use `await obj.__acall__(message)`.
     """
 
-    def __call__(self, message: MessageInType) -> typing.Optional[MessageOutType]: ...
-    async def __acall__(
-        self, message: MessageInType
-    ) -> typing.Optional[MessageOutType]: ...
+    def __call__(self, message: typing.Any) -> typing.Any: ...
+    async def __acall__(self, message: typing.Any) -> typing.Any: ...
 
 
 class Producer(typing.Protocol[SettingsType, MessageOutType]):
@@ -94,16 +93,14 @@ class StatefulProcessor(
     @state.setter
     def state(self, state: StateType | bytes | None) -> None: ...
 
-    def __call__(self, message: MessageInType) -> typing.Optional[MessageOutType]: ...
-    async def __acall__(
-        self, message: MessageInType
-    ) -> typing.Optional[MessageOutType]: ...
+    def __call__(self, message: typing.Any) -> typing.Any: ...
+    async def __acall__(self, message: typing.Any) -> typing.Any: ...
 
     def stateful_op(
         self,
-        state: StateType,
-        message: MessageInType,
-    ) -> tuple[StateType, typing.Optional[MessageOutType]]: ...
+        state: typing.Any,
+        message: typing.Any,
+    ) -> tuple[typing.Any, typing.Any]: ...
 
 
 class StatefulProducer(typing.Protocol[SettingsType, MessageOutType, StateType]):
@@ -118,10 +115,10 @@ class StatefulProducer(typing.Protocol[SettingsType, MessageOutType, StateType])
     def __call__(self) -> MessageOutType: ...
     async def __acall__(self) -> MessageOutType: ...
 
-    async def stateful_op(
+    def stateful_op(
         self,
-        state: StateType,
-    ) -> tuple[StateType, MessageOutType]: ...
+        state: typing.Any,
+    ) -> tuple[typing.Any, typing.Any]: ...
 
 
 class StatefulConsumer(
@@ -134,9 +131,9 @@ class StatefulConsumer(
 
     def stateful_op(
         self,
-        state: StateType,
+        state: tuple[StateType, int],
         message: MessageInType,
-    ) -> tuple[StateType, None]: ...
+    ) -> tuple[tuple[StateType, int], None]: ...
 
     """
     Note: The return type is still a tuple even though the second entry is always None.
@@ -158,15 +155,12 @@ class StatefulTransformer(
 
     def stateful_op(
         self,
-        state: StateType,
+        state: tuple[StateType, int],
         message: MessageInType,
-    ) -> tuple[StateType, MessageOutType]: ...
+    ) -> tuple[tuple[StateType, int], MessageOutType]: ...
 
 
-class AdaptiveTransformer(
-    StatefulTransformer,
-    typing.Protocol[SettingsType, MessageInType, MessageOutType, StateType],
-):
+class AdaptiveTransformer(StatefulTransformer, typing.Protocol):
     def partial_fit(self, message: SampleMessage) -> None:
         """Update transformer state using labeled training data.
 
@@ -200,8 +194,8 @@ def _get_base_processor_message_out_type(cls: type) -> type:
 
 
 def _unify_settings(
-    obj: typing.Any, settings: typing.Optional[SettingsType], *args, **kwargs
-) -> SettingsType:
+    obj: typing.Any, settings: object | None, *args, **kwargs
+) -> typing.Any:
     """Helper function to unify settings for processor initialization."""
     settings_type = _get_base_processor_settings_type(obj.__class__)
 
@@ -212,8 +206,10 @@ def _unify_settings(
             settings = settings_type(*args, **kwargs)
         else:
             settings = settings_type()
-
-    return settings  # type: ignore
+    assert isinstance(settings, settings_type), "Settings must be of type " + str(
+        settings_type
+    )
+    return settings
 
 
 class BaseProcessor(ABC, typing.Generic[SettingsType, MessageInType, MessageOutType]):
@@ -223,19 +219,19 @@ class BaseProcessor(ABC, typing.Generic[SettingsType, MessageInType, MessageOutT
       * Use :obj:`BaseConsumer` or :obj:`BaseTransformer` for ops that return a result or not, respectively.
       * Use :obj:`BaseStatefulProcessor` and its children for operations that require state.
 
-    Note that `BaseProcessor` and its children are sync by default. If you need async by defualt,
-      then override the async methods and call them from the sync methods. Look to `BaseProducer` for examples of
-      calling async methods from sync methods.
+    Note that `BaseProcessor` and its children are sync by default. If you need async by defualt, then
+    override the async methods and call them from the sync methods. Look to `BaseProducer` for examples of
+    calling async methods from sync methods.
     """
 
+    settings: SettingsType
+
     @classmethod
-    def get_settings_type(cls) -> typing.Type[SettingsType]:
+    def get_settings_type(cls) -> type[SettingsType]:
         return _get_base_processor_settings_type(cls)
 
     @classmethod
-    def get_message_type(
-        cls, dir: str
-    ) -> typing.Optional[typing.Type[MessageInType] | typing.Type[MessageOutType]]:
+    def get_message_type(cls, dir: str) -> typing.Any:
         if dir == "in":
             return _get_base_processor_message_in_type(cls)
         elif dir == "out":
@@ -243,39 +239,35 @@ class BaseProcessor(ABC, typing.Generic[SettingsType, MessageInType, MessageOutT
         else:
             raise ValueError(f"Invalid direction: {dir}. Use 'in' or 'out'.")
 
-    def __init__(self, *args, settings: typing.Optional[SettingsType] = None, **kwargs):
+    def __init__(self, *args, settings: SettingsType | None = None, **kwargs) -> None:
         self.settings = _unify_settings(self, settings, *args, **kwargs)
 
     @abstractmethod
-    def _process(self, message: MessageInType) -> typing.Optional[MessageOutType]: ...
+    def _process(self, message: typing.Any) -> typing.Any: ...
 
-    async def _aprocess(
-        self, message: MessageInType
-    ) -> typing.Optional[MessageOutType]:
+    async def _aprocess(self, message: typing.Any) -> typing.Any:
         """Override this for native async processing."""
         return self._process(message)
 
-    def __call__(self, message: MessageInType) -> typing.Optional[MessageOutType]:
+    def __call__(self, message: typing.Any) -> typing.Any:
         # Note: We use the indirection to `_process` because this allows us to
         #  modify __call__ in derived classes with common functionality while
         #  minimizing the boilerplate code in derived classes as they only need to
         #  implement `_process`.
         return self._process(message)
 
-    async def __acall__(
-        self, message: MessageInType
-    ) -> typing.Optional[MessageOutType]:
+    async def __acall__(self, message: typing.Any) -> typing.Any:
         """
         In Python 3.12+, we can invoke this method simply with `await obj(message)`,
         but earlier versions require direct syntax: `await obj.__acall__(message)`.
         """
         return await self._aprocess(message)
 
-    def send(self, message: MessageInType) -> typing.Optional[MessageOutType]:
+    def send(self, message: typing.Any) -> typing.Any:
         """Alias for __call__."""
         return self(message)
 
-    async def asend(self, message: MessageInType) -> typing.Optional[MessageOutType]:
+    async def asend(self, message: typing.Any) -> typing.Any:
         """Alias for __acall__."""
         return await self.__acall__(message)
 
@@ -291,11 +283,11 @@ class BaseProducer(ABC, typing.Generic[SettingsType, MessageOutType]):
     """
 
     @classmethod
-    def get_settings_type(cls) -> typing.Type[SettingsType]:
+    def get_settings_type(cls) -> type[SettingsType]:
         return _get_base_processor_settings_type(cls)
 
     @classmethod
-    def get_message_type(cls, dir: str) -> typing.Optional[typing.Type[MessageOutType]]:
+    def get_message_type(cls, dir: str) -> type[MessageOutType] | None:
         if dir == "out":
             return _get_base_processor_message_out_type(cls)
         elif dir == "in":
@@ -303,7 +295,7 @@ class BaseProducer(ABC, typing.Generic[SettingsType, MessageOutType]):
         else:
             raise ValueError(f"Invalid direction: {dir}. Use 'in' or 'out'.")
 
-    def __init__(self, *args, settings: typing.Optional[SettingsType] = None, **kwargs):
+    def __init__(self, *args, settings: SettingsType | None = None, **kwargs) -> None:
         self.settings = _unify_settings(self, settings, *args, **kwargs)
 
     @abstractmethod
@@ -320,7 +312,7 @@ class BaseProducer(ABC, typing.Generic[SettingsType, MessageOutType]):
         # Make self an iterator
         return self
 
-    async def __anext__(self):
+    async def __anext__(self) -> MessageOutType:
         # So this can be used as an async generator.
         return await self.__acall__()
 
@@ -331,6 +323,7 @@ class BaseProducer(ABC, typing.Generic[SettingsType, MessageOutType]):
 
 class BaseConsumer(
     BaseProcessor[SettingsType, MessageInType, None],
+    ABC,
     typing.Generic[SettingsType, MessageInType],
 ):
     """
@@ -340,7 +333,7 @@ class BaseConsumer(
     """
 
     @classmethod
-    def get_message_type(cls, dir: str) -> typing.Optional[typing.Type[MessageInType]]:
+    def get_message_type(cls, dir: str) -> type[MessageInType] | None:
         if dir == "in":
             return _get_base_processor_message_in_type(cls)
         elif dir == "out":
@@ -351,19 +344,20 @@ class BaseConsumer(
     @abstractmethod
     def _process(self, message: MessageInType) -> None: ...
 
-    async def _aprocess(self, message: MessageInType):
+    async def _aprocess(self, message: MessageInType) -> None:
         """Override this for native async processing."""
         return self._process(message)
 
     def __call__(self, message: MessageInType) -> None:
-        super().__call__(message)
+        return super().__call__(message)
 
-    async def __acall__(self, message: MessageInType):
+    async def __acall__(self, message: MessageInType) -> None:
         return await super().__acall__(message)
 
 
 class BaseTransformer(
     BaseProcessor[SettingsType, MessageInType, MessageOutType],
+    ABC,
     typing.Generic[SettingsType, MessageInType, MessageOutType],
 ):
     """
@@ -398,6 +392,7 @@ def _get_base_processor_state_type(cls: type) -> type:
 
 class BaseStatefulProcessor(
     BaseProcessor[SettingsType, MessageInType, MessageOutType],
+    ABC,
     typing.Generic[SettingsType, MessageInType, MessageOutType, StateType],
 ):
     """
@@ -408,11 +403,13 @@ class BaseStatefulProcessor(
     or BaseStatefulTransformer for operations that do return a result.
     """
 
+    _state: StateType
+
     @classmethod
-    def get_state_type(cls):
+    def get_state_type(cls) -> type[StateType]:
         return _get_base_processor_state_type(cls)
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._hash = -1
         state_type = self.__class__.get_state_type()
@@ -429,9 +426,9 @@ class BaseStatefulProcessor(
             if isinstance(state, bytes):
                 self._state = pickle.loads(state)
             else:
-                self._state = state
+                self._state = state  # type: ignore
 
-    def _hash_message(self, message: MessageInType) -> int:
+    def _hash_message(self, message: typing.Any) -> int:
         """
         Check if the message metadata indicates a need for state reset.
 
@@ -449,7 +446,7 @@ class BaseStatefulProcessor(
         return 0
 
     @abstractmethod
-    def _reset_state(self, message: MessageInType) -> None:
+    def _reset_state(self, message: typing.Any) -> None:
         """
         Reset internal state based on new message metadata.
         This method will only be called when there is a significant change in the message metadata,
@@ -460,18 +457,16 @@ class BaseStatefulProcessor(
         ...
 
     @abstractmethod
-    def _process(self, message: MessageInType) -> typing.Optional[MessageOutType]: ...
+    def _process(self, message: typing.Any) -> typing.Any: ...
 
-    def __call__(self, message: MessageInType) -> typing.Optional[MessageOutType]:
+    def __call__(self, message: typing.Any) -> typing.Any:
         msg_hash = self._hash_message(message)
         if msg_hash != self._hash:
             self._reset_state(message)
             self._hash = msg_hash
         return self._process(message)
 
-    async def __acall__(
-        self, message: MessageInType
-    ) -> typing.Optional[MessageOutType]:
+    async def __acall__(self, message: typing.Any) -> typing.Any:
         msg_hash = self._hash_message(message)
         if msg_hash != self._hash:
             self._reset_state(message)
@@ -480,9 +475,9 @@ class BaseStatefulProcessor(
 
     def stateful_op(
         self,
-        state: typing.Union[tuple[StateType, int], None],
-        message: MessageInType,
-    ) -> tuple[[StateType, int], typing.Optional[MessageOutType]]:
+        state: tuple[StateType, int] | None,
+        message: typing.Any,
+    ) -> tuple[tuple[StateType, int], typing.Any]:
         if state is not None:
             self.state, self._hash = state
         result = self(message)
@@ -491,6 +486,7 @@ class BaseStatefulProcessor(
 
 class BaseStatefulProducer(
     BaseProducer[SettingsType, MessageOutType],
+    ABC,
     typing.Generic[SettingsType, MessageOutType, StateType],
 ):
     """
@@ -504,10 +500,10 @@ class BaseStatefulProducer(
     """
 
     @classmethod
-    def get_state_type(cls):
+    def get_state_type(cls) -> type[StateType]:
         return _get_base_processor_state_type(cls)
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)  # .settings
         self._hash = -1
         state_type = self.__class__.get_state_type()
@@ -523,7 +519,7 @@ class BaseStatefulProducer(
             if isinstance(state, bytes):
                 self._state = pickle.loads(state)
             else:
-                self._state = state
+                self._state = state  # type: ignore
 
     @abstractmethod
     def _reset_state(self) -> None:
@@ -540,15 +536,17 @@ class BaseStatefulProducer(
 
     def stateful_op(
         self,
-        state: tuple[StateType, int],
+        state: tuple[StateType, int] | None,
     ) -> tuple[tuple[StateType, int], MessageOutType]:
-        self.state, self._hash = state  # Update state via setter
+        if state is not None:
+            self.state, self._hash = state  # Update state via setter
         result = self()  # Uses synchronous call
         return (self.state, self._hash), result
 
 
 class BaseStatefulConsumer(
     BaseStatefulProcessor[SettingsType, MessageInType, None, StateType],
+    ABC,
     typing.Generic[SettingsType, MessageInType, StateType],
 ):
     """
@@ -557,7 +555,7 @@ class BaseStatefulConsumer(
     """
 
     @classmethod
-    def get_message_type(cls, dir: str) -> typing.Optional[typing.Type[MessageInType]]:
+    def get_message_type(cls, dir: str) -> type[MessageInType] | None:
         if dir == "in":
             return _get_base_processor_message_in_type(cls)
         elif dir == "out":
@@ -568,18 +566,18 @@ class BaseStatefulConsumer(
     @abstractmethod
     def _process(self, message: MessageInType) -> None: ...
 
-    async def _aprocess(self, message: MessageInType):
+    async def _aprocess(self, message: MessageInType) -> None:
         return self._process(message)
 
     def __call__(self, message: MessageInType) -> None:
-        super().__call__(message)
+        return super().__call__(message)
 
-    async def __acall__(self, message: MessageInType):
+    async def __acall__(self, message: MessageInType) -> None:
         return await super().__acall__(message)
 
     def stateful_op(
         self,
-        state: tuple[StateType, int],
+        state: tuple[StateType, int] | None,
         message: MessageInType,
     ) -> tuple[tuple[StateType, int], None]:
         state, _ = super().stateful_op(state, message)
@@ -588,6 +586,7 @@ class BaseStatefulConsumer(
 
 class BaseStatefulTransformer(
     BaseStatefulProcessor[SettingsType, MessageInType, MessageOutType, StateType],
+    ABC,
     typing.Generic[SettingsType, MessageInType, MessageOutType, StateType],
 ):
     """
@@ -609,7 +608,7 @@ class BaseStatefulTransformer(
 
     def stateful_op(
         self,
-        state: tuple[StateType, int],
+        state: tuple[StateType, int] | None,
         message: MessageInType,
     ) -> tuple[tuple[StateType, int], MessageOutType]:
         return super().stateful_op(state, message)
@@ -627,9 +626,7 @@ class BaseAdaptiveTransformer(
         """Override me if you need async partial fitting."""
         return self.partial_fit(message)
 
-    def __call__(
-        self, message: typing.Union[MessageInType, SampleMessage]
-    ) -> typing.Optional[MessageOutType]:
+    def __call__(self, message: MessageInType | SampleMessage) -> MessageOutType | None:
         """
         Adapt transformer with training data (and optionally labels)
         in SampleMessage
@@ -641,20 +638,20 @@ class BaseAdaptiveTransformer(
 
         Returns: None
         """
-        if hasattr(message, "trigger"):
+        if is_sample_message(message):
             return self.partial_fit(message)
         return super().__call__(message)
 
     async def __acall__(
-        self, message: typing.Union[MessageInType, SampleMessage]
-    ) -> typing.Optional[MessageOutType]:
-        if hasattr(message, "trigger"):
+        self, message: MessageInType | SampleMessage
+    ) -> MessageOutType | None:
+        if is_sample_message(message):
             return await self.apartial_fit(message)
         return await super().__acall__(message)
 
 
 class BaseAsyncTransformer(
-    BaseStatefulTransformer,
+    BaseStatefulTransformer[SettingsType, MessageInType, MessageOutType, StateType],
     ABC,
     typing.Generic[SettingsType, MessageInType, MessageOutType, StateType],
 ):
@@ -686,10 +683,11 @@ class BaseAsyncTransformer(
 
 # Composite processor for building pipelines
 def _get_processor_message_type(
-    proc: BaseProcessor | BaseProducer | typing.Generator, dir: str
-) -> typing.Optional[type]:
+    proc: BaseProcessor | BaseProducer | GeneratorType,
+    dir: str,
+) -> type | None:
     """Extract the input type from a processor."""
-    if inspect.isgenerator(proc):
+    if isinstance(proc, GeneratorType):
         gen_func = proc.gi_frame.f_globals[proc.gi_frame.f_code.co_name]
         args = typing.get_args(gen_func.__annotations__.get("return"))
         return args[0] if dir == "out" else args[1]  # yield type / send type
@@ -697,17 +695,22 @@ def _get_processor_message_type(
 
 
 class CompositeProcessor(
-    BaseProcessor[SettingsType, MessageInType, MessageOutType],
+    BaseStatefulProcessor[
+        SettingsType, MessageInType, MessageOutType, dict[str, typing.Any]
+    ],
+    ABC,
     typing.Generic[SettingsType, MessageInType, MessageOutType],
 ):
     """
     A processor that chains multiple processor together in a feedforward non-branching graph.
     The individual processors may be stateless or stateful.
-    The first processor may be a producer, the last processor may be a consumer,
-     otherwise processors must be transformers.
+    The first processor may be a producer, the last processor may be a consumer, otherwise
+    processors must be transformers.
     """
 
-    def __init__(self, *args, **kwargs):
+    _procs: dict[str, BaseProducer | BaseProcessor | GeneratorType]
+
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)  # .settings
         self._procs = self.__class__._initialize_processors(self.settings)
         self._validate_processor_chain()
@@ -751,12 +754,14 @@ class CompositeProcessor(
     @abstractmethod
     def _initialize_processors(
         settings: SettingsType,
-    ) -> dict[str, BaseProducer | BaseProcessor]: ...
+    ) -> dict[str, typing.Any]: ...
 
     @property
     def state(self) -> dict[str, typing.Any]:
         return {
-            k: proc.state for k, proc in self._procs.items() if hasattr(proc, "state")
+            k: getattr(proc, "state")
+            for k, proc in self._procs.items()
+            if hasattr(proc, "state")
         }
 
     @state.setter
@@ -764,8 +769,12 @@ class CompositeProcessor(
         if state is not None:
             if isinstance(state, bytes):
                 state = pickle.loads(state)
-            for k, v in state.items():
-                self._procs[k].state = v
+            for k, v in state.items():  # type: ignore
+                setattr(self._procs[k], "state", v)
+
+    def _reset_state(self, message: MessageInType) -> None:
+        # By default, we don't expect to change the state of a composite processor
+        pass
 
     def _process(self, message: MessageInType | None = None) -> MessageOutType | None:
         """
@@ -775,9 +784,9 @@ class CompositeProcessor(
         We use `__next__` and `send` to allow using legacy generators that have yet to be converted to transformers.
 
         Warning: All processors will be called using their synchronous API, which may invoke a slow sync->async wrapper
-         for processors that are async-first (i.e., children of BaseProducer or BaseAsyncTransformer).
-         If you are in an async context, please use instead this object's `asend` or `__acall__`,
-         which is much faster for async processors and does not incur penalty on sync processors.
+        for processors that are async-first (i.e., children of BaseProducer or BaseAsyncTransformer).
+        If you are in an async context, please use instead this object's `asend` or `__acall__`,
+        which is much faster for async processors and does not incur penalty on sync processors.
         """
         procs = list(self._procs.values())
         sig = inspect.signature(procs[0].__call__)
@@ -812,9 +821,12 @@ class CompositeProcessor(
 
     def stateful_op(
         self,
-        state: dict[str, tuple[typing.Any, int]],
+        state: dict[str, tuple[typing.Any, int]] | None,
         message: MessageInType | None,
-    ) -> tuple[dict[str, tuple[typing.Any, int]], MessageOutType | None]:
+    ) -> tuple[
+        dict[str, tuple[typing.Any, int]],
+        MessageInType | MessageOutType | None,
+    ]:
         result = message
         state = state or {}
         for k, proc in self._procs.items():
@@ -826,12 +838,8 @@ class CompositeProcessor(
 
 
 # --- Type variables for protocols and processors ---
-ProducerType = typing.TypeVar(
-    "ProducerType", bound=typing.Union[BaseProducer, BaseStatefulProducer]
-)
-ConsumerType = typing.TypeVar(
-    "ConsumerType", bound=typing.Union[BaseConsumer, BaseStatefulConsumer]
-)
+ProducerType = typing.TypeVar("ProducerType", bound=BaseProducer | BaseStatefulProducer)
+ConsumerType = typing.TypeVar("ConsumerType", bound=BaseConsumer | BaseStatefulConsumer)
 TransformerType = typing.TypeVar(
     "TransformerType",
     bound=typing.Union[
@@ -864,7 +872,7 @@ def get_base_adaptive_transformer_type(cls: type) -> type:
 
 # --- Base classes for ezmsg Unit with specific processing capabilities ---
 class BaseProducerUnit(
-    ez.Unit, typing.Generic[SettingsType, MessageOutType, ProducerType]
+    ez.Unit, ABC, typing.Generic[SettingsType, MessageOutType, ProducerType]
 ):
     """
     Base class for producer units -- i.e. units that generate messages without consuming inputs.
@@ -905,7 +913,7 @@ class BaseProducerUnit(
         Args:
             msg: a settings message.
         """
-        self.apply_settings(msg)
+        self.apply_settings(msg)  # type: ignore
         self.create_producer()
 
     @ez.publisher(OUTPUT_SIGNAL)
@@ -916,7 +924,7 @@ class BaseProducerUnit(
 
 
 class BaseConsumerUnit(
-    ez.Unit, typing.Generic[SettingsType, MessageInType, ConsumerType]
+    ez.Unit, ABC, typing.Generic[SettingsType, MessageInType, ConsumerType]
 ):
     """
     Base class for consumer units -- i.e. units that receive messages but do not return results.
@@ -957,7 +965,7 @@ class BaseConsumerUnit(
         Args:
             msg: a settings message.
         """
-        self.apply_settings(msg)
+        self.apply_settings(msg)  # type: ignore
         self.create_processor()
 
     @ez.subscriber(INPUT_SIGNAL, zero_copy=True)
@@ -972,6 +980,7 @@ class BaseConsumerUnit(
 
 class BaseTransformerUnit(
     BaseConsumerUnit[SettingsType, MessageInType, TransformerType],
+    ABC,
     typing.Generic[SettingsType, MessageInType, MessageOutType, TransformerType],
 ):
     """
@@ -1015,6 +1024,7 @@ class BaseAdaptiveTransformerUnit(
     BaseTransformerUnit[
         SettingsType, MessageInType, MessageOutType, AdaptiveTransformerType
     ],
+    ABC,
     typing.Generic[
         SettingsType, MessageInType, MessageOutType, AdaptiveTransformerType
     ],
