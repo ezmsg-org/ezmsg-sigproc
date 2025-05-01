@@ -838,16 +838,11 @@ class CompositeProcessor(
 
 
 # --- Type variables for protocols and processors ---
-ProducerType = typing.TypeVar("ProducerType", bound=BaseProducer | BaseStatefulProducer)
+ProducerType = typing.TypeVar("ProducerType", bound=BaseProducer)
 ConsumerType = typing.TypeVar("ConsumerType", bound=BaseConsumer | BaseStatefulConsumer)
 TransformerType = typing.TypeVar(
     "TransformerType",
-    bound=typing.Union[
-        BaseTransformer,
-        BaseStatefulTransformer,
-        BaseAsyncTransformer,
-        CompositeProcessor,
-    ],
+    bound=BaseTransformer | BaseStatefulTransformer | CompositeProcessor,
 )
 AdaptiveTransformerType = typing.TypeVar(
     "AdaptiveTransformerType", bound=BaseAdaptiveTransformer
@@ -887,8 +882,8 @@ class BaseProducerUnit(
 
     ... that's all!
 
-    Where CustomProducerSettings, and CustomProducer
-    are custom implementations of ez.Settings, and BaseProducer or BaseStatefulProducer, respectively.
+    Where CustomProducerSettings, and CustomProducer are custom implementations of ez.Settings,
+    and BaseProducer or BaseStatefulProducer, respectively.
     """
 
     INPUT_SETTINGS = ez.InputStream(SettingsType)
@@ -897,7 +892,7 @@ class BaseProducerUnit(
     async def initialize(self) -> None:
         self.create_producer()
 
-    def create_producer(self):
+    def create_producer(self) -> None:
         # self.producer: ProducerType
         """Create the producer instance from settings."""
         producer_type = get_base_producer_type(self.__class__)
@@ -920,40 +915,26 @@ class BaseProducerUnit(
     async def produce(self) -> typing.AsyncGenerator:
         while True:
             out = await self.producer.__acall__()
-            yield self.OUTPUT_SIGNAL, out
+            if out is not None:  # and math.prod(out.data.shape) > 0:
+                yield self.OUTPUT_SIGNAL, out
 
 
-class BaseConsumerUnit(
-    ez.Unit, ABC, typing.Generic[SettingsType, MessageInType, ConsumerType]
-):
+class BaseProcessorUnit(ez.Unit, ABC, typing.Generic[SettingsType]):
     """
-    Base class for consumer units -- i.e. units that receive messages but do not return results.
-    Implement a new Unit as follows:
-
-    class CustomUnit(BaseConsumerUnit[
-        CustomConsumerSettings,    # SettingsType
-        AxisArray,                 # MessageInType
-        CustomConsumer,            # ConsumerType
-    ]):
-        SETTINGS = CustomConsumerSettings
-
-    ... that's all!
-
-    Where CustomConsumerSettings, and CustomConsumer
-    are custom implementations of ez.Settings, and BaseConsumer or BaseStatefulConsumer, respectively.
+    Base class for processor units -- i.e. units that process messages.
+    This is an abstract base class that provides common functionality for consumer and transformer
+    units. You probably do not want to inherit from this class directly as you would need to define
+    a custom implementation of `create_processor`.
+    Refer instead to BaseConsumerUnit or BaseTransformerUnit.
     """
 
-    INPUT_SIGNAL = ez.InputStream(MessageInType)
     INPUT_SETTINGS = ez.InputStream(SettingsType)
 
     async def initialize(self) -> None:
         self.create_processor()
 
-    def create_processor(self):
-        # self.processor: ConsumerType[SettingsType, MessageInType, StateType]
-        """Create the consumer instance from settings."""
-        consumer_type = get_base_consumer_type(self.__class__)
-        self.processor = consumer_type(settings=self.SETTINGS)
+    @abstractmethod
+    def create_processor(self) -> None: ...
 
     @ez.subscriber(INPUT_SETTINGS)
     async def on_settings(self, msg: SettingsType) -> None:
@@ -968,22 +949,55 @@ class BaseConsumerUnit(
         self.apply_settings(msg)  # type: ignore
         self.create_processor()
 
+
+class BaseConsumerUnit(
+    BaseProcessorUnit[SettingsType],
+    ABC,
+    typing.Generic[SettingsType, MessageInType, ConsumerType],
+):
+    """
+    Base class for consumer units -- i.e. units that receive messages but do not return results.
+    Implement a new Unit as follows:
+
+    class CustomUnit(BaseConsumerUnit[
+        CustomConsumerSettings,    # SettingsType
+        AxisArray,                 # MessageInType
+        CustomConsumer,            # ConsumerType
+    ]):
+        SETTINGS = CustomConsumerSettings
+
+    ... that's all!
+
+    Where CustomConsumerSettings and CustomConsumer are custom implementations of:
+    - ez.Settings for settings
+    - BaseConsumer or BaseStatefulConsumer for the consumer implementation
+    """
+
+    INPUT_SIGNAL = ez.InputStream(MessageInType)
+
+    def create_processor(self):
+        # self.processor: ConsumerType[SettingsType, MessageInType, StateType]
+        """Create the consumer instance from settings."""
+        consumer_type = get_base_consumer_type(self.__class__)
+        self.processor = consumer_type(settings=self.SETTINGS)
+
     @ez.subscriber(INPUT_SIGNAL, zero_copy=True)
     async def on_signal(self, message: MessageInType):
         """
         Consume the message.
         Args:
-            message:
+            message: Input message to be consumed
         """
         await self.processor.__acall__(message)
 
 
 class BaseTransformerUnit(
-    BaseConsumerUnit[SettingsType, MessageInType, TransformerType],
+    BaseProcessorUnit[SettingsType],
     ABC,
     typing.Generic[SettingsType, MessageInType, MessageOutType, TransformerType],
 ):
     """
+    Base class for transformer units -- i.e. units that transform input messages into output messages.
     Implement a new Unit as follows:
 
     class CustomUnit(BaseTransformerUnit[
@@ -996,11 +1010,15 @@ class BaseTransformerUnit(
 
     ... that's all!
 
-    Where CustomTransformerSettings, and CustomTransformer
-    are custom implementations of ez.Settings, and a transformer type, respectively.
-    Eligible base transformer types: BaseTransformer, BaseStatefulTransformer, CompositeProcessor
+    Where CustomTransformerSettings and CustomTransformer are custom implementations of:
+    - ez.Settings for settings
+    - One of these transformer types:
+      * BaseTransformer
+      * BaseStatefulTransformer
+      * CompositeProcessor
     """
 
+    INPUT_SIGNAL = ez.InputStream(MessageInType)
     OUTPUT_SIGNAL = ez.OutputStream(MessageOutType)
 
     @typing.override
@@ -1011,32 +1029,41 @@ class BaseTransformerUnit(
         self.processor = transformer_type(settings=self.SETTINGS)
 
     @typing.override
-    @ez.subscriber(BaseConsumerUnit.INPUT_SIGNAL, zero_copy=True)
+    @ez.subscriber(INPUT_SIGNAL, zero_copy=True)
     @ez.publisher(OUTPUT_SIGNAL)
     @profile_subpub(trace_oldest=False)
     async def on_signal(self, message: MessageInType) -> typing.AsyncGenerator:
         result = await self.processor.__acall__(message)
-        if result is not None and math.prod(result.data.shape) > 0:
+        if result is not None:  # and math.prod(result.data.shape) > 0:
             yield self.OUTPUT_SIGNAL, result
 
 
 class BaseAdaptiveTransformerUnit(
-    BaseTransformerUnit[
-        SettingsType, MessageInType, MessageOutType, AdaptiveTransformerType
-    ],
+    BaseProcessorUnit[SettingsType],
     ABC,
     typing.Generic[
         SettingsType, MessageInType, MessageOutType, AdaptiveTransformerType
     ],
 ):
     INPUT_SAMPLE = ez.InputStream(SampleMessage)
+    INPUT_SIGNAL = ez.InputStream(MessageInType)
+    OUTPUT_SIGNAL = ez.OutputStream(MessageOutType)
 
     @typing.override
-    def create_processor(self):
+    def create_processor(self) -> None:
         # self.processor: AdaptiveTransformerType[SettingsType, MessageInType, MessageOutType, StateType]
         """Create the adaptive transformer instance from settings."""
         adaptive_transformer_type = get_base_adaptive_transformer_type(self.__class__)
         self.processor = adaptive_transformer_type(settings=self.SETTINGS)
+
+    @typing.override
+    @ez.subscriber(INPUT_SIGNAL, zero_copy=True)
+    @ez.publisher(OUTPUT_SIGNAL)
+    @profile_subpub(trace_oldest=False)
+    async def on_signal(self, message: MessageInType) -> typing.AsyncGenerator:
+        result = await self.processor.__acall__(message)
+        if result is not None:  # and math.prod(result.data.shape) > 0:
+            yield self.OUTPUT_SIGNAL, result
 
     @ez.subscriber(INPUT_SAMPLE)
     async def on_sample(self, msg: SampleMessage) -> None:
