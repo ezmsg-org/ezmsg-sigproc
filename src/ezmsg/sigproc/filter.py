@@ -218,8 +218,11 @@ class FilterByDesignTransformer(
     """Abstract base class for filter design transformers."""
 
     @classmethod
-    def get_message_type(cls, _) -> typing.Type[AxisArray]:
-        return AxisArray
+    def get_message_type(cls, dir: str) -> type[AxisArray]:
+        if dir in ("in", "out"):
+            return AxisArray
+        else:
+            raise ValueError(f"Invalid direction: {dir}. Must be 'in' or 'out'.")
 
     @abstractmethod
     def get_design_function(self) -> typing.Callable[[float], FilterCoefsType | None]:

@@ -1,3 +1,4 @@
+from typing import Generator
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.modify import modify_axis
@@ -46,7 +47,7 @@ class SpectrogramTransformer(
     @staticmethod
     def _initialize_processors(
         settings: SpectrogramSettings,
-    ) -> dict[str, BaseStatefulProcessor]:
+    ) -> dict[str, BaseStatefulProcessor | Generator[AxisArray, AxisArray, None]]:
         return {
             "windowing": WindowTransformer(
                 axis="time",

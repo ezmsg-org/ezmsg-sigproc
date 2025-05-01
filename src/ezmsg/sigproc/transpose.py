@@ -1,3 +1,4 @@
+from types import EllipsisType
 import numpy as np
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import (
@@ -20,7 +21,7 @@ class TransposeSettings(ez.Settings):
       axes:
     """
 
-    axes: tuple[int | str | type(...), ...] | None = None
+    axes: tuple[int | str | EllipsisType, ...] | None = None
     order: str | None = None
 
 
@@ -125,6 +126,6 @@ class Transpose(
 
 
 def transpose(
-    axes: tuple[int | str | type(...), ...] | None = None, order: str | None = None
+    axes: tuple[int | str | EllipsisType, ...] | None = None, order: str | None = None
 ) -> TransposeTransformer:
     return TransposeTransformer(TransposeSettings(axes=axes, order=order))

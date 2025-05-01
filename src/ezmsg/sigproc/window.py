@@ -64,7 +64,7 @@ class WindowTransformer(
     can be difficult. Please read the argument descriptions carefully.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         """
 
         Args:

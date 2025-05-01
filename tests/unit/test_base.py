@@ -37,7 +37,7 @@ class MockSettings:
     param2: str = "test"
 
 
-@processor_state()
+@processor_state
 class MockState:
     iterations: int = 0
     hash: int = -1
@@ -373,16 +373,16 @@ class TestHelperFunctions:
         )
 
         # Test with producers (should throw)
-        with pytest.raises(TypeError, match="Could not resolve ~MessageInType"):
+        with pytest.raises(TypeError, match="Could not resolve MessageInType"):
             _get_base_processor_message_in_type(MockProducer)
-        with pytest.raises(TypeError, match="Could not resolve ~MessageInType"):
+        with pytest.raises(TypeError, match="Could not resolve MessageInType"):
             _get_base_processor_message_in_type(MockStatefulProducer)
 
         # Test with no message in type should raise exception
         class NoMessageInTypeClass:
             pass
 
-        with pytest.raises(TypeError, match="Could not resolve ~MessageInType"):
+        with pytest.raises(TypeError, match="Could not resolve MessageInType"):
             _get_base_processor_message_in_type(NoMessageInTypeClass)
 
     def test_get_base_processor_message_out_type(self):
@@ -429,7 +429,7 @@ class TestHelperFunctions:
         class NoMessageOutTypeClass:
             pass
 
-        with pytest.raises(TypeError, match="Could not resolve ~MessageOutType"):
+        with pytest.raises(TypeError, match="Could not resolve MessageOutType"):
             _get_base_processor_message_out_type(NoMessageOutTypeClass)
 
     # Test _unify_settings function through the MockProcessor class __init__
@@ -477,6 +477,10 @@ class TestHelperFunctions:
             _get_base_processor_state_type(ChebyshevFilterTransformer)
             == FilterByDesignState
         )
+        assert (
+            _get_base_processor_state_type(ValidMultipleCompositeProcessor)
+            == dict[str, Any]
+        )
 
         # Test with class that doesn't have state type
         with pytest.raises(Exception, match="Could not resolve state type"):
@@ -489,8 +493,6 @@ class TestHelperFunctions:
             _get_base_processor_state_type(MockConsumer)
         with pytest.raises(Exception, match="Could not resolve state type"):
             _get_base_processor_state_type(MockTransformer)
-        with pytest.raises(Exception, match="Could not resolve state type"):
-            _get_base_processor_state_type(ValidMultipleCompositeProcessor)
 
     def test_get_processor_message_type(self):
         processor = MockProcessor(MockSettings())
@@ -516,7 +518,7 @@ class TestHelperFunctions:
         assert _get_processor_message_type(deep_transformer, "in") == MockMessageA
         assert _get_processor_message_type(deep_transformer, "out") == MockMessageC
 
-        # Test with invalid direction (currently not supported)
+        # Test with invalid direction
         with pytest.raises(ValueError, match="Invalid direction"):
             _get_processor_message_type(processor, "invalid")
 

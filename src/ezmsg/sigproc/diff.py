@@ -29,7 +29,7 @@ class DiffTransformer(
         sample_shape = message.data.shape[:ax_idx] + message.data.shape[ax_idx + 1 :]
         return hash((sample_shape, message.key))
 
-    def _reset_state(self, message):
+    def _reset_state(self, message) -> None:
         ax_idx = message.get_axis_idx(self.settings.axis)
         self.state.last_dat = slice_along_axis(message.data, slice(0, 1), axis=ax_idx)
         if self.settings.scale_by_fs:

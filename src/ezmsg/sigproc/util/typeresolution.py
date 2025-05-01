@@ -35,7 +35,7 @@ def resolve_typevar(cls: type, target_typevar: typing.TypeVar) -> type:
     raise TypeError(f"Could not resolve {target_typevar} in {cls}")
 
 
-TypeLike = typing.Union[typing.Type[typing.Any], typing.Any, type(None), None]
+TypeLike = typing.Union[type[typing.Any], typing.Any, type(None), None]
 
 
 def check_message_type_compatibility(type1: TypeLike, type2: TypeLike) -> bool:
