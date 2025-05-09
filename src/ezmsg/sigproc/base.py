@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-import inspect
 import dataclasses
 import functools
 import math
@@ -390,17 +389,10 @@ def _get_base_processor_state_type(cls: type) -> type:
         ) from e
 
 
-class BaseStatefulProcessor(
-    BaseProcessor[SettingsType, MessageInType, MessageOutType],
-    ABC,
-    typing.Generic[SettingsType, MessageInType, MessageOutType, StateType],
-):
+class Stateful(ABC, typing.Generic[StateType]):
     """
-    Base class implementing common stateful processor functionality.
-    You probably do not want to inherit from this class directly.
-    Refer instead to the more specific base classes.
-    Use BaseStatefulConsumer for operations that do not return a result,
-    or BaseStatefulTransformer for operations that do return a result.
+    Mixin class for stateful processors. DO NOT use this class directly.
+    Used to enforce that the processor/producer has a state attribute and stateful_op method.
     """
 
     _state: StateType
@@ -408,13 +400,6 @@ class BaseStatefulProcessor(
     @classmethod
     def get_state_type(cls) -> type[StateType]:
         return _get_base_processor_state_type(cls)
-
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self._hash = -1
-        state_type = self.__class__.get_state_type()
-        self._state: StateType = state_type()
-        # TODO: Enforce that StateType has .hash: int field.
 
     @property
     def state(self) -> StateType:
@@ -444,6 +429,40 @@ class BaseStatefulProcessor(
         we force an update on the first message.
         """
         return 0
+
+    @abstractmethod
+    def _reset_state(self, *args: typing.Any, **kwargs: typing.Any) -> None:
+        """
+        Reset internal state based on
+            - new message metadata (processors), or
+            - after first call (producers).
+        """
+        ...
+
+    @abstractmethod
+    def stateful_op(self, *args: typing.Any, **kwargs: typing.Any) -> tuple: ...
+
+
+class BaseStatefulProcessor(
+    BaseProcessor[SettingsType, MessageInType, MessageOutType],
+    Stateful[StateType],
+    ABC,
+    typing.Generic[SettingsType, MessageInType, MessageOutType, StateType],
+):
+    """
+    Base class implementing common stateful processor functionality.
+    You probably do not want to inherit from this class directly.
+    Refer instead to the more specific base classes.
+    Use BaseStatefulConsumer for operations that do not return a result,
+    or BaseStatefulTransformer for operations that do return a result.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._hash = -1
+        state_type = self.__class__.get_state_type()
+        self._state: StateType = state_type()
+        # TODO: Enforce that StateType has .hash: int field.
 
     @abstractmethod
     def _reset_state(self, message: typing.Any) -> None:
@@ -486,6 +505,7 @@ class BaseStatefulProcessor(
 
 class BaseStatefulProducer(
     BaseProducer[SettingsType, MessageOutType],
+    Stateful[StateType],
     ABC,
     typing.Generic[SettingsType, MessageOutType, StateType],
 ):
@@ -499,27 +519,11 @@ class BaseStatefulProducer(
       initialization (.hash == -1) to state reset (.hash == 0).
     """
 
-    @classmethod
-    def get_state_type(cls) -> type[StateType]:
-        return _get_base_processor_state_type(cls)
-
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)  # .settings
         self._hash = -1
         state_type = self.__class__.get_state_type()
         self._state: StateType = state_type()
-
-    @property
-    def state(self) -> StateType:
-        return self._state
-
-    @state.setter
-    def state(self, state: StateType | bytes | None) -> None:
-        if state is not None:
-            if isinstance(state, bytes):
-                self._state = pickle.loads(state)
-            else:
-                self._state = state  # type: ignore
 
     @abstractmethod
     def _reset_state(self) -> None:
@@ -615,7 +619,12 @@ class BaseStatefulTransformer(
 
 
 class BaseAdaptiveTransformer(
-    BaseStatefulTransformer,
+    BaseStatefulTransformer[
+        SettingsType,
+        MessageInType | SampleMessage,
+        MessageOutType | None,
+        StateType,
+    ],
     ABC,
     typing.Generic[SettingsType, MessageInType, MessageOutType, StateType],
 ):
@@ -694,61 +703,73 @@ def _get_processor_message_type(
     return proc.__class__.get_message_type(dir)
 
 
-class CompositeProcessor(
-    BaseStatefulProcessor[
-        SettingsType, MessageInType, MessageOutType, dict[str, typing.Any]
-    ],
-    ABC,
-    typing.Generic[SettingsType, MessageInType, MessageOutType],
+def _has_stateful_op(proc: typing.Any) -> typing.TypeGuard[Stateful]:
+    """
+    Check if the processor has a stateful_op method.
+    This is used to determine if the processor is stateful or not.
+    """
+    return hasattr(proc, "stateful_op")
+
+
+class CompositeStateful(
+    Stateful[dict[str, typing.Any]], ABC, typing.Generic[SettingsType, MessageOutType]
 ):
     """
-    A processor that chains multiple processor together in a feedforward non-branching graph.
-    The individual processors may be stateless or stateful.
-    The first processor may be a producer, the last processor may be a consumer, otherwise
-    processors must be transformers.
+    Mixin class for composite processors/producers. DO NOT use this class directly.
+    Used to enforce statefulness of the composite and provide initialization an validation methods.
     """
 
     _procs: dict[str, BaseProducer | BaseProcessor | GeneratorType]
-
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)  # .settings
-        self._procs = self.__class__._initialize_processors(self.settings)
-        self._validate_processor_chain()
+    _processor_type: typing.Literal["producer", "processor"]
 
     def _validate_processor_chain(self) -> None:
-        """Validate the processor chain types at runtime."""
+        """Validate the composite chain types at runtime."""
         if not self._procs:
-            raise ValueError("CompositeProcessor requires at least one processor")
+            raise ValueError(
+                f"Composite {self._processor_type} requires at least one processor"
+            )
 
         expected_in_type = _get_processor_message_type(self, "in")
         expected_out_type = _get_processor_message_type(self, "out")
 
-        procs = [_ for _ in self._procs.values() if _ is not None]
-        in_type = _get_processor_message_type(procs[0], "in")
+        procs = [p for p in self._procs.items() if p[1] is not None]
+        in_type = _get_processor_message_type(procs[0][1], "in")
         if not check_message_type_compatibility(expected_in_type, in_type):
             raise TypeError(
-                f"Input type mismatch: Composite processor expects {expected_in_type}, "
-                f"but its first processor accepts {in_type}"
+                f"Input type mismatch: Composite {self._processor_type} expects {expected_in_type}, "
+                f"but its first processor (name: {procs[0][0]}, type: {procs[0][1].__class__.__name__}) accepts {in_type}"
             )
 
-        out_type = _get_processor_message_type(procs[-1], "out")
+        out_type = _get_processor_message_type(procs[-1][1], "out")
         if not check_message_type_compatibility(out_type, expected_out_type):
             raise TypeError(
-                f"Output type mismatch: Composite processor wants to return {expected_out_type}, "
-                f"but its last processor returns {out_type}"
+                f"Output type mismatch: Composite {self._processor_type} wants to return {expected_out_type}, "
+                f"but its last processor (name: {procs[-1][0]}, type: {procs[-1][1].__class__.__name__})  returns {out_type}"
             )
 
         # Check intermediate connections
         for i in range(len(procs) - 1):
-            current_out_type = _get_processor_message_type(procs[i], "out")
-            next_in_type = _get_processor_message_type(procs[i + 1], "in")
+            current_out_type = _get_processor_message_type(procs[i][1], "out")
+            next_in_type = _get_processor_message_type(procs[i + 1][1], "in")
 
+            if current_out_type is None or current_out_type is type(None):
+                raise TypeError(
+                    f"Processor {i} (name: {procs[i][0]}, type: {procs[i][1].__class__.__name__}) is a consumer "
+                    f"or returns None. Consumers can only be the last processor of a composite {self._processor_type} chain."
+                )
+            if next_in_type is None or next_in_type is type(None):
+                raise TypeError(
+                    f"Processor {i+1} (name: {procs[i+1][0]}, type: {procs[i+1][1].__class__.__name__}) is a producer "
+                    f"or receives only None. Producers can only be the first processor of a composite producer chain."
+                )
             if not check_message_type_compatibility(current_out_type, next_in_type):
                 raise TypeError(
-                    f"Message type mismatch between processors {i} and {i + 1}: "
-                    f"{procs[i].__class__.__name__} outputs {current_out_type}, "
-                    f"but {procs[i + 1].__class__.__name__} expects {next_in_type}"
+                    f"Message type mismatch between processors {i} (name: {procs[i][0]}, type: {procs[i][1].__class__.__name__}) "
+                    f"and {i+1} (name: {procs[i+1][0]}, type: {procs[i+1][1].__class__.__name__}): "
+                    f"{procs[i][1].__class__.__name__} outputs {current_out_type}, "
+                    f"but {procs[i+1][1].__class__.__name__} expects {next_in_type}"
                 )
+        self._procs = {k: v for (k, v) in procs}
 
     @staticmethod
     @abstractmethod
@@ -770,11 +791,72 @@ class CompositeProcessor(
             if isinstance(state, bytes):
                 state = pickle.loads(state)
             for k, v in state.items():  # type: ignore
-                setattr(self._procs[k], "state", v)
+                if k not in self._procs:
+                    raise KeyError(
+                        f"Processor (name: {k}) in provided state not found in composite {self._processor_type} chain. "
+                        f"Available keys: {list(self._procs.keys())}"
+                    )
+                if hasattr(self._procs[k], "state"):
+                    setattr(self._procs[k], "state", v)
 
-    def _reset_state(self, message: MessageInType) -> None:
-        # By default, we don't expect to change the state of a composite processor
+    def _reset_state(self, *args: typing.Any, **kwargs: typing.Any) -> None:
+        # By default, we don't expect to change the state of a composite processor/producer
         pass
+
+    @abstractmethod
+    def stateful_op(
+        self,
+        state: dict[str, tuple[typing.Any, int]] | None,
+        *args: typing.Any,
+        **kwargs: typing.Any,
+    ) -> tuple[
+        dict[str, tuple[typing.Any, int]],
+        MessageOutType | None,
+    ]: ...
+
+
+class CompositeProcessor(
+    BaseProcessor[SettingsType, MessageInType, MessageOutType],
+    CompositeStateful[SettingsType, MessageOutType],
+    ABC,
+    typing.Generic[SettingsType, MessageInType, MessageOutType],
+):
+    """
+    A processor that chains multiple processor together in a feedforward non-branching graph.
+    The individual processors may be stateless or stateful. The last processor may be a consumer,
+    otherwise processors must be transformers. Use CompositeProducer if you want the first
+    processor to be a producer. Concrete subclasses must implement `_initialize_processors`.
+    Optionally override `_reset_state` if you want adaptive state behaviour.
+    Example implementation:
+
+    class CustomCompositeProcessor(CompositeProcessor[CustomSettings, AxisArray, AxisArray]):
+        @staticmethod
+        def _initialize_processors(settings: CustomSettings) -> dict[str, BaseProcessor]:
+            return {
+                "stateful_transformer": CustomStatefulProducer(**settings),
+                "transformer": CustomTransformer(**settings),
+            }
+    Where **settings should be replaced with initialisation arguments for each processor.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)  # .settings
+        self._processor_type = "processor"
+        self._procs = self._initialize_processors(self.settings)
+        self._validate_processor_chain()
+        first_proc = next(iter(self._procs.items()))
+        first_proc_in_type = _get_processor_message_type(first_proc[1], "in")
+        if first_proc_in_type is None or first_proc_in_type is type(None):
+            raise TypeError(
+                f"First processor (name: {first_proc[0]}, type: {first_proc[1].__class__.__name__}) "
+                f"is a producer or receives only None. Please use CompositeProducer, not "
+                f"CompositeProcessor for this composite chain."
+            )
+        self._hash = -1
+
+    @staticmethod
+    @abstractmethod
+    def _initialize_processors(settings: SettingsType) -> dict[str, typing.Any]: ...
 
     def _process(self, message: MessageInType | None = None) -> MessageOutType | None:
         """
@@ -788,15 +870,8 @@ class CompositeProcessor(
         If you are in an async context, please use instead this object's `asend` or `__acall__`,
         which is much faster for async processors and does not incur penalty on sync processors.
         """
-        procs = list(self._procs.values())
-        sig = inspect.signature(procs[0].__call__)
-        if len(sig.parameters) == 0:
-            # Accommodate first processor being a producer (no arguments).
-            result = procs[0].__next__()
-        else:
-            result = procs[0].send(message)
-
-        for proc in procs[1:]:
+        result = message
+        for proc in self._procs.values():
             result = proc.send(result)
         return result
 
@@ -809,13 +884,8 @@ class CompositeProcessor(
         is a producer and will be called without arguments.
         We use `__anext__` and `asend` to allow using legacy generators that have yet to be converted to transformers.
         """
-        procs = list(self._procs.values())
-        sig = inspect.signature(procs[0].__acall__)
-        if len(sig.parameters) == 0:
-            result = await procs[0].__anext__()
-        else:
-            result = await procs[0].asend(message)
-        for proc in procs[1:]:
+        result = message
+        for proc in self._procs.values():
             result = await proc.asend(result)
         return result
 
@@ -825,12 +895,108 @@ class CompositeProcessor(
         message: MessageInType | None,
     ) -> tuple[
         dict[str, tuple[typing.Any, int]],
-        MessageInType | MessageOutType | None,
+        MessageOutType | None,
     ]:
         result = message
         state = state or {}
+        try:
+            state_keys = list(state.keys())
+        except AttributeError as e:
+            raise AttributeError(
+                "state provided to stateful_op must be a dict or None"
+            ) from e
+        for key in state_keys:
+            if key not in self._procs:
+                raise KeyError(
+                    f"Processor (name: {key}) in provided state not found in composite processor chain. "
+                    f"Available keys: {list(self._procs.keys())}"
+                )
         for k, proc in self._procs.items():
-            if hasattr(proc, "stateful_op"):
+            if _has_stateful_op(proc):
+                state[k], result = proc.stateful_op(state.get(k, None), result)
+            else:
+                result = proc.send(result)
+        return state, result
+
+
+class CompositeProducer(
+    BaseProducer[SettingsType, MessageOutType],
+    CompositeStateful[SettingsType, MessageOutType],
+    ABC,
+    typing.Generic[SettingsType, MessageOutType],
+):
+    """
+    A producer that chains multiple processors (starting with a producer) together in a feedforward
+    non-branching graph. The individual processors may be stateless or stateful.
+    The first processor must be a producer, the last processor may be a consumer, otherwise
+    processors must be transformers.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)  # .settings
+        self._processor_type = "producer"
+        self._procs = self._initialize_processors(self.settings)
+        self._validate_processor_chain()
+        first_proc = next(iter(self._procs.items()))
+        first_proc_in_type = _get_processor_message_type(first_proc[1], "in")
+        if first_proc_in_type is not None and first_proc_in_type is not type(None):
+            raise TypeError(
+                f"First processor (name: {first_proc[0]}, type: {first_proc[1].__class__.__name__}) "
+                f"is not a producer. Please use CompositeProcessor, not "
+                f"CompositeProducer for this composite chain."
+            )
+        self._hash = -1
+
+    @staticmethod
+    @abstractmethod
+    def _initialize_processors(
+        settings: SettingsType,
+    ) -> dict[str, typing.Any]: ...
+
+    async def _produce(self) -> MessageOutType:
+        """
+        Process a message through the pipeline of processors. If the message is None, or no message is provided,
+        then it will be assumed that the first processor is a producer and will be called without arguments.
+        This will be invoked via `__call__` or `send`.
+        We use `__next__` and `send` to allow using legacy generators that have yet to be converted to transformers.
+
+        Warning: All processors will be called using their asynchronous API, which is much faster for async
+        processors and does not incur penalty on sync processors.
+        """
+        procs = list(self._procs.values())
+        result = await procs[0].__anext__()
+        for proc in procs[1:]:
+            result = await proc.asend(result)
+        return result
+
+    def stateful_op(
+        self,
+        state: dict[str, tuple[typing.Any, int]] | None,
+    ) -> tuple[
+        dict[str, tuple[typing.Any, int]],
+        MessageOutType | None,
+    ]:
+        state = state or {}
+        try:
+            state_keys = list(state.keys())
+        except AttributeError as e:
+            raise AttributeError(
+                "state provided to stateful_op must be a dict or None"
+            ) from e
+        for key in state_keys:
+            if key not in self._procs:
+                raise KeyError(
+                    f"Processor (name: {key}) in provided state not found in composite producer chain. "
+                    f"Available keys: {list(self._procs.keys())}"
+                )
+        labeled_procs = list(self._procs.items())
+        prod_name, prod = labeled_procs[0]
+        if _has_stateful_op(prod):
+            state[prod_name], result = prod.stateful_op(state.get(prod_name, None))
+        else:
+            result = prod.__next__()
+        for k, proc in labeled_procs[1:]:
+            if _has_stateful_op(proc):
                 state[k], result = proc.stateful_op(state.get(k, None), result)
             else:
                 result = proc.send(result)
