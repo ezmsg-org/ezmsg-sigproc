@@ -15,12 +15,11 @@ from .base import (
     BaseProducerUnit,
     BaseTransformer,
     BaseTransformerUnit,
-    CompositeProcessor,
+    CompositeProducer,
+    ProducerType,
     SettingsType,
     MessageInType,
     MessageOutType,
-    TransformerType,
-    BaseConsumerUnit,
     processor_state,
 )
 from .util.asio import run_coroutine_sync
@@ -251,9 +250,9 @@ class CounterProducer(BaseStatefulProducer[CounterSettings, AxisArray, CounterSt
     # TODO: Adapt this to use ezmsg.util.rate?
 
     @classmethod
-    def get_message_type(cls, dir: str) -> type[typing.Optional[AxisArray]]:
+    def get_message_type(cls, dir: str) -> typing.Optional[type[AxisArray]]:
         if dir == "in":
-            return typing.Optional[AxisArray]
+            return None
         elif dir == "out":
             return AxisArray
         else:
@@ -541,9 +540,7 @@ class OscillatorSettings(ez.Settings):
     """Adjust `freq` to sync with sampling rate"""
 
 
-class OscillatorTransformer(
-    CompositeProcessor[OscillatorSettings, AxisArray, AxisArray]
-):
+class OscillatorProducer(CompositeProducer[OscillatorSettings, AxisArray]):
     @staticmethod
     def _initialize_processors(
         settings: OscillatorSettings,
@@ -572,34 +569,36 @@ class OscillatorTransformer(
         }
 
 
-class BaseCounterFirstTransformerUnit(
-    BaseTransformerUnit[SettingsType, MessageInType, MessageOutType, TransformerType],
-    typing.Generic[SettingsType, MessageInType, MessageOutType, TransformerType],
+class BaseCounterFirstProducerUnit(
+    BaseProducerUnit[SettingsType, MessageOutType, ProducerType],
+    typing.Generic[SettingsType, MessageInType, MessageOutType, ProducerType],
 ):
     """
-    Base class for units whose primary processor is a composite processor with a CounterProducer as the first
-     processor (producer) in the chain. CounterProducer is sometimes a transformer (
+    Base class for units whose primary processor is a composite producer with a CounterProducer as the first
+    processor (producer) in the chain.
     """
 
-    def create_processor(self):
-        super().create_processor()
+    INPUT_SIGNAL = ez.InputStream(MessageInType)
+
+    def create_producer(self):
+        super().create_producer()
 
         def recurse_get_counter(proc) -> CounterProducer:
             if hasattr(proc, "_procs"):
                 return recurse_get_counter(list(proc._procs.values())[0])
             return proc
 
-        self._counter = recurse_get_counter(self.processor)
+        self._counter = recurse_get_counter(self.producer)
 
-    @ez.subscriber(BaseConsumerUnit.INPUT_SIGNAL, zero_copy=True)
-    @ez.publisher(BaseTransformerUnit.OUTPUT_SIGNAL)
+    @ez.subscriber(INPUT_SIGNAL, zero_copy=True)
+    @ez.publisher(BaseProducerUnit.OUTPUT_SIGNAL)
     @profile_subpub(trace_oldest=False)
     async def on_signal(self, _: ez.Flag):
-        if self.processor.settings.dispatch_rate == "ext_clock":
-            out = await self.processor.__acall__(None)
+        if self.producer.settings.dispatch_rate == "ext_clock":
+            out = await self.producer.__acall__()
             yield self.OUTPUT_SIGNAL, out
 
-    @ez.publisher(BaseTransformerUnit.OUTPUT_SIGNAL)
+    @ez.publisher(BaseProducerUnit.OUTPUT_SIGNAL)
     async def produce(self) -> typing.AsyncGenerator:
         try:
             counter_state = self._counter.state
@@ -608,21 +607,21 @@ class BaseCounterFirstTransformerUnit(
                 await counter_state.new_generator.wait()
                 counter_state.new_generator.clear()
 
-                if self.processor.settings.dispatch_rate == "ext_clock":
+                if self.producer.settings.dispatch_rate == "ext_clock":
                     # We shouldn't even be here. Cycle around and wait on the event again.
                     continue
 
                 # We are not using an external clock. Run the generator.
                 while not counter_state.new_generator.is_set():
-                    out = await self.processor.__acall__(None)
+                    out = await self.producer.__acall__()
                     yield self.OUTPUT_SIGNAL, out
         except Exception:
             ez.logger.info(traceback.format_exc())
 
 
 class Oscillator(
-    BaseCounterFirstTransformerUnit[
-        OscillatorSettings, AxisArray, AxisArray, OscillatorTransformer
+    BaseCounterFirstProducerUnit[
+        OscillatorSettings, AxisArray, AxisArray, OscillatorProducer
     ]
 ):
     """Generates sinusoidal waveforms using a counter and sine transformer."""
@@ -647,7 +646,7 @@ class NoiseSettings(ez.Settings):
 WhiteNoiseSettings = NoiseSettings
 
 
-class WhiteNoiseTransformer(CompositeProcessor[NoiseSettings, AxisArray, AxisArray]):
+class WhiteNoiseProducer(CompositeProducer[NoiseSettings, AxisArray]):
     @staticmethod
     def _initialize_processors(
         settings: NoiseSettings,
@@ -672,8 +671,8 @@ class WhiteNoiseTransformer(CompositeProcessor[NoiseSettings, AxisArray, AxisArr
 
 
 class WhiteNoise(
-    BaseCounterFirstTransformerUnit[
-        NoiseSettings, AxisArray, AxisArray, WhiteNoiseTransformer
+    BaseCounterFirstProducerUnit[
+        NoiseSettings, AxisArray, AxisArray, WhiteNoiseProducer
     ]
 ):
     """chains a :obj:`Counter` and :obj:`RandomGenerator`."""
@@ -684,13 +683,13 @@ class WhiteNoise(
 PinkNoiseSettings = NoiseSettings
 
 
-class PinkNoiseTransformer(CompositeProcessor[PinkNoiseSettings, AxisArray, AxisArray]):
+class PinkNoiseProducer(CompositeProducer[PinkNoiseSettings, AxisArray]):
     @staticmethod
     def _initialize_processors(
         settings: PinkNoiseSettings,
-    ) -> dict[str, WhiteNoiseTransformer | ButterworthFilterTransformer]:
+    ) -> dict[str, WhiteNoiseProducer | ButterworthFilterTransformer]:
         return {
-            "white_noise": WhiteNoiseTransformer(settings=settings),
+            "white_noise": WhiteNoiseProducer(settings=settings),
             "filter": ButterworthFilterTransformer(
                 settings=ButterworthFilterSettings(
                     axis="time",
@@ -702,9 +701,7 @@ class PinkNoiseTransformer(CompositeProcessor[PinkNoiseSettings, AxisArray, Axis
 
 
 class PinkNoise(
-    BaseCounterFirstTransformerUnit[
-        NoiseSettings, AxisArray, AxisArray, PinkNoiseTransformer
-    ]
+    BaseCounterFirstProducerUnit[NoiseSettings, AxisArray, AxisArray, PinkNoiseProducer]
 ):
     """chains :obj:`WhiteNoise` and :obj:`ButterworthFilter`."""
 
