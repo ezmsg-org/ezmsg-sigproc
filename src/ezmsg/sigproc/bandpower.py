@@ -10,6 +10,7 @@ from .aggregate import (
     RangedAggregateSettings,
 )
 from .base import (
+    BaseProcessor,
     CompositeProcessor,
     BaseStatefulProcessor,
     BaseTransformerUnit,
@@ -40,7 +41,7 @@ class BandPowerTransformer(CompositeProcessor[BandPowerSettings, AxisArray, Axis
     @staticmethod
     def _initialize_processors(
         settings: BandPowerSettings,
-    ) -> dict[str, BaseStatefulProcessor]:
+    ) -> dict[str, BaseProcessor | BaseStatefulProcessor]:
         return {
             "spectrogram": SpectrogramTransformer(
                 settings=settings.spectrogram_settings

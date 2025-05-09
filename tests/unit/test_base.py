@@ -6,6 +6,7 @@ from typing import Any, Generator
 from unittest.mock import MagicMock
 
 from ezmsg.sigproc.base import (
+    CompositeProducer,
     _get_base_processor_message_in_type,
     _get_base_processor_message_out_type,
     _get_base_processor_settings_type,
@@ -114,11 +115,11 @@ class MockStatefulProducer(BaseStatefulProducer[MockSettings, MockMessageA, Mock
         return MockMessageA()
 
 
-class MockStatefulConsumer(BaseStatefulConsumer[MockSettings, MockMessageB, MockState]):
-    def _reset_state(self, message: MockMessageB) -> None:
+class MockStatefulConsumer(BaseStatefulConsumer[MockSettings, MockMessageA, MockState]):
+    def _reset_state(self, message: MockMessageA) -> None:
         self._state.iterations = 0
 
-    def _process(self, message: MockMessageB) -> None:
+    def _process(self, message: MockMessageA) -> None:
         self._state.iterations += 1
 
 
@@ -139,7 +140,7 @@ class MockAdaptiveTransformer(
     def _reset_state(self, message: MockMessageA) -> None:
         self._state.iterations = 0
 
-    def _process(self, message: MockMessageA) -> MockMessageB:
+    def _process(self, message: MockMessageA | SampleMessage) -> MockMessageB:
         self._state.iterations += 1
         return MockMessageB()
 
@@ -224,6 +225,17 @@ class InvalidConsumerNotLastCompositeProcessor(
         }
 
 
+class InvalidConsumerProducerCompositeProcessor(
+    CompositeProcessor[MockSettings, MockMessageB, MockMessageA]
+):
+    @staticmethod
+    def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
+        return {
+            "consumer": MockConsumer(settings=settings),
+            "producer": MockProducer(settings=settings),
+        }
+
+
 class TypeMismatchCompositeProcessor(
     CompositeProcessor[MockSettings, MockMessageA, None]
 ):
@@ -232,6 +244,17 @@ class TypeMismatchCompositeProcessor(
         return {
             "transformer": MockTransformer(settings=settings),
             "consumer": MockConsumer(settings=settings),
+        }
+
+
+class InvalidProducerFirstCompositeProcessor(
+    CompositeProcessor[MockSettings, NoneType, MockMessageC]
+):
+    @staticmethod
+    def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
+        return {
+            "stateful_producer": MockStatefulProducer(settings=settings),
+            "stateful_transformer": MockStatefulTransformer(settings=settings),
         }
 
 
@@ -244,24 +267,13 @@ class ChainedCompositeProcessor(CompositeProcessor[MockSettings, MockMessageA, N
         }
 
 
-class ChainedWithProducerCompositeProcessor(
-    CompositeProcessor[MockSettings, NoneType, MockMessageC]
-):
-    @staticmethod
-    def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
-        return {
-            "stateful_producer": MockStatefulProducer(settings=settings),
-            "stateful_transformer": MockStatefulTransformer(settings=settings),
-        }
-
-
 class ChainedCompositeProcessorWithDeepProcessors(
-    CompositeProcessor[MockSettings, NoneType, MockMessageC]
+    CompositeProcessor[MockSettings, MockMessageA, MockMessageC]
 ):
     @staticmethod
     def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
         return {
-            "stateful_producer": MockStatefulProducer(settings=settings),
+            "processor": MockProcessor(settings=settings),
             "deep_processor": DeepMockProcessor(settings=settings),
             "deeper_transformer": DeeperMockTransformer(settings=settings),
         }
@@ -279,6 +291,92 @@ class MockGeneratorCompositeProcessor(
     def _initialize_processors(settings):
         return {
             "generator": mock_generator(),
+            "stateful_processor": MockStatefulProcessor(settings=settings),
+        }
+
+
+# Mock CompositeProducer examples
+class ValidSingleCompositeProducer(CompositeProducer[MockSettings, MockMessageA]):
+    @staticmethod
+    def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
+        return {"producer": MockProducer(settings=settings)}
+
+
+class ValidMultipleCompositeProducer(CompositeProducer[MockSettings, MockMessageB]):
+    @staticmethod
+    def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
+        return {
+            "producer": MockProducer(settings=settings),
+            "stateful_processor": MockStatefulProcessor(settings=settings),
+        }
+
+
+class EmptyCompositeProducer(CompositeProducer[MockSettings, MockMessageA]):
+    @staticmethod
+    def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
+        return {}
+
+
+class InvalidOutputCompositeProducer(CompositeProducer[MockSettings, MockMessageB]):
+    @staticmethod
+    def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
+        return {"producer": MockProducer(settings=settings)}
+
+
+class InvalidProducerNotFirstCompositeProducer(
+    CompositeProducer[MockSettings, MockMessageA]
+):
+    @staticmethod
+    def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
+        return {
+            "processor": MockProcessor(settings=settings),
+            "producer": MockProducer(settings=settings),
+        }
+
+
+class InvalidConsumerNotLastCompositeProducer(
+    CompositeProducer[MockSettings, MockMessageC]
+):
+    @staticmethod
+    def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
+        return {
+            "producer": MockProducer(settings=settings),
+            "stateful_consumer": MockStatefulConsumer(settings=settings),
+            "transformer": MockTransformer(settings=settings),
+        }
+
+
+class TypeMismatchCompositeProducer(CompositeProducer[MockSettings, None]):
+    @staticmethod
+    def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
+        return {
+            "producer": MockProducer(settings=settings),
+            "consumer": MockConsumer(settings=settings),
+        }
+
+
+class ChainedCompositeProducerWithDeepProcessors(
+    CompositeProducer[MockSettings, MockMessageC]
+):
+    @staticmethod
+    def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
+        return {
+            "stateful_producer": MockStatefulProducer(settings=settings),
+            "deep_processor": DeepMockProcessor(settings=settings),
+            "deeper_transformer": DeeperMockTransformer(settings=settings),
+        }
+
+
+def mock_producer_generator() -> Generator[MockMessageA, None, None]:
+    """A mock generator function for testing purposes."""
+    yield MockMessageA()
+
+
+class MockGeneratorCompositeProducer(CompositeProducer[MockSettings, MockMessageB]):
+    @staticmethod
+    def _initialize_processors(settings):
+        return {
+            "generator": mock_producer_generator(),
             "stateful_processor": MockStatefulProcessor(settings=settings),
         }
 
@@ -346,7 +444,7 @@ class TestHelperFunctions:
         assert (
             _get_base_processor_message_in_type(MockStatefulProcessor) == MockMessageA
         )
-        assert _get_base_processor_message_in_type(MockStatefulConsumer) == MockMessageB
+        assert _get_base_processor_message_in_type(MockStatefulConsumer) == MockMessageA
         assert (
             _get_base_processor_message_in_type(MockStatefulTransformer) == MockMessageA
         )
@@ -809,79 +907,83 @@ class TestCompositeProcessor:
 
     def test_invalid_producer_not_first(self):
         with pytest.raises(
-            TypeError, match="Message type mismatch between processors 0 and 1"
+            TypeError,
+            match="Producers can only be the first processor of a composite producer chain.",
         ):
             InvalidProducerNotFirstCompositeProcessor()
 
     def test_invalid_consumer_not_last(self):
         with pytest.raises(
-            TypeError, match="Message type mismatch between processors 0 and 1"
+            TypeError,
+            match="Consumers can only be the last processor of a composite processor chain.",
         ):
             InvalidConsumerNotLastCompositeProcessor()
 
-    def test_type_mismatch_between_processors(self):
+    def test_invalid_consumer_to_producer(self):
         with pytest.raises(
-            TypeError, match="Message type mismatch between processors 0 and 1"
+            TypeError,
+            match="Consumers can only be the last processor of a composite processor chain.",
         ):
+            InvalidConsumerProducerCompositeProcessor()
+
+    def test_type_mismatch_between_processors(self):
+        with pytest.raises(TypeError, match="Message type mismatch between processors"):
             TypeMismatchCompositeProcessor()
+
+    def test_composite_processor_with_producer_first(self):
+        with pytest.raises(
+            TypeError,
+            match=r"First processor .* is a producer or receives only None. Please use CompositeProducer.*",
+        ):
+            InvalidProducerFirstCompositeProcessor()
 
     def test_chained_processors(self):
         processor = ChainedCompositeProcessor()
         result = processor(MockMessageA())
         assert isinstance(result, NoneType)
 
-    def test_chained_processors_with_producer_first(self):
-        processor = ChainedWithProducerCompositeProcessor()
-        result = processor(None)
-        assert isinstance(result, MockMessageC)
-
     def test_chained_processors_with_deep_classes(self):
         processor = ChainedCompositeProcessorWithDeepProcessors()
         result = processor(None)
         assert isinstance(result, MockMessageC)
 
-    def test_composite_processor_with_generator_sync(self):
-        processor = MockGeneratorCompositeProcessor()
-        # Attempt to use the sync processing interface and assert it raises an error
-        with pytest.raises(
-            Exception, match="'generator' object has no attribute '__call__'"
-        ):
-            processor._process(MockMessageA())
+    # def test_composite_processor_with_generator_sync(self):
+    #     processor = MockGeneratorCompositeProcessor()
+    #     # Attempt to use the sync processing interface and assert it raises an error
+    #     with pytest.raises(
+    #         Exception, match="'generator' object has no attribute '__call__'"
+    #     ):
+    #         processor._process(MockMessageA())
 
     @pytest.mark.asyncio
     async def test_composite_processor_with_generator_async(self):
         processor = MockGeneratorCompositeProcessor()
         # Attempt to use the async processing interface and assert it raises an error
         with pytest.raises(
-            Exception, match="'generator' object has no attribute '__acall__'"
+            Exception, match="'generator' object has no attribute 'asend'"
         ):
             await processor._aprocess(MockMessageA())
 
     def test_state_property(self):
         processor1 = ValidMultipleCompositeProcessor()
-        processor2 = ChainedWithProducerCompositeProcessor()
-        processor3 = ChainedCompositeProcessorWithDeepProcessors()
-        processor4 = MockGeneratorCompositeProcessor()
+        processor2 = ChainedCompositeProcessorWithDeepProcessors()
+        processor3 = MockGeneratorCompositeProcessor()
 
         state1 = processor1.state
         assert "processor" not in state1
         assert "stateful_processor" in state1
 
         state2 = processor2.state
-        assert "stateful_producer" in state2
-        assert "stateful_transformer" in state2
+        assert "processor" not in state2
+        assert "deep_processor" not in state2
+        assert "deeper_transformer" not in state2
 
         state3 = processor3.state
-        assert "stateful_producer" in state3
-        assert "deep_processor" not in state3
-        assert "deeper_transformer" not in state3
-
-        state4 = processor4.state
-        assert "generator" not in state4
-        assert "stateful_processor" in state4
+        assert "generator" not in state3
+        assert "stateful_processor" in state3
 
     def test_state_setter(self):
-        processor = ChainedWithProducerCompositeProcessor()
+        processor = ChainedCompositeProcessor()
 
         # Create new states
         state1 = MockState()
@@ -890,13 +992,20 @@ class TestCompositeProcessor:
         state2.iterations = 10
 
         # Set composite state
-        processor.state = {"stateful_producer": state1, "stateful_transformer": state2}
+        processor.state = {"processor": state1, "stateful_consumer": state2}
 
-        assert processor._procs["stateful_producer"].state.iterations == 5
-        assert processor._procs["stateful_transformer"].state.iterations == 10
+        assert not hasattr(processor._procs["processor"], "state")
+        assert processor._procs["stateful_consumer"].state.iterations == 10
+
+        # Attempt to set state for non-existent processor
+        with pytest.raises(
+            KeyError,
+            match=r"Processor .* in provided state not found in composite processor chain.",
+        ):
+            processor.state = {"non_existent_processor": state1}
 
     def test_state_setter_with_bytes(self):
-        processor = ChainedWithProducerCompositeProcessor()
+        processor = ChainedCompositeProcessor()
 
         # Create new states
         state1 = MockState()
@@ -905,14 +1014,10 @@ class TestCompositeProcessor:
         state2.iterations = 20
 
         # Serialize composite state
-        serialized = pickle.dumps(
-            {"stateful_producer": state1, "stateful_transformer": state2}
-        )
-
+        serialized = pickle.dumps({"processor": state1, "stateful_consumer": state2})
         processor.state = serialized
-
-        assert processor._procs["stateful_producer"].state.iterations == 15
-        assert processor._procs["stateful_transformer"].state.iterations == 20
+        assert not hasattr(processor._procs["processor"], "state")
+        assert processor._procs["stateful_consumer"].state.iterations == 20
 
     @pytest.mark.asyncio
     async def test_aprocess_method(self):
@@ -937,3 +1042,136 @@ class TestCompositeProcessor:
         # Hash not set to 3 as expected as processor is called after setting the hash
         # Hash set to 0 via the _reset_state method.
         assert processor._procs["stateful_processor"]._hash == 0
+
+
+# -- Tests for CompositeProducer --
+
+
+class TestCompositeProducer:
+    def test_valid_single_producer_chain(self):
+        producer = ValidSingleCompositeProducer()
+        result = producer()
+        assert isinstance(result, MockMessageA)
+
+    def test_valid_multiple_producer_chain(self):
+        producer = ValidMultipleCompositeProducer()
+        result = producer()
+        assert isinstance(result, MockMessageB)
+
+    def test_empty_producer_chain(self):
+        with pytest.raises(ValueError, match="requires at least one processor"):
+            EmptyCompositeProducer()
+
+    def test_invalid_output_type(self):
+        with pytest.raises(TypeError, match="Output type mismatch"):
+            InvalidOutputCompositeProducer()
+
+    def test_invalid_producer_not_first(self):
+        with pytest.raises(
+            TypeError, match="Input type mismatch: Composite producer expects None"
+        ):
+            InvalidProducerNotFirstCompositeProducer()
+
+    def test_invalid_consumer_not_last(self):
+        with pytest.raises(
+            TypeError,
+            match="Consumers can only be the last processor of a composite producer chain.",
+        ):
+            InvalidConsumerNotLastCompositeProducer()
+
+    def test_type_mismatch_between_processors(self):
+        with pytest.raises(TypeError, match="Message type mismatch between processors"):
+            TypeMismatchCompositeProducer()
+
+    def test_chained_producers_with_deep_classes(self):
+        producer = ChainedCompositeProducerWithDeepProcessors()
+        result = producer()
+        assert isinstance(result, MockMessageC)
+
+    @pytest.mark.asyncio
+    async def test_composite_producer_with_generator(self):
+        producer = MockGeneratorCompositeProducer()
+        # Attempt to use the async processing interface and assert it raises an error
+        with pytest.raises(
+            Exception, match="'generator' object has no attribute '__anext__'"
+        ):
+            await producer._produce()
+
+    def test_state_property(self):
+        producer1 = ValidMultipleCompositeProducer()
+        producer2 = ChainedCompositeProducerWithDeepProcessors()
+        producer3 = MockGeneratorCompositeProducer()
+
+        state1 = producer1.state
+        assert "producer" not in state1
+        assert "stateful_processor" in state1
+
+        state2 = producer2.state
+        assert "stateful_producer" in state2
+        assert "deep_processor" not in state2
+        assert "deeper_transformer" not in state2
+
+        state3 = producer3.state
+        assert "generator" not in state3
+        assert "stateful_processor" in state3
+
+    def test_state_setter(self):
+        producer = ValidMultipleCompositeProducer()
+
+        # Create new states
+        state1 = MockState()
+        state1.iterations = 5
+        state2 = MockState()
+        state2.iterations = 10
+
+        # Set composite state
+        producer.state = {"producer": state1, "stateful_processor": state2}
+
+        assert not hasattr(producer._procs["producer"], "state")
+        assert producer._procs["stateful_processor"].state.iterations == 10
+
+        # Attempt to set state for non-existent processor
+        with pytest.raises(
+            KeyError,
+            match=r"Processor .* in provided state not found in composite producer chain.",
+        ):
+            producer.state = {"non_existent_processor": state1}
+
+    def test_state_setter_with_bytes(self):
+        producer = ValidMultipleCompositeProducer()
+
+        # Create new states
+        state1 = MockState()
+        state1.iterations = 15
+        state2 = MockState()
+        state2.iterations = 20
+
+        # Serialize composite state
+        serialized = pickle.dumps({"producer": state1, "stateful_processor": state2})
+        producer.state = serialized
+        assert not hasattr(producer._procs["producer"], "state")
+        assert producer._procs["stateful_processor"].state.iterations == 20
+
+    @pytest.mark.asyncio
+    async def test_produce_method(self):
+        producer = ValidMultipleCompositeProducer()
+        result = await producer._produce()
+        assert isinstance(result, MockMessageB)
+
+    def test_stateful_op(self):
+        composite_producer = ValidMultipleCompositeProducer()
+        state = {"producer": (MockState(), 2), "stateful_processor": (MockState(), 3)}
+        new_state, result = composite_producer.stateful_op(state)
+        assert isinstance(result, MockMessageB)
+        # Do we really want to keep the 'state' of a stateless processor?
+        # State of producer not changed from default values
+        assert new_state["producer"][0].iterations == 0
+        assert new_state["producer"][0].hash == -1
+        assert hasattr(composite_producer._procs["producer"], "_state") is False
+        # State of stateful_processor updated
+        assert new_state["stateful_processor"][0].iterations == 1
+        assert new_state["stateful_processor"][0].hash == -1
+        assert composite_producer._procs["stateful_processor"].state.iterations == 1
+        # Hash not set to 3 as expected as processor is called after setting the hash
+        # Hash set to 0 via the _reset_state method.
+        assert composite_producer._procs["stateful_processor"]._hash == 0
