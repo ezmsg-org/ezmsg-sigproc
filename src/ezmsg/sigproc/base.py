@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 import dataclasses
 import functools
+import inspect
 import math
 import pickle
 import traceback
@@ -18,7 +19,7 @@ from ezmsg.sigproc.util.typeresolution import (
 
 from .util.profile import profile_subpub
 from .util.message import SampleMessage, is_sample_message
-from .util.asio import run_coroutine_sync
+from .util.asio import SyncToAsyncGeneratorWrapper, run_coroutine_sync
 
 
 # --- All processor state classes must inherit from this or at least have .hash ---
@@ -692,11 +693,11 @@ class BaseAsyncTransformer(
 
 # Composite processor for building pipelines
 def _get_processor_message_type(
-    proc: BaseProcessor | BaseProducer | GeneratorType,
+    proc: BaseProcessor | BaseProducer | GeneratorType | SyncToAsyncGeneratorWrapper,
     dir: str,
 ) -> type | None:
     """Extract the input type from a processor."""
-    if isinstance(proc, GeneratorType):
+    if isinstance(proc, GeneratorType) or isinstance(proc, SyncToAsyncGeneratorWrapper):
         gen_func = proc.gi_frame.f_globals[proc.gi_frame.f_code.co_name]
         args = typing.get_args(gen_func.__annotations__.get("return"))
         return args[0] if dir == "out" else args[1]  # yield type / send type
@@ -715,11 +716,14 @@ class CompositeStateful(
     Stateful[dict[str, typing.Any]], ABC, typing.Generic[SettingsType, MessageOutType]
 ):
     """
-    Mixin class for composite processors/producers. DO NOT use this class directly.
-    Used to enforce statefulness of the composite and provide initialization an validation methods.
+    Mixin class for composite processor/producer chains. DO NOT use this class directly.
+    Used to enforce statefulness of the composite processor/producer chain and provide
+    initialization and validation methods.
     """
 
-    _procs: dict[str, BaseProducer | BaseProcessor | GeneratorType]
+    _procs: dict[
+        str, BaseProducer | BaseProcessor | GeneratorType | SyncToAsyncGeneratorWrapper
+    ]
     _processor_type: typing.Literal["producer", "processor"]
 
     def _validate_processor_chain(self) -> None:
@@ -769,6 +773,12 @@ class CompositeStateful(
                     f"{procs[i][1].__class__.__name__} outputs {current_out_type}, "
                     f"but {procs[i+1][1].__class__.__name__} expects {next_in_type}"
                 )
+            if inspect.isgenerator(procs[i][1]) and hasattr(procs[i][1], "send"):
+                # If the processor is a generator, wrap it in a SyncToAsyncGeneratorWrapper
+                procs[i] = (procs[i][0], SyncToAsyncGeneratorWrapper(procs[i][1]))
+        if inspect.isgenerator(procs[-1][1]) and hasattr(procs[-1][1], "send"):
+            # If the last processor is a generator, wrap it in a SyncToAsyncGeneratorWrapper
+            procs[-1] = (procs[-1][0], SyncToAsyncGeneratorWrapper(procs[-1][1]))
         self._procs = {k: v for (k, v) in procs}
 
     @staticmethod
