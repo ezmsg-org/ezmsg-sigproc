@@ -28,6 +28,7 @@ from ezmsg.sigproc.base import (
 )
 from ezmsg.sigproc.cheby import ChebyshevFilterTransformer
 from ezmsg.sigproc.filter import FilterByDesignState
+from ezmsg.util.generator import consumer
 
 # -- Mock Classes for Testing --
 
@@ -279,9 +280,11 @@ class ChainedCompositeProcessorWithDeepProcessors(
         }
 
 
+@consumer
 def mock_generator() -> Generator[MockMessageA, MockMessageA, None]:
     """A mock generator function for testing purposes."""
-    yield MockMessageA()
+    while True:
+        yield MockMessageA()
 
 
 class MockGeneratorCompositeProcessor(
@@ -367,9 +370,19 @@ class ChainedCompositeProducerWithDeepProcessors(
         }
 
 
+@consumer
 def mock_producer_generator() -> Generator[MockMessageA, None, None]:
     """A mock generator function for testing purposes."""
-    yield MockMessageA()
+    while True:
+        yield MockMessageA()
+
+
+def mock_generator_unprimed() -> Generator[MockMessageA, MockMessageA, None]:
+    """A mock generator function for testing purposes."""
+    output = MockMessageA()
+    while True:
+        input = yield output
+        output = input or output
 
 
 class MockGeneratorCompositeProducer(CompositeProducer[MockSettings, MockMessageB]):
@@ -377,6 +390,7 @@ class MockGeneratorCompositeProducer(CompositeProducer[MockSettings, MockMessage
     def _initialize_processors(settings):
         return {
             "generator": mock_producer_generator(),
+            "mock_generator_unprimed": mock_generator_unprimed(),
             "stateful_processor": MockStatefulProcessor(settings=settings),
         }
 
@@ -947,22 +961,17 @@ class TestCompositeProcessor:
         result = processor(None)
         assert isinstance(result, MockMessageC)
 
-    # def test_composite_processor_with_generator_sync(self):
-    #     processor = MockGeneratorCompositeProcessor()
-    #     # Attempt to use the sync processing interface and assert it raises an error
-    #     with pytest.raises(
-    #         Exception, match="'generator' object has no attribute '__call__'"
-    #     ):
-    #         processor._process(MockMessageA())
+    def test_composite_processor_with_generator_sync(self):
+        processor = MockGeneratorCompositeProcessor()
+        # Attempt to use the sync processing interface and assert it raises an error
+        result = processor._process(MockMessageA())
+        assert isinstance(result, MockMessageA)
 
     @pytest.mark.asyncio
     async def test_composite_processor_with_generator_async(self):
         processor = MockGeneratorCompositeProcessor()
-        # Attempt to use the async processing interface and assert it raises an error
-        with pytest.raises(
-            Exception, match="'generator' object has no attribute 'asend'"
-        ):
-            await processor._aprocess(MockMessageA())
+        result = await processor._aprocess(MockMessageA())
+        assert isinstance(result, MockMessageA)
 
     def test_state_property(self):
         processor1 = ValidMultipleCompositeProcessor()
@@ -1091,11 +1100,8 @@ class TestCompositeProducer:
     @pytest.mark.asyncio
     async def test_composite_producer_with_generator(self):
         producer = MockGeneratorCompositeProducer()
-        # Attempt to use the async processing interface and assert it raises an error
-        with pytest.raises(
-            Exception, match="'generator' object has no attribute '__anext__'"
-        ):
-            await producer._produce()
+        result = await producer._produce()
+        assert isinstance(result, MockMessageA)
 
     def test_state_property(self):
         producer1 = ValidMultipleCompositeProducer()
