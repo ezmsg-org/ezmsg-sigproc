@@ -1,8 +1,9 @@
-from typing import TypeVar, Coroutine, Any
 import asyncio
-import threading
 from concurrent.futures import ThreadPoolExecutor
 import contextlib
+import inspect
+import threading
+from typing import Any, Coroutine, TypeVar
 
 T = TypeVar("T")
 
@@ -89,3 +90,67 @@ def run_coroutine_sync(coroutine: Coroutine[Any, Any, T], timeout: float = 30) -
             raise CoroutineExecutionError(
                 f"Failed to execute coroutine threadsafe: {str(e)}"
             ) from e
+
+
+class SyncToAsyncGeneratorWrapper:
+    """
+    A wrapper for synchronous generators to be used in an async context.
+    """
+
+    def __init__(self, gen):
+        self._gen = gen
+        self._closed = False
+        # Prime the generator to ready for first send/next call
+        try:
+            is_not_primed = inspect.getgeneratorstate(self._gen) is inspect.GEN_CREATED
+        except AttributeError as e:
+            raise TypeError(
+                "The provided generator is not a valid generator object"
+            ) from e
+        if is_not_primed:
+            try:
+                next(self._gen)
+            except StopIteration:
+                self._closed = True
+            except Exception as e:
+                raise RuntimeError(f"Failed to prime generator: {e}") from e
+
+    async def asend(self, value):
+        if self._closed:
+            raise StopAsyncIteration("Generator is closed")
+        try:
+            return await asyncio.to_thread(self._gen.send, value)
+        except StopIteration as e:
+            self._closed = True
+            raise StopAsyncIteration("Generator is closed") from e
+        except Exception as e:
+            raise RuntimeError(f"Error while sending value to generator: {e}") from e
+
+    async def __anext__(self):
+        if self._closed:
+            raise StopAsyncIteration("Generator is closed")
+        try:
+            return await asyncio.to_thread(self._gen.__next__)
+        except StopIteration as e:
+            self._closed = True
+            raise StopAsyncIteration("Generator is closed") from e
+        except Exception as e:
+            raise RuntimeError(
+                f"Error while getting next value from generator: {e}"
+            ) from e
+
+    async def aclose(self):
+        if self._closed:
+            return
+        try:
+            await asyncio.to_thread(self._gen.close)
+        except Exception as e:
+            raise RuntimeError(f"Error while closing generator: {e}") from e
+        finally:
+            self._closed = True
+
+    def __aiter__(self):
+        return self
+
+    def __getattr__(self, name):
+        return getattr(self._gen, name)
