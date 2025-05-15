@@ -485,16 +485,16 @@ class TestHelperFunctions:
         )
 
         # Test with producers (should throw)
-        with pytest.raises(TypeError, match="Could not resolve MessageInType"):
+        with pytest.raises(TypeError, match=r"Could not resolve .*MessageInType"):
             _get_base_processor_message_in_type(MockProducer)
-        with pytest.raises(TypeError, match="Could not resolve MessageInType"):
+        with pytest.raises(TypeError, match=r"Could not resolve .*MessageInType"):
             _get_base_processor_message_in_type(MockStatefulProducer)
 
         # Test with no message in type should raise exception
         class NoMessageInTypeClass:
             pass
 
-        with pytest.raises(TypeError, match="Could not resolve MessageInType"):
+        with pytest.raises(TypeError, match=r"Could not resolve .*MessageInType"):
             _get_base_processor_message_in_type(NoMessageInTypeClass)
 
     def test_get_base_processor_message_out_type(self):
@@ -541,7 +541,7 @@ class TestHelperFunctions:
         class NoMessageOutTypeClass:
             pass
 
-        with pytest.raises(TypeError, match="Could not resolve MessageOutType"):
+        with pytest.raises(TypeError, match="Could not resolve .*MessageOutType"):
             _get_base_processor_message_out_type(NoMessageOutTypeClass)
 
     # Test _unify_settings function through the MockProcessor class __init__
