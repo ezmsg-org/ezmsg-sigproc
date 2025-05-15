@@ -29,9 +29,9 @@ processor_state = functools.partial(
 )
 
 # --- Type variables for protocols and processors ---
-MessageInType = typing.TypeVar("MessageInType", infer_variance=True)
-MessageOutType = typing.TypeVar("MessageOutType", infer_variance=True)
-SettingsType = typing.TypeVar("SettingsType", infer_variance=True)
+MessageInType = typing.TypeVar("MessageInType")
+MessageOutType = typing.TypeVar("MessageOutType")
+SettingsType = typing.TypeVar("SettingsType")
 StateType = typing.TypeVar("StateType")
 
 
@@ -1197,14 +1197,12 @@ class BaseTransformerUnit(
     INPUT_SIGNAL = ez.InputStream(MessageInType)
     OUTPUT_SIGNAL = ez.OutputStream(MessageOutType)
 
-    @typing.override
     def create_processor(self):
         # self.processor: TransformerType[SettingsType, MessageInType, MessageOutType, StateType]
         """Create the transformer instance from settings."""
         transformer_type = get_base_transformer_type(self.__class__)
         self.processor = transformer_type(settings=self.SETTINGS)
 
-    @typing.override
     @ez.subscriber(INPUT_SIGNAL, zero_copy=True)
     @ez.publisher(OUTPUT_SIGNAL)
     @profile_subpub(trace_oldest=False)
@@ -1225,14 +1223,12 @@ class BaseAdaptiveTransformerUnit(
     INPUT_SIGNAL = ez.InputStream(MessageInType)
     OUTPUT_SIGNAL = ez.OutputStream(MessageOutType)
 
-    @typing.override
     def create_processor(self) -> None:
         # self.processor: AdaptiveTransformerType[SettingsType, MessageInType, MessageOutType, StateType]
         """Create the adaptive transformer instance from settings."""
         adaptive_transformer_type = get_base_adaptive_transformer_type(self.__class__)
         self.processor = adaptive_transformer_type(settings=self.SETTINGS)
 
-    @typing.override
     @ez.subscriber(INPUT_SIGNAL, zero_copy=True)
     @ez.publisher(OUTPUT_SIGNAL)
     @profile_subpub(trace_oldest=False)
