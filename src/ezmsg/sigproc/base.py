@@ -763,15 +763,15 @@ class CompositeStateful(
                 )
             if next_in_type is None or next_in_type is type(None):
                 raise TypeError(
-                    f"Processor {i+1} (name: {procs[i+1][0]}, type: {procs[i+1][1].__class__.__name__}) is a producer "
+                    f"Processor {i + 1} (name: {procs[i + 1][0]}, type: {procs[i + 1][1].__class__.__name__}) is a producer "
                     f"or receives only None. Producers can only be the first processor of a composite producer chain."
                 )
             if not check_message_type_compatibility(current_out_type, next_in_type):
                 raise TypeError(
                     f"Message type mismatch between processors {i} (name: {procs[i][0]}, type: {procs[i][1].__class__.__name__}) "
-                    f"and {i+1} (name: {procs[i+1][0]}, type: {procs[i+1][1].__class__.__name__}): "
+                    f"and {i + 1} (name: {procs[i + 1][0]}, type: {procs[i + 1][1].__class__.__name__}): "
                     f"{procs[i][1].__class__.__name__} outputs {current_out_type}, "
-                    f"but {procs[i+1][1].__class__.__name__} expects {next_in_type}"
+                    f"but {procs[i + 1][1].__class__.__name__} expects {next_in_type}"
                 )
             if inspect.isgenerator(procs[i][1]) and hasattr(procs[i][1], "send"):
                 # If the processor is a generator, wrap it in a SyncToAsyncGeneratorWrapper

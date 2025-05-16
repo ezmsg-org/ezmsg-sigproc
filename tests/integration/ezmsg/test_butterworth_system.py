@@ -92,7 +92,7 @@ def test_butterworth_system(cutoff: float, cuton: float, test_name: str | None =
 
     os.remove(test_filename)
 
-    ez.logger.info(f"Analyzing recording of { len( messages ) } messages...")
+    ez.logger.info(f"Analyzing recording of {len(messages)} messages...")
 
     data = np.concatenate([msg.data for msg in messages], axis=0)
 

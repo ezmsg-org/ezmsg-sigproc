@@ -120,7 +120,7 @@ def test_window_system(
 
     messages: list[AxisArray] = [_ for _ in message_log(test_filename)]
     os.remove(test_filename)
-    ez.logger.info(f"Analyzing recording of { len( messages ) } messages...")
+    ez.logger.info(f"Analyzing recording of {len(messages)} messages...")
 
     # Within a test config, the metadata should not change across messages.
     for msg in messages:

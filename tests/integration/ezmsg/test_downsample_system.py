@@ -95,7 +95,7 @@ def test_downsample_system(
 
     messages: list[AxisArray] = [_ for _ in message_log(test_filename)]
     os.remove(test_filename)
-    ez.logger.info(f"Analyzing recording of { len( messages ) } messages...")
+    ez.logger.info(f"Analyzing recording of {len(messages)} messages...")
 
     # Check fs
     expected_factor: int = int(in_fs // target_rate) if factor is None else factor
