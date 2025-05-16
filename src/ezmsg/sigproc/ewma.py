@@ -177,6 +177,8 @@ class EWMATransformer(
         self._state.zi = (1 - self._state.alpha) * sub_dat
 
     def _process(self, message: AxisArray) -> AxisArray:
+        if np.prod(message.data.shape) == 0:
+            return message
         axis = self.settings.axis or message.dims[0]
         axis_idx = message.get_axis_idx(axis)
         expected, self._state.zi = sps.lfilter(
