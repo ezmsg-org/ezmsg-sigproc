@@ -156,4 +156,4 @@ def test_adaptive_lattice_notch_transformer():
 
     assert np.allclose(ref_concat.data, result_f, atol=1e-9)
 
-    debug_alnf_plot(result)
+    # debug_alnf_plot(result)
