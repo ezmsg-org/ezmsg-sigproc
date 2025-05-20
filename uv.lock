@@ -128,7 +128,7 @@ wheels = [
 
 [[package]]
 name = "ezmsg-sigproc"
-version = "1.7.2.dev134+gd220fca.d20250516"
+version = "1.7.2.dev136+ge8810ff.d20250518"
 source = { editable = "." }
 dependencies = [
     { name = "array-api-compat" },
