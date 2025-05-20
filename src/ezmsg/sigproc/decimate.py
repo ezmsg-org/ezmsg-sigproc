@@ -3,29 +3,39 @@ import typing
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 
-from .cheby import ChebyshevFilter, ChebyshevFilterSettings
+from .base import BaseTransformerUnit
+from .cheby import ChebyshevFilterTransformer, ChebyshevFilterSettings
 from .downsample import Downsample, DownsampleSettings
-from .filter import FilterCoefsMultiType
+from .filter import BACoeffs, SOSCoeffs
 
 
-class ChebyForDecimate(ChebyshevFilter):
+class ChebyForDecimateTransformer(ChebyshevFilterTransformer[BACoeffs | SOSCoeffs]):
     """
-    A :obj:`ChebyshevFilter` node with a design filter method that additionally accepts a target sampling rate,
+    A :obj:`ChebyshevFilterTransformer` with a design filter method that additionally accepts a target sampling rate,
      and if the target rate cannot be achieved it returns None, else it returns the filter coefficients.
     """
 
-    def design_filter(
+    def get_design_function(
         self,
-    ) -> typing.Callable[[float], FilterCoefsMultiType | None]:
-        def cheby_opt_design_fun(fs: float) -> FilterCoefsMultiType | None:
+    ) -> typing.Callable[[float], BACoeffs | SOSCoeffs | None]:
+        def cheby_opt_design_fun(fs: float) -> BACoeffs | SOSCoeffs | None:
             if fs is None:
                 return None
-            ds_factor = int(fs / (2.5 * self.SETTINGS.Wn))
+            ds_factor = int(fs / (2.5 * self.settings.Wn))
             if ds_factor < 2:
                 return None
-            partial_fun = super(ChebyForDecimate, self).design_filter()
+            partial_fun = super(ChebyForDecimateTransformer, self).get_design_function()
             return partial_fun(fs)
+
         return cheby_opt_design_fun
+
+
+class ChebyForDecimate(
+    BaseTransformerUnit[
+        ChebyshevFilterSettings, AxisArray, AxisArray, ChebyForDecimateTransformer
+    ]
+):
+    SETTINGS = ChebyshevFilterSettings
 
 
 class Decimate(ez.Collection):
@@ -43,7 +53,6 @@ class Decimate(ez.Collection):
     DOWNSAMPLE = Downsample()
 
     def configure(self) -> None:
-
         cheby_settings = ChebyshevFilterSettings(
             order=8,
             ripple_tol=0.05,

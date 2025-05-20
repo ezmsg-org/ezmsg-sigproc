@@ -1,12 +1,14 @@
-import typing
-
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 import numpy as np
 import numpy.typing as npt
 
-from .util.profile import profile_subpub
+from .base import (
+    BaseAsyncTransformer,
+    BaseTransformerUnit,
+    processor_state,
+)
 
 
 class SignalInjectorSettings(ez.Settings):
@@ -16,57 +18,64 @@ class SignalInjectorSettings(ez.Settings):
     mixing_seed: int | None = None
 
 
-class SignalInjectorState(ez.State):
+@processor_state
+class SignalInjectorState:
     cur_shape: tuple[int, ...] | None = None
     cur_frequency: float | None = None
-    cur_amplitude: float
-    mixing: npt.NDArray
+    cur_amplitude: float | None = None
+    mixing: npt.NDArray | None = None
 
 
-class SignalInjector(ez.Unit):
-    """
-    Add a sinusoidal signal to the input signal. Each feature gets a different amplitude of the sinusoid.
-    All features get the same frequency sinusoid. The frequency and base amplitude can be changed while running.
-    """
+class SignalInjectorTransformer(
+    BaseAsyncTransformer[
+        SignalInjectorSettings, AxisArray, AxisArray, SignalInjectorState
+    ]
+):
+    def _hash_message(self, message: AxisArray) -> int:
+        time_ax_idx = message.get_axis_idx(self.settings.time_dim)
+        sample_shape = (
+            message.data.shape[:time_ax_idx] + message.data.shape[time_ax_idx + 1 :]
+        )
+        return hash((message.key,) + sample_shape)
 
+    def _reset_state(self, message: AxisArray) -> None:
+        if self._state.cur_frequency is None:
+            self._state.cur_frequency = self.settings.frequency
+        if self._state.cur_amplitude is None:
+            self._state.cur_amplitude = self.settings.amplitude
+        time_ax_idx = message.get_axis_idx(self.settings.time_dim)
+        self._state.cur_shape = (
+            message.data.shape[:time_ax_idx] + message.data.shape[time_ax_idx + 1 :]
+        )
+        rng = np.random.default_rng(self.settings.mixing_seed)
+        self._state.mixing = rng.random((1, message.shape2d(self.settings.time_dim)[1]))
+        self._state.mixing = (self._state.mixing * 2.0) - 1.0
+
+    async def _aprocess(self, message: AxisArray) -> AxisArray:
+        if self._state.cur_frequency is None:
+            return message
+        out_msg = replace(message, data=message.data.copy())
+        t = out_msg.ax(self.settings.time_dim).values[..., np.newaxis]
+        signal = np.sin(2 * np.pi * self._state.cur_frequency * t)
+        mixed_signal = signal * self._state.mixing * self._state.cur_amplitude
+        with out_msg.view2d(self.settings.time_dim) as view:
+            view[...] = view + mixed_signal.astype(view.dtype)
+        return out_msg
+
+
+class SignalInjector(
+    BaseTransformerUnit[
+        SignalInjectorSettings, AxisArray, AxisArray, SignalInjectorTransformer
+    ]
+):
     SETTINGS = SignalInjectorSettings
-    STATE = SignalInjectorState
-
     INPUT_FREQUENCY = ez.InputStream(float | None)
     INPUT_AMPLITUDE = ez.InputStream(float)
-    INPUT_SIGNAL = ez.InputStream(AxisArray)
-    OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
-
-    async def initialize(self) -> None:
-        self.STATE.cur_frequency = self.SETTINGS.frequency
-        self.STATE.cur_amplitude = self.SETTINGS.amplitude
-        self.STATE.mixing = np.array([])
 
     @ez.subscriber(INPUT_FREQUENCY)
     async def on_frequency(self, msg: float | None) -> None:
-        self.STATE.cur_frequency = msg
+        self.processor.state.cur_frequency = msg
 
     @ez.subscriber(INPUT_AMPLITUDE)
     async def on_amplitude(self, msg: float) -> None:
-        self.STATE.cur_amplitude = msg
-
-    @ez.subscriber(INPUT_SIGNAL)
-    @ez.publisher(OUTPUT_SIGNAL)
-    @profile_subpub(trace_oldest=False)
-    async def inject(self, msg: AxisArray) -> typing.AsyncGenerator:
-        if self.STATE.cur_shape != msg.shape:
-            self.STATE.cur_shape = msg.shape
-            rng = np.random.default_rng(self.SETTINGS.mixing_seed)
-            self.STATE.mixing = rng.random((1, msg.shape2d(self.SETTINGS.time_dim)[1]))
-            self.STATE.mixing = (self.STATE.mixing * 2.0) - 1.0
-
-        if self.STATE.cur_frequency is None:
-            yield self.OUTPUT_SIGNAL, msg
-        else:
-            out_msg = replace(msg, data=msg.data.copy())
-            t = out_msg.ax(self.SETTINGS.time_dim).values[..., np.newaxis]
-            signal = np.sin(2 * np.pi * self.STATE.cur_frequency * t)
-            mixed_signal = signal * self.STATE.mixing * self.STATE.cur_amplitude
-            with out_msg.view2d(self.SETTINGS.time_dim) as view:
-                view[...] = view + mixed_signal.astype(view.dtype)
-            yield self.OUTPUT_SIGNAL, out_msg
+        self.processor.state.cur_amplitude = msg

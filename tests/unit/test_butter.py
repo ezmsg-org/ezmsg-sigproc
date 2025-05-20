@@ -164,3 +164,98 @@ def test_butterworth_empty_msg():
     )
     res = proc.send(msg_in)
     assert res.data.size == 0
+
+
+def test_butterworth_update_settings():
+    """Test the update_settings functionality of the Butterworth filter."""
+    # Setup parameters
+    fs = 200.0
+    dur = 2.0
+    n_times = int(dur * fs)
+    n_chans = 2
+
+    # Create input data - simple sine wave at 10Hz
+    t = np.arange(n_times) / fs
+    # Create a 10Hz sine wave on channel 0 and a 40Hz sine wave on channel 1
+    freqs = [10.0, 40.0]
+    in_dat = np.vstack([np.sin(2 * np.pi * f * t) for f in freqs]).T
+
+    # Create message
+    msg_in = AxisArray(
+        data=in_dat,
+        dims=["time", "ch"],
+        axes={
+            "time": AxisArray.TimeAxis(fs=fs, offset=0),
+            "ch": AxisArray.CoordinateAxis(
+                data=np.arange(n_chans).astype(str), dims=["ch"]
+            ),
+        },
+        key="test_butterworth_update_settings",
+    )
+
+    def _calc_power(msg, targ_freqs):
+        """Calculate power at target frequencies for each channel."""
+        fft_result = np.abs(np.fft.rfft(msg.data, axis=0)) ** 2
+        fft_freqs = np.fft.rfftfreq(len(msg.data), 1 / fs)
+        return np.vstack(
+            [np.max(fft_result[np.abs(fft_freqs - f) < 1], axis=0) for f in targ_freqs]
+        )
+
+    power0 = _calc_power(msg_in, targ_freqs=freqs)
+    assert np.argmax(power0[:, 0]) == 0  # 10Hz should be the strongest frequency in ch0
+    assert np.argmax(power0[:, 1]) == 1  # 40Hz should be the strongest frequency in ch1
+
+    # Initialize filter - lowpass at 30Hz should pass 10Hz but attenuate 40Hz
+    proc = butter(
+        axis="time",
+        order=4,
+        cutoff=30.0,  # Lowpass at 30Hz
+        cuton=None,
+        coef_type="sos",
+    )
+
+    # Process first message
+    result1 = proc(msg_in)
+
+    # Apply spectral analysis to confirm filter characteristics
+    power1 = _calc_power(result1, targ_freqs=freqs)
+    assert power1[0][0] / power0[0][0] > 0.9  # 10Hz should be passed
+    assert power1[1][1] / power0[1][1] < 0.1  # 40Hz should be attenuated
+
+    # Update settings - change to a highpass at 25Hz (should attenuate 10Hz, pass 40Hz)
+    proc.update_settings(cutoff=None, cuton=25.0)
+
+    # Process the same message with new settings
+    result2 = proc(msg_in)
+
+    # Calculate power after update
+    power2 = _calc_power(result2, targ_freqs=freqs)
+
+    # Verify that the filter behavior changed correctly
+    assert power2[0][0] / power0[0][0] < 0.1  # 10Hz should be attenuated
+    assert power2[1][1] / power0[1][1] > 0.9  # 40Hz should
+
+    # Test with order change (should reset the state)
+    proc.update_settings(cuton=25.0, order=8)
+    result3 = proc(msg_in)
+    power3 = _calc_power(result3, targ_freqs=freqs)
+    assert power3[0][0] / power2[0][0] < 0.1  # 10Hz should be _further_ attenuated
+
+    # Test update_settings with complete new settings object, includes coef_type change.
+    from ezmsg.sigproc.butterworthfilter import ButterworthFilterSettings
+
+    new_settings = ButterworthFilterSettings(
+        axis="time",
+        order=2,
+        cutoff=15.0,  # Lowpass at 15Hz
+        cuton=None,
+        coef_type="ba",  # Change coefficient type
+    )
+
+    proc.update_settings(new_settings=new_settings)
+    result4 = proc(msg_in)
+    power4 = _calc_power(result4, targ_freqs=freqs)
+    assert (
+        0.9 > (power4[0][0] / power0[0][0]) > 0.8
+    )  # 10Hz should be passed, but not as much
+    assert power4[1][1] / power0[1][1] < 0.1  # 40Hz should be attenuated

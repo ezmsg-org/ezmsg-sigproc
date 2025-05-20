@@ -12,7 +12,7 @@ from ezmsg.util.terminate import TerminateOnTimeoutSettings as TerminateTestSett
 
 from ezmsg.sigproc.synth import WhiteNoise, WhiteNoiseSettings
 from ezmsg.sigproc.butterworthfilter import ButterworthFilter, ButterworthFilterSettings
-from util import get_test_fn
+from tests.helpers.util import get_test_fn
 
 
 class ButterworthSystemSettings(ez.Settings):
@@ -92,7 +92,7 @@ def test_butterworth_system(cutoff: float, cuton: float, test_name: str | None =
 
     os.remove(test_filename)
 
-    ez.logger.info(f"Analyzing recording of { len( messages ) } messages...")
+    ez.logger.info(f"Analyzing recording of {len(messages)} messages...")
 
     data = np.concatenate([msg.data for msg in messages], axis=0)
 
