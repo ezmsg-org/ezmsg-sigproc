@@ -128,7 +128,7 @@ wheels = [
 
 [[package]]
 name = "ezmsg-sigproc"
-version = "1.7.2.dev136+ge8810ff.d20250518"
+version = "1.8.3.dev141+ge6944d6.d20250520"
 source = { editable = "." }
 dependencies = [
     { name = "array-api-compat" },
@@ -161,7 +161,7 @@ requires-dist = [
     { name = "ezmsg", specifier = ">=3.6.0" },
     { name = "flake8", marker = "extra == 'test'", specifier = ">=7.1.1" },
     { name = "frozendict", marker = "extra == 'test'", specifier = ">=2.4.4" },
-    { name = "numba", specifier = ">=0.60.0" },
+    { name = "numba", specifier = ">=0.61.0" },
     { name = "numpy", specifier = ">=1.26.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.3.3" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.24.0" },
