@@ -2,7 +2,7 @@ import copy
 
 import numpy as np
 from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.sigproc.bandpower import bandpower, SpectrogramSettings
+from ezmsg.sigproc.bandpower import bandpower, SpectrogramSettings, AggregationFunction
 
 from tests.helpers.util import (
     create_messages_with_periodic_signal,
@@ -45,6 +45,7 @@ def test_bandpower():
             window_shift=0.1,
         ),
         bands=bands,
+        aggregation=AggregationFunction.MEAN,
     )
     results = [gen.send(_) for _ in messages]
 

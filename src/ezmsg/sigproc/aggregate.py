@@ -36,6 +36,7 @@ class AggregationFunction(OptionsEnum):
     NANSUM = "nansum"
     ARGMIN = "argmin"
     ARGMAX = "argmax"
+    TRAPEZOID = "trapezoid"
 
 
 AGGREGATORS = {
@@ -54,6 +55,9 @@ AGGREGATORS = {
     AggregationFunction.NANSUM: np.nansum,
     AggregationFunction.ARGMIN: np.argmin,
     AggregationFunction.ARGMAX: np.argmax,
+    # Note: Some methods require x-coordinates and
+    #  are handled specially in `_process`.
+    AggregationFunction.TRAPEZOID: np.trapezoid,
 }
 
 
@@ -144,10 +148,23 @@ class RangedAggregateTransformer(
         ax_idx = message.get_axis_idx(axis)
         agg_func = AGGREGATORS[self.settings.operation]
 
-        out_data = [
-            agg_func(slice_along_axis(message.data, sl, axis=ax_idx), axis=ax_idx)
-            for sl in self._state.slices
-        ]
+        if self.settings.operation in [
+            AggregationFunction.TRAPEZOID,
+        ]:
+            # Special handling for methods that require x-coordinates.
+            out_data = [
+                agg_func(
+                    slice_along_axis(message.data, sl, axis=ax_idx),
+                    x=self._state.ax_vec[sl],
+                    axis=ax_idx,
+                )
+                for sl in self._state.slices
+            ]
+        else:
+            out_data = [
+                agg_func(slice_along_axis(message.data, sl, axis=ax_idx), axis=ax_idx)
+                for sl in self._state.slices
+            ]
 
         msg_out = replace(
             message,
