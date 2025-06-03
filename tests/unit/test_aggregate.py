@@ -110,6 +110,30 @@ def test_arg_aggregate(agg_func: AggregationFunction):
     assert np.array_equal(out_dat, expected_dat)
 
 
+def test_trapezoid():
+    bands = [(5.0, 20.0), (30.0, 50.0)]
+    in_msgs = [_ for _ in get_msg_gen()]
+    gen = ranged_aggregate(
+        axis="freq", bands=bands, operation=AggregationFunction.TRAPEZOID
+    )
+    out_msgs = [gen.send(_) for _ in in_msgs]
+
+    out_dat = AxisArray.concatenate(*out_msgs, dim="time").data
+
+    # Calculate expected data using trapezoidal integration
+    in_data = AxisArray.concatenate(*in_msgs, dim="time").data
+    targ_ax = in_msgs[0].axes["freq"]
+    targ_ax_vec = targ_ax.value(np.arange(in_data.shape[-1]))
+    expected = []
+    for start, stop in bands:
+        inds = np.logical_and(targ_ax_vec >= start, targ_ax_vec <= stop)
+        expected.append(np.trapezoid(in_data[..., inds], x=targ_ax_vec[inds], axis=-1))
+    expected = np.stack(expected, axis=-1)
+
+    assert out_dat.shape == expected.shape
+    assert np.allclose(out_dat, expected)
+
+
 @pytest.mark.parametrize("change_ax", ["ch", "freq"])
 def test_aggregate_handle_change(change_ax: str):
     """
