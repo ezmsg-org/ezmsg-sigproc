@@ -36,6 +36,9 @@ class BandPowerSettings(ez.Settings):
     (min, max) tuples of band limits in Hz.
     """
 
+    aggregation: AggregationFunction = AggregationFunction.MEAN
+    """:obj:`AggregationFunction` to apply to each band."""
+
 
 class BandPowerTransformer(CompositeProcessor[BandPowerSettings, AxisArray, AxisArray]):
     @staticmethod
@@ -50,7 +53,7 @@ class BandPowerTransformer(CompositeProcessor[BandPowerSettings, AxisArray, Axis
                 settings=RangedAggregateSettings(
                     axis="freq",
                     bands=settings.bands,
-                    operation=AggregationFunction.MEAN,
+                    operation=settings.aggregation,
                 )
             ),
         }
@@ -68,6 +71,7 @@ def bandpower(
         (17, 30),
         (70, 170),
     ],
+    aggregation: AggregationFunction = AggregationFunction.MEAN,
 ) -> BandPowerTransformer:
     """
     Calculate the average spectral power in each band.
@@ -77,6 +81,8 @@ def bandpower(
     """
     return BandPowerTransformer(
         settings=BandPowerSettings(
-            spectrogram_settings=spectrogram_settings, bands=bands
+            spectrogram_settings=spectrogram_settings,
+            bands=bands,
+            aggregation=aggregation,
         )
     )
