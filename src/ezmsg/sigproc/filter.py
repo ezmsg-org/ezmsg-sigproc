@@ -32,8 +32,8 @@ FilterCoefsType = typing.TypeVar("FilterCoefsType", BACoeffs, SOSCoeffs)
 
 
 def _normalize_coefs(
-    coefs: FilterCoefficients | tuple[npt.NDArray, npt.NDArray] | npt.NDArray,
-) -> tuple[str, tuple[npt.NDArray, ...]]:
+    coefs: FilterCoefficients | tuple[npt.NDArray, npt.NDArray] | npt.NDArray | None,
+) -> tuple[str, tuple[npt.NDArray, ...] | None]:
     coef_type = "ba"
     if coefs is not None:
         # scipy.signal functions called with first arg `*coefs`.
@@ -42,7 +42,9 @@ def _normalize_coefs(
             coef_type = "sos"
             coefs = (coefs,)  # sos funcs just want a single ndarray.
         elif isinstance(coefs, FilterCoefficients):
-            coefs = (FilterCoefficients.b, FilterCoefficients.a)
+            coefs = (coefs.b, coefs.a)
+        elif not isinstance(coefs, tuple):
+            coefs = (coefs,)
     return coef_type, coefs
 
 
@@ -91,12 +93,7 @@ class FilterTransformer(
         axis = message.dims[0] if self.settings.axis is None else self.settings.axis
         axis_idx = message.get_axis_idx(axis)
         n_tail = message.data.ndim - axis_idx - 1
-        coefs = (
-            (self.settings.coefs,)
-            if self.settings.coefs is not None
-            and not isinstance(self.settings.coefs, tuple)
-            else self.settings.coefs
-        )
+        _, coefs = _normalize_coefs(self.settings.coefs)
         zi_func = {"ba": scipy.signal.lfilter_zi, "sos": scipy.signal.sosfilt_zi}[
             self.settings.coef_type
         ]
@@ -166,12 +163,7 @@ class FilterTransformer(
         if message.data.size > 0:
             axis = message.dims[0] if self.settings.axis is None else self.settings.axis
             axis_idx = message.get_axis_idx(axis)
-            coefs = (
-                (self.settings.coefs,)
-                if self.settings.coefs is not None
-                and not isinstance(self.settings.coefs, tuple)
-                else self.settings.coefs
-            )
+            _, coefs = _normalize_coefs(self.settings.coefs)
             filt_func = {"ba": scipy.signal.lfilter, "sos": scipy.signal.sosfilt}[
                 self.settings.coef_type
             ]
