@@ -3,56 +3,55 @@ import pytest
 from ezmsg.util.messages.axisarray import AxisArray
 
 from ezmsg.sigproc.gaussiansmoothing import (
-    gaussian_smoothing_filter,
     gaussian_smoothing_filter_design,
     GaussianSmoothingSettings,
     GaussianSmoothingFilterTransformer,
 )
 
 
-def test_gaussian_smoothing_filter_function():
+@pytest.mark.parametrize(
+    "axis,sigma,width,kernel_size,coef_type",
+    [
+        ("time", 1.5, 5, None, "ba"),
+        ("time", 2.0, 4, 21, "ba"),
+    ],
+)
+def test_gaussian_smoothing_filter_function(axis, sigma, width, kernel_size, coef_type):
     """Test the gaussian_smoothing_filter convenience function."""
-    # Test basic usage
-    transformer = gaussian_smoothing_filter(
-        axis="time", sigma=1.5, width=5, kernel_size=None, coef_type="ba"
+    transformer = GaussianSmoothingFilterTransformer(
+        axis=axis,
+        sigma=sigma,
+        width=width,
+        kernel_size=kernel_size,
+        coef_type=coef_type,
     )
 
     assert isinstance(transformer, GaussianSmoothingFilterTransformer)
-    assert transformer.settings.axis == "time"
-    assert transformer.settings.sigma == 1.5
-    assert transformer.settings.width == 5
-    assert transformer.settings.kernel_size is None
-    assert transformer.settings.coef_type == "ba"
-
-    # Test with custom kernel_size
-    transformer_custom = gaussian_smoothing_filter(
-        axis="time", sigma=2.0, width=4, kernel_size=21, coef_type="ba"
-    )
-
-    assert transformer_custom.settings.axis == "time"
-    assert transformer_custom.settings.sigma == 2.0
-    assert transformer_custom.settings.width == 4
-    assert transformer_custom.settings.kernel_size == 21
-    assert transformer_custom.settings.coef_type == "ba"
+    assert transformer.settings.axis == axis
+    assert transformer.settings.sigma == sigma
+    assert transformer.settings.width == width
+    assert transformer.settings.kernel_size == kernel_size
+    assert transformer.settings.coef_type == coef_type
 
 
-def test_gaussian_smoothing_settings():
-    """Test the GaussianSmoothingSettings class."""
-    # Test default settings
+def test_gaussian_smoothing_settings_defaults():
+    """Test the GaussianSmoothingSettings class with default values."""
     settings = GaussianSmoothingSettings()
     assert settings.sigma == 1.0
     assert settings.width == 4
     assert settings.kernel_size is None
     assert settings.coef_type == "ba"
 
-    # Test custom settings
-    settings_custom = GaussianSmoothingSettings(
+
+def test_gaussian_smoothing_settings_custom():
+    """Test the GaussianSmoothingSettings class with custom values."""
+    settings = GaussianSmoothingSettings(
         sigma=2.5, width=6, kernel_size=21, coef_type="ba"
     )
-    assert settings_custom.sigma == 2.5
-    assert settings_custom.width == 6
-    assert settings_custom.kernel_size == 21
-    assert settings_custom.coef_type == "ba"
+    assert settings.sigma == 2.5
+    assert settings.width == 6
+    assert settings.kernel_size == 21
+    assert settings.coef_type == "ba"
 
 
 @pytest.mark.parametrize(
@@ -221,7 +220,7 @@ def test_gaussian_smoothing_update_settings():
     original_variance = _calc_smoothing_effect(msg_in)
 
     # Initialize filter with small sigma (minimal smoothing)
-    proc = gaussian_smoothing_filter(
+    proc = GaussianSmoothingFilterTransformer(
         axis="time",
         sigma=0.5,
         width=4,

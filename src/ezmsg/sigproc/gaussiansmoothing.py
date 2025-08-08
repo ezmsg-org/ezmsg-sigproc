@@ -98,23 +98,3 @@ class GaussianSmoothingFilter(
     ]
 ):
     SETTINGS = GaussianSmoothingSettings
-
-
-def gaussian_smoothing_filter(
-    axis: str | None,
-    sigma: float = 1.0,
-    # dims: int = 1,
-    width: int = 4,
-    kernel_size: int | None = None,
-    coef_type: str = "ba",
-) -> GaussianSmoothingFilterTransformer:
-    return GaussianSmoothingFilterTransformer(
-        GaussianSmoothingSettings(
-            axis=axis,
-            sigma=sigma,
-            # dims=dims,
-            width=width,
-            kernel_size=kernel_size,
-            coef_type=coef_type,
-        )
-    )
