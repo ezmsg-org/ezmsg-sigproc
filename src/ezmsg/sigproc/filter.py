@@ -38,7 +38,7 @@ def _normalize_coefs(
     if coefs is not None:
         # scipy.signal functions called with first arg `*coefs`.
         # Make sure we have a tuple of coefficients.
-        if isinstance(coefs, npt.NDArray):
+        if isinstance(coefs, np.ndarray):
             coef_type = "sos"
             coefs = (coefs,)  # sos funcs just want a single ndarray.
         elif isinstance(coefs, FilterCoefficients):
