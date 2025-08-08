@@ -1,5 +1,4 @@
 import numpy as np
-from scipy.ndimage import gaussian_filter1d
 import pytest
 from ezmsg.util.messages.axisarray import AxisArray
 
@@ -8,7 +7,6 @@ from ezmsg.sigproc.gaussiansmoothing import (
     gaussian_smoothing_filter_design,
     GaussianSmoothingSettings,
     GaussianSmoothingFilterTransformer,
-    GaussianSmoothingFilter,
 )
 
 
@@ -16,29 +14,21 @@ def test_gaussian_smoothing_filter_function():
     """Test the gaussian_smoothing_filter convenience function."""
     # Test basic usage
     transformer = gaussian_smoothing_filter(
-        axis="time",
-        sigma=1.5,
-        width=5,
-        kernel_size=None,
-        coef_type="ba"
+        axis="time", sigma=1.5, width=5, kernel_size=None, coef_type="ba"
     )
-    
+
     assert isinstance(transformer, GaussianSmoothingFilterTransformer)
     assert transformer.settings.axis == "time"
     assert transformer.settings.sigma == 1.5
     assert transformer.settings.width == 5
     assert transformer.settings.kernel_size is None
     assert transformer.settings.coef_type == "ba"
-    
+
     # Test with custom kernel_size
     transformer_custom = gaussian_smoothing_filter(
-        axis="time",
-        sigma=2.0,
-        width=4,
-        kernel_size=21,
-        coef_type="ba"
+        axis="time", sigma=2.0, width=4, kernel_size=21, coef_type="ba"
     )
-    
+
     assert transformer_custom.settings.axis == "time"
     assert transformer_custom.settings.sigma == 2.0
     assert transformer_custom.settings.width == 4
@@ -54,13 +44,10 @@ def test_gaussian_smoothing_settings():
     assert settings.width == 4
     assert settings.kernel_size is None
     assert settings.coef_type == "ba"
-    
+
     # Test custom settings
     settings_custom = GaussianSmoothingSettings(
-        sigma=2.5,
-        width=6,
-        kernel_size=21,
-        coef_type="ba"
+        sigma=2.5, width=6, kernel_size=21, coef_type="ba"
     )
     assert settings_custom.sigma == 2.5
     assert settings_custom.width == 6
@@ -68,31 +55,40 @@ def test_gaussian_smoothing_settings():
     assert settings_custom.coef_type == "ba"
 
 
-@pytest.mark.parametrize("sigma,width,kernel_size,coef_type", [
-    (1.0, 4, None, "ba"),
-    (2.0, 6, None, "ba"),
-    (1.5, 5, 11, "ba"),
-    (1.5, 5, 17, "ba"),  # Fixed kernel_size to be >= expected
-    (3.0, 2, None, "sos"),
-])
-def test_gaussian_smoothing_filter_design_parameters(sigma, width, kernel_size, coef_type):
+@pytest.mark.parametrize(
+    "sigma,width,kernel_size,coef_type",
+    [
+        (1.0, 4, None, "ba"),
+        (2.0, 6, None, "ba"),
+        (1.5, 5, 11, "ba"),
+        (1.5, 5, 17, "ba"),  # Fixed kernel_size to be >= expected
+        (3.0, 2, None, "sos"),
+    ],
+)
+def test_gaussian_smoothing_filter_design_parameters(
+    sigma, width, kernel_size, coef_type
+):
     """Test gaussian smoothing filter design across multiple parameter configurations."""
-    coefs = gaussian_smoothing_filter_design(sigma=sigma, width=width, kernel_size=kernel_size, coef_type=coef_type)
+    coefs = gaussian_smoothing_filter_design(
+        sigma=sigma, width=width, kernel_size=kernel_size, coef_type=coef_type
+    )
     assert coefs is not None
     assert isinstance(coefs, tuple)
     assert len(coefs) == 2  # b and a coefficients
-    
+
     b, a = coefs
     assert b is not None and a is not None
     assert isinstance(b, np.ndarray) and isinstance(a, np.ndarray)
-    assert np.all(b >= 0) # positive
-    assert np.allclose(b, b[::-1]) # symmetric
-    assert np.isclose(np.sum(b), 1.0) # normalized
-    assert b[len(b)//2] == np.max(b)  # center of kernel is peak
-    assert len(a) == 1 and a[0] == 1.0 # default for gaussian window
+    assert np.all(b >= 0)  # positive
+    assert np.allclose(b, b[::-1])  # symmetric
+    assert np.isclose(np.sum(b), 1.0)  # normalized
+    assert b[len(b) // 2] == np.max(b)  # center of kernel is peak
+    assert len(a) == 1 and a[0] == 1.0  # default for gaussian window
 
     if coef_type == "ba":
-        expected_kernel_size = int(2 * width * sigma + 1) if kernel_size is None else kernel_size
+        expected_kernel_size = (
+            int(2 * width * sigma + 1) if kernel_size is None else kernel_size
+        )
         assert len(b) == expected_kernel_size
     else:
         assert len(b) == 1
@@ -105,8 +101,8 @@ def test_gaussian_smoothing_kernel_properties():
     coefs_large = gaussian_smoothing_filter_design(sigma=3.0)
     b_large, _ = coefs_large
 
-    assert len(b_large) >= len(b_small) # wider kernel
-    assert b_large[len(b_large)//2] < b_small[len(b_small)//2] # lower peak
+    assert len(b_large) >= len(b_small)  # wider kernel
+    assert b_large[len(b_large) // 2] < b_small[len(b_small) // 2]  # lower peak
 
 
 @pytest.mark.parametrize("sigma", [0.0, -1.0])
@@ -127,20 +123,18 @@ def test_gaussian_smoothing_filter_process(data_shape):
     """Test gaussian smoothing filter with different data shapes."""
     # Create test data
     data = np.arange(np.prod(data_shape)).reshape(data_shape)
-    
+
     # Create appropriate dims and axes based on shape
     if len(data_shape) == 1:
         dims = ["time"]
-        axes = {
-            "time": AxisArray.TimeAxis(fs=100.0, offset=0)
-        }
+        axes = {"time": AxisArray.TimeAxis(fs=100.0, offset=0)}
     elif len(data_shape) == 2:
         dims = ["time", "ch"]
         axes = {
             "time": AxisArray.TimeAxis(fs=100.0, offset=0),
             "ch": AxisArray.CoordinateAxis(
                 data=np.arange(data_shape[1]).astype(str), dims=["ch"]
-            )
+            ),
         }
     else:
         dims = ["freq", "time", "ch"]
@@ -149,20 +143,16 @@ def test_gaussian_smoothing_filter_process(data_shape):
             "time": AxisArray.TimeAxis(fs=100.0, offset=0),
             "ch": AxisArray.CoordinateAxis(
                 data=np.arange(data_shape[2]).astype(str), dims=["ch"]
-            )
+            ),
         }
-    
+
     msg = AxisArray(data=data, dims=dims, axes=axes, key="test_gaussian_smoothing")
 
     # Instantiate transformer (not unit)
     transformer = GaussianSmoothingFilterTransformer(
-        settings=GaussianSmoothingSettings(
-            axis="time",
-            sigma=2.0,
-            width=4
-        )
+        settings=GaussianSmoothingSettings(axis="time", sigma=2.0, width=4)
     )
-    
+
     # Process message using __call__ method
     output_msg = transformer(msg)
 
@@ -179,18 +169,18 @@ def test_gaussian_smoothing_edge_cases():
     b_small, a_small = coefs_small
     assert len(b_small) > 0
     assert np.isclose(np.sum(b_small), 1.0)
-    
+
     # Test with very large sigma
     coefs_large = gaussian_smoothing_filter_design(sigma=100.0)
     b_large, a_large = coefs_large
     assert len(b_large) > 0
     assert np.isclose(np.sum(b_large), 1.0)
-    
+
     # Test with very small width
     coefs_narrow = gaussian_smoothing_filter_design(width=1)
     b_narrow, a_narrow = coefs_narrow
     assert len(b_narrow) > 0
-    
+
     # Test with very large width
     coefs_wide = gaussian_smoothing_filter_design(width=100)
     b_wide, a_wide = coefs_wide
@@ -241,7 +231,7 @@ def test_gaussian_smoothing_update_settings():
     # Process first message
     result1 = proc(msg_in)
     variance1 = _calc_smoothing_effect(result1)
-    
+
     # Small sigma should have minimal effect
     assert np.allclose(variance1, original_variance, rtol=0.1)
 
@@ -267,7 +257,6 @@ def test_gaussian_smoothing_update_settings():
     proc.update_settings(new_settings=new_settings)
     result3 = proc(msg_in)
     variance3 = _calc_smoothing_effect(result3)
-    
+
     # Even larger sigma should reduce variance further
     assert np.all(variance3 < variance2)
-
