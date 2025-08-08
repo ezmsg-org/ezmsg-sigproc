@@ -11,8 +11,7 @@ def test_filter_transformer_accepts_dataclass_coefficients():
         axes={"time": AxisArray.TimeAxis(fs=1.0, offset=0.0)},
         key="test",
     )
-    coefs = FilterCoefficients(b=np.array([1.0]), a=np.array([1.0]))
+    coefs = FilterCoefficients(b=np.array([1.0]), a=np.array([1.0, 0.0]))
     transformer = FilterTransformer(settings=FilterSettings(axis="time", coefs=coefs))
     out = transformer(msg)
     assert np.allclose(out.data, data)
-
