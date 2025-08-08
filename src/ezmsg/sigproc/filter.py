@@ -94,10 +94,19 @@ class FilterTransformer(
         axis_idx = message.get_axis_idx(axis)
         n_tail = message.data.ndim - axis_idx - 1
         _, coefs = _normalize_coefs(self.settings.coefs)
-        zi_func = {"ba": scipy.signal.lfilter_zi, "sos": scipy.signal.sosfilt_zi}[
-            self.settings.coef_type
-        ]
-        zi = zi_func(*coefs)
+
+        if self.settings.coef_type == "ba":
+            b, a = coefs
+            if len(a) == 1 or np.allclose(a[1:], 0):
+                # For FIR filters, use lfiltic with zero initial conditions
+                zi = scipy.signal.lfiltic(b, a, [])
+            else:
+                # For IIR filters...
+                zi = scipy.signal.lfilter_zi(b, a)
+        else:
+            # For second-order sections (SOS) filters, use sosfilt_zi
+            zi = scipy.signal.sosfilt_zi(*coefs)
+
         zi_expand = (None,) * axis_idx + (slice(None),) + (None,) * n_tail
         n_tile = (
             message.data.shape[:axis_idx] + (1,) + message.data.shape[axis_idx + 1 :]
