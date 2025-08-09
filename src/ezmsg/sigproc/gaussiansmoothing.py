@@ -35,7 +35,6 @@ def gaussian_smoothing_filter_design(
     sigma: float = 1.0,
     width: int = 4,
     kernel_size: int | None = None,
-    coef_type: str = "ba",
 ) -> BACoeffs | None:
     # Parameter checks
     if sigma <= 0:
@@ -69,9 +68,7 @@ def gaussian_smoothing_filter_design(
 
     a = np.array([1.0])  # default for gaussian window
 
-    if coef_type == "ba":
-        return (b, a)  # Return as tuple, not BACoeffs(b=b, a=a)
-    return (np.array([1.0]), np.array([1.0]))  # Return as tuple for non-ba case
+    return b, a
 
 
 class GaussianSmoothingFilterTransformer(
@@ -86,7 +83,6 @@ class GaussianSmoothingFilterTransformer(
                 sigma=self.settings.sigma,
                 width=self.settings.width,
                 kernel_size=self.settings.kernel_size,
-                coef_type=self.settings.coef_type,
             )
 
         return design_wrapper

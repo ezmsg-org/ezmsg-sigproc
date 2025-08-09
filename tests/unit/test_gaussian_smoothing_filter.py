@@ -10,20 +10,19 @@ from ezmsg.sigproc.gaussiansmoothing import (
 
 
 @pytest.mark.parametrize(
-    "axis,sigma,width,kernel_size,coef_type",
+    "axis,sigma,width,kernel_size",
     [
-        ("time", 1.5, 5, None, "ba"),
-        ("time", 2.0, 4, 21, "ba"),
+        ("time", 1.5, 5, None),
+        ("time", 2.0, 4, 21),
     ],
 )
-def test_gaussian_smoothing_filter_function(axis, sigma, width, kernel_size, coef_type):
+def test_gaussian_smoothing_filter_function(axis, sigma, width, kernel_size):
     """Test the gaussian_smoothing_filter convenience function."""
     transformer = GaussianSmoothingFilterTransformer(
         axis=axis,
         sigma=sigma,
         width=width,
         kernel_size=kernel_size,
-        coef_type=coef_type,
     )
 
     assert isinstance(transformer, GaussianSmoothingFilterTransformer)
@@ -31,7 +30,6 @@ def test_gaussian_smoothing_filter_function(axis, sigma, width, kernel_size, coe
     assert transformer.settings.sigma == sigma
     assert transformer.settings.width == width
     assert transformer.settings.kernel_size == kernel_size
-    assert transformer.settings.coef_type == coef_type
 
 
 def test_gaussian_smoothing_settings_defaults():
@@ -40,36 +38,35 @@ def test_gaussian_smoothing_settings_defaults():
     assert settings.sigma == 1.0
     assert settings.width == 4
     assert settings.kernel_size is None
-    assert settings.coef_type == "ba"
 
 
 def test_gaussian_smoothing_settings_custom():
     """Test the GaussianSmoothingSettings class with custom values."""
     settings = GaussianSmoothingSettings(
-        sigma=2.5, width=6, kernel_size=21, coef_type="ba"
+        sigma=2.5,
+        width=6,
+        kernel_size=21,
     )
     assert settings.sigma == 2.5
     assert settings.width == 6
     assert settings.kernel_size == 21
-    assert settings.coef_type == "ba"
 
 
 @pytest.mark.parametrize(
-    "sigma,width,kernel_size,coef_type",
+    "sigma,width,kernel_size",
     [
-        (1.0, 4, None, "ba"),
-        (2.0, 6, None, "ba"),
-        (1.5, 5, 11, "ba"),
-        (1.5, 5, 17, "ba"),  # Fixed kernel_size to be >= expected
-        (3.0, 2, None, "sos"),
+        (1.0, 4, None),
+        (2.0, 6, None),
+        (1.5, 5, 11),
+        (1.5, 5, 17),  # Fixed kernel_size to be >= expected
     ],
 )
-def test_gaussian_smoothing_filter_design_parameters(
-    sigma, width, kernel_size, coef_type
-):
+def test_gaussian_smoothing_filter_design_parameters(sigma, width, kernel_size):
     """Test gaussian smoothing filter design across multiple parameter configurations."""
     coefs = gaussian_smoothing_filter_design(
-        sigma=sigma, width=width, kernel_size=kernel_size, coef_type=coef_type
+        sigma=sigma,
+        width=width,
+        kernel_size=kernel_size,
     )
     assert coefs is not None
     assert isinstance(coefs, tuple)
@@ -84,13 +81,10 @@ def test_gaussian_smoothing_filter_design_parameters(
     assert b[len(b) // 2] == np.max(b)  # center of kernel is peak
     assert len(a) == 1 and a[0] == 1.0  # default for gaussian window
 
-    if coef_type == "ba":
-        expected_kernel_size = (
-            int(2 * width * sigma + 1) if kernel_size is None else kernel_size
-        )
-        assert len(b) == expected_kernel_size
-    else:
-        assert len(b) == 1
+    expected_kernel_size = (
+        int(2 * width * sigma + 1) if kernel_size is None else kernel_size
+    )
+    assert len(b) == expected_kernel_size
 
 
 def test_gaussian_smoothing_kernel_properties():
