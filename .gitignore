@@ -143,3 +143,4 @@ cython_debug/
 .idea/
 
 src/ezmsg/sigproc/__version__.py
+uv.lock
