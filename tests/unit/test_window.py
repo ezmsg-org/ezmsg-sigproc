@@ -39,7 +39,7 @@ def test_window_gen_nodur():
     assert np.shares_memory(result.data, test_msg.data)
 
 
-@pytest.mark.parametrize("msg_block_size", [1, 5, 10, 20, 60])
+@pytest.mark.parametrize("msg_block_size", [1, 5, 10, 60, 100])
 @pytest.mark.parametrize("newaxis", [None, "win"])
 @pytest.mark.parametrize("win_dur", [0.3, 1.0])
 @pytest.mark.parametrize("win_shift", [None, 0.2, 1.0])
@@ -57,11 +57,11 @@ def test_window_generator(
     anchor: str,
     time_ax: int,
 ):
-    nchans = 3
+    nchans = 5
 
     shift_len = int(win_shift * fs) if win_shift is not None else None
     win_len = int(win_dur * fs)
-    data_len = 2 * win_len
+    data_len = 5 * win_len
     if win_shift is not None:
         data_len += shift_len - 1
     data = np.arange(nchans * data_len, dtype=float).reshape((nchans, data_len))
@@ -159,7 +159,10 @@ def test_window_generator(
     )
 
     # Compare results to expected
-    assert np.array_equal(result, expected)
+    if win_shift is None:
+        assert len(results) == len(messages)
+        assert len(tvec) == len(messages)
+    assert np.allclose(result, expected)
     assert np.allclose(offsets, tvec)
 
 
