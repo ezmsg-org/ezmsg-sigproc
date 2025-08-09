@@ -59,14 +59,11 @@ def gaussian_smoothing_filter_design(
             "The kernel may be truncated."
         )
 
-    kernel_sequence = np.arange(
-        -(kernel_size // 2), (kernel_size // 2) + 1
-    )  # default spacing of 1.0 -> change to np.linspace to adjust spacing <1.0
+    from scipy.signal.windows import gaussian
 
-    b = np.exp(-1 / 2 * (kernel_sequence**2) / (sigma**2))
-    b /= np.sum(b)
-
-    a = np.array([1.0])  # default for gaussian window
+    b = gaussian(kernel_size, std=sigma)
+    b /= np.sum(b)  # Ensure normalization
+    a = np.array([1.0])
 
     return b, a
 
