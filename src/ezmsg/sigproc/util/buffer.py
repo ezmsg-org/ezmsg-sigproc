@@ -31,7 +31,7 @@ class HybridBuffer:
         self,
         array_namespace: ArrayNamespace,
         maxlen: int,
-        other_shape: typing.Tuple[int, ...],
+        other_shape: tuple[int, ...],
         dtype: DType,
         update_strategy: UpdateStrategy = "on_demand",
         threshold: int = 0,
@@ -76,7 +76,7 @@ class HybridBuffer:
         ):
             self._sync()
 
-    def get_data(self, n_samples: typing.Optional[int] = None) -> Array:
+    def get_data(self, n_samples: int | None = None) -> Array:
         """
         Retrieves the most recent `n_samples` from the buffer.
 
