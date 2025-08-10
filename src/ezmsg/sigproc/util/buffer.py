@@ -17,6 +17,10 @@ class HybridBuffer:
     The buffer stores samples along the first dimension, and other dimensions
     are defined by `other_shape`.
 
+    Compared to a deque-only buffer, this has more efficient reads and minimal copies,
+    especially when reads are less frequent than inserts or reads are likely to have overlaps.
+    Compared to a circular-only buffer, this has faster insertions.
+
     Args:
         array_namespace: The array library (e.g., numpy, cupy) that conforms to the Array API.
         maxlen: The maximum number of samples to store in the circular buffer.
