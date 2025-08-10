@@ -5,7 +5,12 @@ from ezmsg.sigproc.util.buffer import HybridBuffer
 
 @pytest.fixture
 def buffer_params():
-    return {"maxlen": 100, "other_shape": (2,), "dtype": np.float32}
+    return {
+        "array_namespace": np,
+        "maxlen": 100,
+        "other_shape": (2,),
+        "dtype": np.float32,
+    }
 
 
 def test_initialization(buffer_params):
@@ -27,7 +32,11 @@ def test_add_and_get_simple(buffer_params):
 
 def test_add_1d_message():
     buf = HybridBuffer(
-        maxlen=10, other_shape=(1,), dtype=np.float32, update_strategy="immediate"
+        array_namespace=np,
+        maxlen=10,
+        other_shape=(1,),
+        dtype=np.float32,
+        update_strategy="immediate",
     )
     data = np.arange(5, dtype=np.float32)
     buf.add_message(data)
@@ -174,7 +183,12 @@ def test_get_zero_samples(buffer_params):
 
 
 def test_nd_tensor():
-    params = {"maxlen": 50, "other_shape": (3, 4), "dtype": np.int16}
+    params = {
+        "array_namespace": np,
+        "maxlen": 50,
+        "other_shape": (3, 4),
+        "dtype": np.int16,
+    }
     buf = HybridBuffer(**params, update_strategy="immediate")
     shape = (10, *params["other_shape"])
     data = np.arange(np.prod(shape), dtype=params["dtype"]).reshape(shape)
