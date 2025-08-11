@@ -83,39 +83,72 @@ class HybridBuffer:
         Returns:
             An array containing the requested samples. This may be a view or a copy.
         """
+        data = self.peek(n_samples)
+        self.skip(data.shape[0])
+        return data
+
+    def peek(self, n_samples: int | None = None) -> Array:
+        """
+        Retrieves the oldest unread samples from the buffer without
+        advancing the read head.
+
+        Args:
+            n_samples: The number of samples to retrieve. If None, returns all
+                unread samples.
+
+        Returns:
+            An array containing the requested samples. This may be a view or a copy.
+        """
         self._sync_if_needed()
 
         if n_samples is None:
             n_samples = self._buff_unread
         elif n_samples > self._buff_unread:
             raise ValueError(
-                f"Requested {n_samples} samples, but only {self._buff_unread} are available in buffer."
+                f"Requested to peek {n_samples} samples, but only {self._buff_unread} are available."
             )
 
-        n_to_read = min(n_samples, self._buff_unread)
+        n_to_peek = min(n_samples, self._buff_unread)
 
-        if n_to_read == 0:
+        if n_to_peek == 0:
             return self.xp.empty((0, *self._other_shape), dtype=self._buffer.dtype)
 
         start_idx = self._tail
 
-        # Check for wrap-around read
-        if start_idx + n_to_read > self._maxlen:
+        if start_idx + n_to_peek > self._maxlen:
             part1_len = self._maxlen - start_idx
-            part2_len = n_to_read - part1_len
+            part2_len = n_to_peek - part1_len
             data = self.xp.empty(
-                (n_to_read, *self._other_shape), dtype=self._buffer.dtype
+                (n_to_peek, *self._other_shape), dtype=self._buffer.dtype
             )
             data[:part1_len] = self._buffer[start_idx:]
             data[part1_len:] = self._buffer[:part2_len]
         else:
-            data = self._buffer[start_idx : start_idx + n_to_read]
-
-        # Advance read head
-        self._tail = (self._tail + n_to_read) % self._maxlen
-        self._buff_unread -= n_to_read
+            data = self._buffer[start_idx : start_idx + n_to_peek]
 
         return data
+
+    def skip(self, n_samples: int) -> int:
+        """
+        Advances the read head by n_samples, discarding them.
+
+        Args:
+            n_samples: The number of samples to skip.
+
+        Returns:
+            The number of samples actually skipped.
+        """
+        self._sync_if_needed()
+
+        n_to_skip = min(n_samples, self._buff_unread)
+
+        if n_to_skip == 0:
+            return 0
+
+        self._tail = (self._tail + n_to_skip) % self._maxlen
+        self._buff_unread -= n_to_skip
+
+        return n_to_skip
 
     def _sync_if_needed(self):
         if self._update_strategy == "on_demand" and self._deque:
@@ -142,11 +175,10 @@ class HybridBuffer:
 
         n_free = self._maxlen - self._buff_unread
 
-        # Determine how many samples we will overwrite then advance the tail to 'forget' those.
+        # Determine how many samples we will overwrite then skip those.
         n_overwrite = n_new - n_free
         if n_overwrite > 0:
-            self._buff_unread = max(self._buff_unread - n_overwrite, 0)
-            self._tail = (self._tail + n_overwrite) % self._maxlen
+            self.skip(n_overwrite)
 
         # Copy data to buffer
         space_til_end = self._maxlen - self._head

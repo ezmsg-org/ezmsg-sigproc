@@ -313,3 +313,49 @@ def test_read_operation_wraps(buffer_params):
 
     expected = np.concatenate([data1[60:], data2[:10]])
     np.testing.assert_array_equal(read_data, expected)
+
+
+def test_peek_simple(buffer_params):
+    buf = HybridBuffer(**buffer_params, update_strategy="immediate")
+    data = np.arange(20 * 2).reshape(20, 2)
+    buf.add_message(data)
+
+    peeked_data = buf.peek(10)
+    np.testing.assert_array_equal(peeked_data, data[:10])
+
+    # Assert that state has not changed
+    assert buf.n_unread == 20
+    assert buf._tail == 0
+
+    # Get the data to prove it was still there
+    retrieved_data = buf.get_data(10)
+    np.testing.assert_array_equal(retrieved_data, data[:10])
+    assert buf.n_unread == 10
+
+
+def test_skip_simple(buffer_params):
+    buf = HybridBuffer(**buffer_params, update_strategy="immediate")
+    data = np.arange(20 * 2).reshape(20, 2)
+    buf.add_message(data)
+
+    skipped = buf.skip(10)
+    assert skipped == 10
+    assert buf.n_unread == 10
+    assert buf._tail == 10
+
+    retrieved_data = buf.get_data()
+    np.testing.assert_array_equal(retrieved_data, data[10:])
+
+
+def test_peek_and_skip(buffer_params):
+    buf = HybridBuffer(**buffer_params, update_strategy="immediate")
+    data = np.arange(20 * 2).reshape(20, 2)
+    buf.add_message(data)
+
+    peeked = buf.peek(5)
+    skipped = buf.skip(5)
+    assert skipped == 5
+    np.testing.assert_array_equal(peeked, data[:5])
+
+    retrieved = buf.get_data(5)
+    np.testing.assert_array_equal(retrieved, data[5:10])
