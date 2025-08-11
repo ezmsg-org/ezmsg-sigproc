@@ -110,20 +110,21 @@ class HybridAxisArrayBuffer:
                 **self.buffer_kwargs,
             )
 
-    def get_data(self, n_samples: int | None = None) -> AxisArray | None:
-        """Retrieves the oldest unread data as a new AxisArray."""
+    def peek(self, n_samples: int | None = None) -> AxisArray | None:
+        """Retrieves the oldest unread data as a new AxisArray without advancing the read head."""
         if self._data_buffer is None:
             return None
 
         total_unread = self.n_unread
-        data_array = self._data_buffer.get_data(n_samples)
+        data_array = self._data_buffer.peek(n_samples)
+
         if data_array is None or data_array.shape[0] == 0:
             return None
 
-        num_retrieved = data_array.shape[0]
+        num_peeked = data_array.shape[0]
 
         if hasattr(self._template_msg.axes[self._axis], "data"):
-            out_axis_data = self._axis_buffer.get_data(num_retrieved)
+            out_axis_data = self._axis_buffer.peek(num_peeked)
             out_axis = replace(self._template_msg.axes[self._axis], data=out_axis_data)
         else:
             gain = self._template_msg.axes[self._axis].gain
@@ -135,3 +136,26 @@ class HybridAxisArrayBuffer:
             data=data_array,
             axes={**self._template_msg.axes, self._axis: out_axis},
         )
+
+    def skip(self, n_samples: int) -> int:
+        """Advances the read head by n_samples, discarding them."""
+        if self._data_buffer is None:
+            return 0
+
+        skipped_data_count = self._data_buffer.skip(n_samples)
+
+        if hasattr(self._template_msg.axes[self._axis], "data"):
+            self._axis_buffer.skip(skipped_data_count)
+
+        return skipped_data_count
+
+    def get_data(self, n_samples: int | None = None) -> AxisArray | None:
+        """Retrieves the oldest unread data as a new AxisArray and advances the read head."""
+        retrieved_axis_array = self.peek(n_samples)
+
+        if retrieved_axis_array is None or retrieved_axis_array.shape[0] == 0:
+            return None
+
+        self.skip(retrieved_axis_array.shape[0])
+
+        return retrieved_axis_array
