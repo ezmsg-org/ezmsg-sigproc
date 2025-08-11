@@ -42,14 +42,13 @@ class HybridBuffer:
 
         self._head = 0  # Write pointer
         self._tail = 0  # Read pointer
-        self._unread_samples = 0
+        self._buff_unread = 0
         self._deque_len = 0
 
     @property
     def n_unread(self) -> int:
-        """The total number of unread samples currently available in the buffer."""
-        self._sync_if_needed()
-        return self._unread_samples
+        """The total number of unread samples available (in buffer and deque)."""
+        return self._buff_unread + self._deque_len
 
     def add_message(self, message: Array):
         """Appends a new message (an array of samples) to the internal deque."""
@@ -69,7 +68,7 @@ class HybridBuffer:
         elif (
             self._update_strategy == "threshold"
             and self._threshold > 0
-            and self._deque_len >= self._threshold
+            and self.n_unread >= self._threshold
         ):
             self._sync()
 
@@ -87,13 +86,13 @@ class HybridBuffer:
         self._sync_if_needed()
 
         if n_samples is None:
-            n_samples = self._unread_samples
-        elif n_samples > self._unread_samples:
+            n_samples = self._buff_unread
+        elif n_samples > self._buff_unread:
             raise ValueError(
-                f"Requested {n_samples} samples, but only {self._unread_samples} are available."
+                f"Requested {n_samples} samples, but only {self._buff_unread} are available in buffer."
             )
 
-        n_to_read = min(n_samples, self._unread_samples)
+        n_to_read = min(n_samples, self._buff_unread)
 
         if n_to_read == 0:
             return self.xp.empty((0, *self._other_shape), dtype=self._buffer.dtype)
@@ -114,7 +113,7 @@ class HybridBuffer:
 
         # Advance read head
         self._tail = (self._tail + n_to_read) % self._maxlen
-        self._unread_samples -= n_to_read
+        self._buff_unread -= n_to_read
 
         return data
 
@@ -138,21 +137,15 @@ class HybridBuffer:
             self._buffer[:] = all_new_data[-self._maxlen :, ...]
             self._head = 0
             self._tail = 0
-            self._unread_samples = self._maxlen
+            self._buff_unread = self._maxlen
             return
 
-        # Determine how much dead space is available in the buffer.
-        if self._head == self._tail and self._unread_samples == 0:
-            n_free = self._maxlen
-        elif self._head > self._tail:
-            n_free = self._maxlen - self._head + self._tail
-        else:
-            n_free = self._tail - self._head
+        n_free = self._maxlen - self._buff_unread
 
         # Determine how many samples we will overwrite then advance the tail to 'forget' those.
         n_overwrite = n_new - n_free
         if n_overwrite > 0:
-            self._unread_samples = max(self._unread_samples - n_overwrite, 0)
+            self._buff_unread = max(self._buff_unread - n_overwrite, 0)
             self._tail = (self._tail + n_overwrite) % self._maxlen
 
         # Copy data to buffer
@@ -168,4 +161,4 @@ class HybridBuffer:
             self._buffer[self._head : self._head + n_new] = all_new_data
 
         self._head = (self._head + n_new) % self._maxlen
-        self._unread_samples += n_new
+        self._buff_unread += n_new

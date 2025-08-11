@@ -70,14 +70,16 @@ def test_strategy_on_demand(buffer_params):
     data1 = np.ones(shape)
     buf.add_message(data1)
     assert len(buf._deque) == 1
-    assert buf._unread_samples == 0  # Not synced yet
+    assert buf._buff_unread == 0  # Not synced yet
+    assert buf.n_unread == n_write_1
 
     n_write_2 = 5
     shape2 = (n_write_2, *buffer_params["other_shape"])
     data2 = np.ones(shape2) * 2
     buf.add_message(data2)
     assert len(buf._deque) == 2
-    assert buf._unread_samples == 0
+    assert buf._buff_unread == 0
+    assert buf.n_unread == n_write_1 + n_write_2
 
     n_read_1 = 7
     n_read_2 = (n_write_1 + n_write_2) - n_read_1
@@ -102,14 +104,14 @@ def test_strategy_immediate(buffer_params):
     data1 = np.ones(shape1)
     buf.add_message(data1)
     assert len(buf._deque) == 0
-    assert buf._unread_samples == n_write_1
+    assert buf.n_unread == n_write_1
 
     n_write_2 = 5
     shape2 = (n_write_2, *buffer_params["other_shape"])
     data2 = np.ones(shape2) * 2
     buf.add_message(data2)
     assert len(buf._deque) == 0
-    assert buf._unread_samples == (n_write_1 + n_write_2)
+    assert buf.n_unread == (n_write_1 + n_write_2)
 
     retrieved = buf.get_data()
     np.testing.assert_array_equal(retrieved[:n_write_1], data1)
@@ -123,19 +125,22 @@ def test_strategy_threshold(buffer_params):
     data1 = np.ones(shape1)
     buf.add_message(data1)
     assert len(buf._deque) == 1
-    assert buf._unread_samples == 0
+    assert buf.n_unread == 10
+    assert buf._buff_unread == 0
 
     shape2 = (4, *buffer_params["other_shape"])  # Total = 14, under threshold
     data2 = np.ones(shape2)
     buf.add_message(data2)
     assert len(buf._deque) == 2
-    assert buf._unread_samples == 0
+    assert buf.n_unread == 14
+    assert buf._buff_unread == 0
 
     shape3 = (1, *buffer_params["other_shape"])  # Total = 15, meets threshold
     data3 = np.ones(shape3)
     buf.add_message(data3)
     assert len(buf._deque) == 0
-    assert buf._unread_samples == 15
+    assert buf.n_unread == 15
+    assert buf._buff_unread == 15
 
 
 def test_buffer_wrap_around(buffer_params):
