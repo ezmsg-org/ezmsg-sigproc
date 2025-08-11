@@ -38,11 +38,11 @@ class HybridAxisArrayBuffer:
         self._template_msg = None
 
     @property
-    def n_samples(self) -> int:
-        """The total number of samples currently available in the buffer."""
+    def n_unread(self) -> int:
+        """The total number of unread samples currently available in the buffer."""
         if self._data_buffer is None:
             return 0
-        return self._data_buffer.n_samples
+        return self._data_buffer.n_unread
 
     def add_message(self, msg: AxisArray) -> None:
         """Adds an AxisArray message to the buffer, initializing on the first call."""
@@ -111,10 +111,11 @@ class HybridAxisArrayBuffer:
             )
 
     def get_data(self, n_samples: int | None = None) -> AxisArray | None:
-        """Retrieves the most recent data as a new AxisArray."""
+        """Retrieves the oldest unread data as a new AxisArray."""
         if self._data_buffer is None:
             return None
 
+        total_unread = self.n_unread
         data_array = self._data_buffer.get_data(n_samples)
         if data_array is None or data_array.shape[0] == 0:
             return None
@@ -125,10 +126,8 @@ class HybridAxisArrayBuffer:
             out_axis_data = self._axis_buffer.get_data(num_retrieved)
             out_axis = replace(self._template_msg.axes[self._axis], data=out_axis_data)
         else:
-            offset = (
-                self._axis_offset
-                - (num_retrieved - 1) * self._template_msg.axes[self._axis].gain
-            )
+            gain = self._template_msg.axes[self._axis].gain
+            offset = self._axis_offset - (total_unread - 1) * gain
             out_axis = replace(self._template_msg.axes[self._axis], offset=offset)
 
         return replace(
