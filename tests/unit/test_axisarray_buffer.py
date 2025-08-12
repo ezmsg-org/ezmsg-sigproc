@@ -1,5 +1,6 @@
 import pytest
 import numpy as np
+import time
 
 from ezmsg.util.messages.axisarray import AxisArray, LinearAxis, CoordinateAxis
 from ezmsg.sigproc.util.axisarray_buffer import HybridAxisArrayBuffer
@@ -230,3 +231,66 @@ def test_skip_coordinate(coordinate_axis_message):
     assert retrieved_msg.shape == (10, 2)
     np.testing.assert_array_equal(retrieved_msg.data, msg2.data)
     np.testing.assert_allclose(retrieved_msg.axes["time"].data, msg2.axes["time"].data)
+
+
+def test_last_update(linear_axis_message):
+    buf = HybridAxisArrayBuffer(duration=1.0)
+    assert buf.last_update is None
+    buf.add_message(linear_axis_message())
+    first_update_time = buf.last_update
+    assert first_update_time is not None
+    time.sleep(0.01)
+    buf.add_message(linear_axis_message())
+    assert buf.last_update > first_update_time
+
+
+def test_prune(linear_axis_message):
+    buf = HybridAxisArrayBuffer(duration=1.0, update_strategy="immediate")
+    buf.add_message(linear_axis_message(samples=20))
+    assert buf.n_unread == 20
+    pruned_count = buf.prune(5)
+    assert pruned_count == 15
+    assert buf.n_unread == 5
+    retrieved = buf.get_data()
+    assert retrieved.shape[0] == 5
+
+
+def test_searchsorted_linear(linear_axis_message):
+    buf = HybridAxisArrayBuffer(duration=1.0, update_strategy="immediate")
+    buf.add_message(linear_axis_message(samples=20, fs=100.0, offset=0.1))
+    # Buffer now has timestamps from 0.1 to 0.29
+    indices = buf.searchsorted(np.array([0.1, 0.15, 0.29]))
+    np.testing.assert_array_equal(indices, np.array([0, 5, 19]))
+
+
+def test_searchsorted_coordinate(coordinate_axis_message):
+    buf = HybridAxisArrayBuffer(duration=1.0, update_strategy="immediate")
+    buf.add_message(coordinate_axis_message(samples=20, start_time=0.1, interval=0.01))
+    indices = buf.searchsorted(np.array([0.1, 0.15, 0.29]))
+    np.testing.assert_array_equal(indices, np.array([0, 5, 19]))
+
+
+def test_peek_padded_linear(linear_axis_message):
+    buf = HybridAxisArrayBuffer(duration=1.0, update_strategy="immediate")
+    msg1 = linear_axis_message(samples=20, fs=100.0, offset=0.0)
+    buf.add_message(msg1)
+    buf.skip(10)
+    # History: 0.0-0.09, Unread: 0.1-0.19
+    msg, num_padded = buf.peek_padded(n_samples=5, padding=5)
+    assert num_padded == 5
+    assert msg.shape[0] == 10
+    assert msg.axes["time"].offset == pytest.approx(0.05)
+
+
+def test_get_data_padded_coordinate(coordinate_axis_message):
+    buf = HybridAxisArrayBuffer(duration=1.0, update_strategy="immediate")
+    msg1 = coordinate_axis_message(samples=20, start_time=0.0, interval=0.01)
+    buf.add_message(msg1)
+    buf.skip(10)
+    # History: 0.0-0.09, Unread: 0.1-0.19
+    msg, num_padded = buf.get_data_padded(n_samples=5, padding=5)
+    assert num_padded == 5
+    assert msg.shape[0] == 10
+    expected_times = np.arange(10) * 0.01 + 0.05
+    np.testing.assert_allclose(msg.axes["time"].data, expected_times)
+    assert buf.n_unread == 5

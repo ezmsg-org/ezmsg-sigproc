@@ -87,6 +87,26 @@ class HybridBuffer:
         self.skip(data.shape[0])
         return data
 
+    def get_data_padded(
+        self, n_samples: int | None = None, padding: int = 0
+    ) -> tuple[Array, int]:
+        """
+        Retrieves the oldest unread samples from the buffer with padding and advances the read head.
+
+        Args:
+            n_samples: The number of samples to retrieve. If None, returns all
+                unread samples.
+            padding: The number of samples to include before the oldest unread sample.
+
+        Returns:
+            A tuple containing:
+                - An array containing the requested samples. This may be a view or a copy.
+                - The number of padded samples included.
+        """
+        data, num_padded = self.peek_padded(n_samples, padding=padding)
+        self.skip(data.shape[0] - num_padded)
+        return data, num_padded
+
     def peek(self, n_samples: int | None = None) -> Array:
         """
         Retrieves the oldest unread samples from the buffer without
@@ -99,6 +119,26 @@ class HybridBuffer:
         Returns:
             An array containing the requested samples. This may be a view or a copy.
         """
+        data, _ = self.peek_padded(n_samples, padding=0)
+        return data
+
+    def peek_padded(
+        self, n_samples: int | None = None, padding: int = 0
+    ) -> tuple[Array, int]:
+        """
+        Retrieves the oldest unread samples from the buffer with padding without
+        advancing the read head.
+
+        Args:
+            n_samples: The number of samples to retrieve. If None, returns all
+                unread samples.
+            padding: The number of samples to include before the oldest unread sample.
+
+        Returns:
+            A tuple containing:
+                - An array containing the requested samples. This may be a view or a copy.
+                - The number of padded samples included.
+        """
         self._sync_if_needed()
 
         if n_samples is None:
@@ -110,23 +150,31 @@ class HybridBuffer:
 
         n_to_peek = min(n_samples, self._buff_unread)
 
-        if n_to_peek == 0:
-            return self.xp.empty((0, *self._other_shape), dtype=self._buffer.dtype)
+        if self._head >= self._tail:
+            n_hist = self._tail
+        else:
+            n_hist = self._tail - self._head
 
-        start_idx = self._tail
+        num_padded = min(padding, n_hist)
 
-        if start_idx + n_to_peek > self._maxlen:
+        if n_to_peek == 0 and num_padded == 0:
+            return self.xp.empty((0, *self._other_shape), dtype=self._buffer.dtype), 0
+
+        start_idx = (self._tail - num_padded + self._maxlen) % self._maxlen
+        n_to_peek_padded = n_to_peek + num_padded
+
+        if start_idx + n_to_peek_padded > self._maxlen:
             part1_len = self._maxlen - start_idx
-            part2_len = n_to_peek - part1_len
+            part2_len = n_to_peek_padded - part1_len
             data = self.xp.empty(
-                (n_to_peek, *self._other_shape), dtype=self._buffer.dtype
+                (n_to_peek_padded, *self._other_shape), dtype=self._buffer.dtype
             )
             data[:part1_len] = self._buffer[start_idx:]
             data[part1_len:] = self._buffer[:part2_len]
         else:
-            data = self._buffer[start_idx : start_idx + n_to_peek]
+            data = self._buffer[start_idx : start_idx + n_to_peek_padded]
 
-        return data
+        return data, num_padded
 
     def skip(self, n_samples: int) -> int:
         """

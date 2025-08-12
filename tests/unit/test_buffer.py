@@ -359,3 +359,62 @@ def test_peek_and_skip(buffer_params):
 
     retrieved = buf.get_data(5)
     np.testing.assert_array_equal(retrieved, data[5:10])
+
+
+def test_peek_padded_simple(buffer_params):
+    buf = HybridBuffer(**buffer_params, update_strategy="immediate")
+    data1 = np.arange(20 * 2).reshape(20, 2)
+    buf.add_message(data1)
+    buf.skip(10)
+
+    # 10 samples of history, 10 samples unread
+    data, num_padded = buf.peek_padded(n_samples=5, padding=5)
+    assert num_padded == 5
+    assert data.shape[0] == 10
+    expected = data1[5:15]
+    np.testing.assert_array_equal(data, expected)
+
+
+def test_peek_padded_no_history(buffer_params):
+    buf = HybridBuffer(**buffer_params, update_strategy="immediate")
+    data1 = np.arange(20 * 2).reshape(20, 2)
+    buf.add_message(data1)
+
+    # 0 samples of history, 20 samples unread
+    data, num_padded = buf.peek_padded(n_samples=5, padding=5)
+    assert num_padded == 0
+    assert data.shape[0] == 5
+    np.testing.assert_array_equal(data, data1[:5])
+
+
+def test_peek_padded_more_padding_than_history(buffer_params):
+    buf = HybridBuffer(**buffer_params, update_strategy="immediate")
+    data1 = np.arange(20 * 2).reshape(20, 2)
+    buf.add_message(data1)
+    buf.skip(10)
+
+    # 10 samples of history, 10 samples unread
+    data, num_padded = buf.peek_padded(n_samples=5, padding=15)
+    assert num_padded == 10
+    assert data.shape[0] == 15
+    expected = data1[:15]
+    np.testing.assert_array_equal(data, expected)
+
+
+def test_get_data_padded(buffer_params):
+    buf = HybridBuffer(**buffer_params, update_strategy="immediate")
+    data1 = np.arange(20 * 2).reshape(20, 2)
+    buf.add_message(data1)
+    buf.skip(10)
+
+    # 10 samples of history, 10 samples unread
+    data, num_padded = buf.get_data_padded(n_samples=5, padding=5)
+    assert num_padded == 5
+    assert data.shape[0] == 10
+    expected = data1[5:15]
+    np.testing.assert_array_equal(data, expected)
+
+    # The 5 unread samples should be gone
+    assert buf.n_unread == 5
+    remaining_data = buf.get_data()
+    np.testing.assert_array_equal(remaining_data, data1[15:])
