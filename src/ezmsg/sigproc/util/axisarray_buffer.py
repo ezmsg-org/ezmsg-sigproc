@@ -198,11 +198,11 @@ class HybridAxisArrayBuffer:
         return self.skip(n_to_discard)
 
     def searchsorted(
-        self, timestamps: typing.Union[float, Array]
+        self, values: typing.Union[float, Array], side: str = "left"
     ) -> typing.Union[int, Array]:
         """
-        Find the indices into which the given _axis_ values (e.g., timestamps)
-        would be inserted to maintain order.
+        Find the indices into which the given values would be inserted
+        into the target axis data to maintain order.
         """
         if self._data_buffer is None:
             raise RuntimeError("Buffer not initialized. Cannot search.")
@@ -211,14 +211,14 @@ class HybridAxisArrayBuffer:
 
         if hasattr(targ_axis, "data"):
             buffered_times = self._axis_buffer.peek(self.n_unread)
-            return self._data_buffer.xp.searchsorted(buffered_times, timestamps)
+            return self._data_buffer.xp.searchsorted(buffered_times, values, side=side)
 
         else:
             if self.n_unread == 0:
                 return (
                     0
-                    if isinstance(timestamps, float)
-                    else self._data_buffer.xp.zeros_like(timestamps, dtype=int)
+                    if isinstance(values, float)
+                    else self._data_buffer.xp.zeros_like(values, dtype=int)
                 )
 
             # Correctly calculate the timestamp of the first sample in the buffer
@@ -227,5 +227,8 @@ class HybridAxisArrayBuffer:
             )
 
             # Calculate indices
-            indices = (timestamps - first_sample_offset) / targ_axis.gain
-            return self._data_buffer.xp.round(indices).astype(int)
+            indices = (values - first_sample_offset) / targ_axis.gain
+            if side == "right":
+                return self._data_buffer.xp.ceil(indices).astype(int)
+            else:
+                return self._data_buffer.xp.floor(indices).astype(int)
