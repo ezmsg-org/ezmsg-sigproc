@@ -7,7 +7,7 @@ from ezmsg.sigproc.util.buffer import HybridBuffer
 def buffer_params():
     return {
         "array_namespace": np,
-        "maxlen": 100,
+        "capacity": 100,
         "other_shape": (2,),
         "dtype": np.float32,
     }
@@ -16,7 +16,10 @@ def buffer_params():
 def test_initialization(buffer_params):
     buf = HybridBuffer(**buffer_params)
     assert buf.n_unread == 0
-    assert buf._buffer.shape == (buffer_params["maxlen"], *buffer_params["other_shape"])
+    assert buf._buffer.shape == (
+        buffer_params["capacity"],
+        *buffer_params["other_shape"],
+    )
     assert buf._buffer.dtype == buffer_params["dtype"]
 
 
@@ -33,7 +36,7 @@ def test_add_and_get_simple(buffer_params):
 def test_add_1d_message():
     buf = HybridBuffer(
         array_namespace=np,
-        maxlen=10,
+        capacity=10,
         other_shape=(1,),
         dtype=np.float32,
         update_strategy="immediate",
@@ -146,7 +149,9 @@ def test_strategy_threshold(buffer_params):
 def test_buffer_wrap_around(buffer_params):
     buf = HybridBuffer(**buffer_params, update_strategy="immediate")
     # Fill the buffer completely
-    buf.add_message(np.zeros((buffer_params["maxlen"], *buffer_params["other_shape"])))
+    buf.add_message(
+        np.zeros((buffer_params["capacity"], *buffer_params["other_shape"]))
+    )
     assert buf._head == 0
     assert buf._tail == 0
     assert buf.n_unread == 100
@@ -214,7 +219,7 @@ def test_get_zero_samples(buffer_params):
 def test_nd_tensor():
     params = {
         "array_namespace": np,
-        "maxlen": 50,
+        "capacity": 50,
         "other_shape": (3, 4),
         "dtype": np.int16,
     }

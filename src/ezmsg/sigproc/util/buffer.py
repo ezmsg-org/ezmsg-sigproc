@@ -16,7 +16,7 @@ class HybridBuffer:
 
     Args:
         array_namespace: The array library (e.g., numpy, cupy) that conforms to the Array API.
-        maxlen: The maximum number of samples to store in the circular buffer.
+        capacity: The current maximum number of samples to store in the circular buffer.
         other_shape: A tuple defining the shape of the non-sample dimensions.
         dtype: The data type of the samples, belonging to the provided array_namespace.
         update_strategy: The strategy for synchronizing the deque to the circular buffer.
@@ -26,7 +26,7 @@ class HybridBuffer:
     def __init__(
         self,
         array_namespace: ArrayNamespace,
-        maxlen: int,
+        capacity: int,
         other_shape: tuple[int, ...],
         dtype: DType,
         update_strategy: UpdateStrategy = "on_demand",
@@ -34,8 +34,8 @@ class HybridBuffer:
     ):
         self.xp = array_namespace
         self._deque = collections.deque()
-        self._buffer = self.xp.empty((maxlen, *other_shape), dtype=dtype)
-        self._maxlen = maxlen
+        self._buffer = self.xp.empty((capacity, *other_shape), dtype=dtype)
+        self._capacity = capacity
         self._other_shape = other_shape
         self._update_strategy = update_strategy
         self._threshold = threshold
@@ -160,11 +160,11 @@ class HybridBuffer:
         if n_to_peek == 0 and num_padded == 0:
             return self.xp.empty((0, *self._other_shape), dtype=self._buffer.dtype), 0
 
-        start_idx = (self._tail - num_padded + self._maxlen) % self._maxlen
+        start_idx = (self._tail - num_padded + self._capacity) % self._capacity
         n_to_peek_padded = n_to_peek + num_padded
 
-        if start_idx + n_to_peek_padded > self._maxlen:
-            part1_len = self._maxlen - start_idx
+        if start_idx + n_to_peek_padded > self._capacity:
+            part1_len = self._capacity - start_idx
             part2_len = n_to_peek_padded - part1_len
             data = self.xp.empty(
                 (n_to_peek_padded, *self._other_shape), dtype=self._buffer.dtype
@@ -193,7 +193,7 @@ class HybridBuffer:
         if n_to_skip == 0:
             return 0
 
-        self._tail = (self._tail + n_to_skip) % self._maxlen
+        self._tail = (self._tail + n_to_skip) % self._capacity
         self._buff_unread -= n_to_skip
 
         return n_to_skip
@@ -214,14 +214,14 @@ class HybridBuffer:
         n_new = all_new_data.shape[0]
 
         # If new data is larger than buffer, just keep the latest
-        if n_new >= self._maxlen:
-            self._buffer[:] = all_new_data[-self._maxlen :, ...]
+        if n_new >= self._capacity:
+            self._buffer[:] = all_new_data[-self._capacity :, ...]
             self._head = 0
             self._tail = 0
-            self._buff_unread = self._maxlen
+            self._buff_unread = self._capacity
             return
 
-        n_free = self._maxlen - self._buff_unread
+        n_free = self._capacity - self._buff_unread
 
         # Determine how many samples we will overwrite then skip those.
         n_overwrite = n_new - n_free
@@ -229,7 +229,7 @@ class HybridBuffer:
             self.skip(n_overwrite)
 
         # Copy data to buffer
-        space_til_end = self._maxlen - self._head
+        space_til_end = self._capacity - self._head
         if n_new > space_til_end:
             # Two-part copy (wraps around)
             part1_len = space_til_end
@@ -240,5 +240,5 @@ class HybridBuffer:
             # Single-part copy
             self._buffer[self._head : self._head + n_new] = all_new_data
 
-        self._head = (self._head + n_new) % self._maxlen
+        self._head = (self._head + n_new) % self._capacity
         self._buff_unread += n_new
