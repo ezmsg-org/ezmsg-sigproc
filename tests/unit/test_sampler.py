@@ -5,14 +5,12 @@ from frozendict import frozendict
 
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.sigproc.util.message import SampleTriggerMessage
-from ezmsg.sigproc.sampler import (
-    sampler,
-)
+from ezmsg.sigproc.sampler import SamplerTransformer, SamplerSettings
 
 from tests.helpers.util import assert_messages_equal
 
 
-def test_sampler_gen():
+def test_sampler():
     data_dur = 10.0
     chunk_period = 0.1
     fs = 500.0
@@ -65,8 +63,10 @@ def test_sampler_gen():
     # Create the sample-generator
     period_dur = period[1] - period[0]
     buffer_dur = 2 * max(period_dur, period[1])
-    gen = sampler(
-        buffer_dur, axis="time", period=None, value=None, estimate_alignment=True
+    gen = SamplerTransformer(
+        settings=SamplerSettings(
+            buffer_dur, axis="time", period=None, value=None, estimate_alignment=True
+        )
     )
 
     # Run the messages through the generator and collect samples.
