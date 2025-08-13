@@ -1,7 +1,8 @@
+import math
 import time
 import typing
 
-from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.axisarray import AxisArray, LinearAxis, CoordinateAxis
 from ezmsg.util.messages.util import replace
 from array_api_compat import get_namespace
 
@@ -9,6 +10,168 @@ from .buffer import HybridBuffer
 
 
 Array = typing.TypeVar("Array")
+
+
+class HybridAxisBuffer:
+    """
+    A buffer that intelligently handles ezmsg.util.messages.AxisArray _axes_ objects.
+    LinearAxis and CoordinateAxis are supported.
+    """
+
+    _coords_buffer: HybridBuffer | None
+    _coords_template: CoordinateAxis | None
+    _coords_gain_estimate: float | None = None
+    _linear_axis: LinearAxis | None
+    _linear_n_available: int
+
+    def __init__(self, duration: float, **kwargs):
+        self.duration = duration
+        self.buffer_kwargs = kwargs
+        # Delay initialization until the first message arrives
+        self._coords_buffer = None
+        self._coords_template = None
+        self._linear_axis = None
+        self._linear_n_available = 0
+
+    @property
+    def capacity(self) -> int:
+        """The maximum number of samples that can be stored in the buffer."""
+        if self._coords_buffer is not None:
+            return self._coords_buffer.capacity
+        elif self._linear_axis is not None:
+            return int(math.ceil(self.duration / self._linear_axis.gain))
+        else:
+            return 0
+
+    def available(self) -> int:
+        if self._coords_buffer is None:
+            return self._linear_n_available
+        return self._coords_buffer.available()
+
+    def is_empty(self) -> bool:
+        return self.available() == 0
+
+    def is_full(self) -> bool:
+        if self._coords_buffer is not None:
+            return self._coords_buffer.is_full()
+        return self.capacity > 0 and self.available() == self.capacity
+
+    def _initialize(self, first_axis: LinearAxis | CoordinateAxis) -> None:
+        if hasattr(first_axis, "data"):
+            # Initialize a CoordinateAxis buffer
+            if len(first_axis.data) > 1:
+                _axis_gain = (first_axis.data[-1] - first_axis.data[0]) / (
+                    len(first_axis.data) - 1
+                )
+            else:
+                _axis_gain = 1.0
+            self._coords_gain_estimate = _axis_gain
+            capacity = int(self.duration / _axis_gain)
+            self._coords_buffer = HybridBuffer(
+                get_namespace(first_axis.data),
+                capacity,
+                other_shape=(),
+                dtype=first_axis.data.dtype,
+                **self.buffer_kwargs,
+            )
+            self._coords_template = replace(first_axis, data=first_axis.data[:0])
+        else:
+            # Initialize a LinearAxis buffer
+            self._linear_axis = first_axis
+            self._linear_n_available = 0
+
+    def write(self, axis: LinearAxis | CoordinateAxis, n_samples: int) -> None:
+        if self._linear_axis is None and self._coords_buffer is None:
+            self._initialize(axis)
+
+        if self._coords_buffer is not None:
+            if axis.__class__ is not self._coords_template.__class__:
+                raise TypeError(
+                    f"Buffer initialized with {self._coords_template.__class__.__name__}, "
+                    f"but received {axis.__class__.__name__}."
+                )
+            self._coords_buffer.write(axis.data)
+        else:
+            if axis.__class__ is not self._linear_axis.__class__:
+                raise TypeError(
+                    f"Buffer initialized with {self._linear_axis.__class__.__name__}, "
+                    f"but received {axis.__class__.__name__}."
+                )
+            if axis.gain != self._linear_axis.gain:
+                raise ValueError(
+                    f"Buffer initialized with gain={self._linear_axis.gain}, "
+                    f"but received gain={axis.gain}."
+                )
+            # Update the offset corresponding to the oldest sample in the buffer
+            #  by anchoring on the new offset and accounting for the samples already available.
+            self._linear_axis.offset = (
+                axis.offset - self._linear_n_available * axis.gain
+            )
+            self._linear_n_available += n_samples
+
+    def peek(self, n_samples: int | None = None) -> LinearAxis | CoordinateAxis:
+        if self._coords_buffer is not None:
+            return replace(
+                self._coords_template, data=self._coords_buffer.peek(n_samples)
+            )
+        else:
+            return self._linear_axis
+
+    def seek(self, n_samples: int) -> int:
+        if self._coords_buffer is not None:
+            return self._coords_buffer.seek(n_samples)
+        else:
+            n_to_seek = min(n_samples, self._linear_n_available)
+            self._linear_n_available -= n_to_seek
+            self._linear_axis.offset += n_to_seek * self._linear_axis.gain
+            return n_to_seek
+
+    def prune(self, n_samples: int) -> int:
+        """Discards all but the last n_samples from the buffer."""
+        n_to_discard = self.available() - n_samples
+        if n_to_discard <= 0:
+            return 0
+        return self.seek(n_to_discard)
+
+    @property
+    def final_value(self) -> float | None:
+        """
+        The axis-value (timestamp, typically) of the last sample in the buffer.
+        This does not advance the read head.
+        """
+        if self._coords_buffer is not None:
+            return self._coords_buffer.peek(self.available())[-1]
+        elif self._linear_axis is not None:
+            return self._linear_axis.value(self._linear_n_available - 1)
+        else:
+            return None
+
+    @property
+    def gain(self) -> float | None:
+        if self._coords_buffer is not None:
+            return self._coords_gain_estimate
+        elif self._linear_axis is not None:
+            return self._linear_axis.gain
+        else:
+            return None
+
+    def searchsorted(
+        self, values: typing.Union[float, Array]
+    ) -> typing.Union[int, Array]:
+        if self._coords_buffer is not None:
+            return self._coords_buffer.xp.searchsorted(
+                self._coords_buffer.peek(self.available()), values, side="left"
+            )
+        else:
+            if self.available() == 0:
+                if isinstance(values, float):
+                    return 0
+                else:
+                    _xp = get_namespace(values)
+                    return _xp.zeros_like(values, dtype=int)
+
+            # _linear_axis.index(values) uses np.rint
+            return self._linear_axis.index(values)
 
 
 class HybridAxisArrayBuffer:

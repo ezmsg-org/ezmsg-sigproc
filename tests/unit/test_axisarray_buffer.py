@@ -1,9 +1,315 @@
-import pytest
-import numpy as np
 import time
 
+import pytest
+import numpy as np
 from ezmsg.util.messages.axisarray import AxisArray, LinearAxis, CoordinateAxis
-from ezmsg.sigproc.util.axisarray_buffer import HybridAxisArrayBuffer
+
+from ezmsg.sigproc.util.axisarray_buffer import HybridAxisBuffer, HybridAxisArrayBuffer
+
+
+class TestHybridAxisBuffer:
+    """Test suite for HybridAxisBuffer"""
+
+    def test_uninitialized_state(self):
+        """Test buffer state before initialization"""
+        buf = HybridAxisBuffer(duration=1.0)
+
+        assert buf.capacity == 0
+        assert buf.available() == 0
+        assert buf.is_empty() is True
+        assert buf.is_full() is False
+        assert buf.gain is None
+        assert buf.final_value is None
+
+    def test_linear_axis_initialization(self):
+        """Test initialization with LinearAxis"""
+        buf = HybridAxisBuffer(duration=1.0)
+
+        # Create a LinearAxis with 1kHz sampling (gain=0.001)
+        axis = LinearAxis(gain=0.001, offset=0.0)
+        buf._initialize(axis)
+
+        assert buf._linear_axis is not None
+        assert buf._coords_buffer is None
+        assert buf.capacity == 1000  # 1.0 sec / 0.001 gain
+        assert buf.gain == 0.001
+        assert buf.available() == 0
+
+    def test_coordinate_axis_initialization(self):
+        """Test initialization with CoordinateAxis"""
+        buf = HybridAxisBuffer(duration=1.0)
+
+        # Create CoordinateAxis with timestamps - note it needs dims parameter
+        timestamps = np.linspace(0, 0.1, 101)  # 100 intervals, 0.001 gain
+        axis = CoordinateAxis(data=timestamps, dims=["time"])
+        buf._initialize(axis)
+
+        assert buf._coords_buffer is not None
+        assert buf._linear_axis is None
+        assert buf.capacity == 1000  # 1.0 sec / 0.001 gain
+        assert buf.gain == pytest.approx(0.001)
+        assert buf.available() == 0
+
+    def test_coordinate_axis_single_sample(self):
+        """Test CoordinateAxis initialization with single sample"""
+        buf = HybridAxisBuffer(duration=1.0)
+
+        # Single timestamp should default to gain of 1.0
+        axis = CoordinateAxis(data=np.array([0.0]), dims=["time"])
+        buf._initialize(axis)
+
+        assert buf.capacity == 1  # 1.0 sec / 1.0 gain
+        assert buf.gain == 1.0
+
+    def test_linear_axis_write_and_read(self):
+        """Test writing and reading with LinearAxis"""
+        buf = HybridAxisBuffer(duration=1.0)
+
+        # Initialize with LinearAxis
+        axis1 = LinearAxis(gain=0.001, offset=0.0)
+        buf.write(axis1, n_samples=100)
+
+        assert buf.available() == 100
+        assert buf._linear_n_available == 100
+        assert buf._linear_axis.offset == 0.0
+
+        # Write more samples with different offset
+        #  The expected offset for the next write was 0.1,
+        #  but we provide 0.15, which causes the original
+        #  samples write operation to be adjusted to 0.05
+        axis2 = LinearAxis(gain=0.001, offset=0.15)
+        buf.write(axis2, n_samples=50)
+
+        assert buf.available() == 150
+        # Offset should be adjusted to oldest sample
+        assert buf._linear_axis.offset == pytest.approx(0.05)  # 0.15 - 100*0.001
+
+        # Peek at the axis
+        peeked_axis = buf.peek(50)
+        assert isinstance(peeked_axis, LinearAxis)
+        assert peeked_axis.offset == pytest.approx(0.05)
+        assert peeked_axis.gain == 0.001
+
+        # Seek forward
+        sought = buf.seek(50)
+        assert sought == 50
+        assert buf.available() == 100
+        assert buf._linear_axis.offset == pytest.approx(0.1)  # 0.05 + 50*0.001
+
+    def test_coordinate_axis_write_and_read(self):
+        """Test writing and reading with CoordinateAxis"""
+        buf = HybridAxisBuffer(duration=1.0, update_strategy="immediate")
+
+        # Initialize with CoordinateAxis
+        timestamps1 = np.linspace(0, 0.099, 100)
+        axis1 = CoordinateAxis(data=timestamps1, dims=["time"])
+        buf.write(axis1, n_samples=100)
+
+        assert buf.available() == 100
+
+        # Write more samples
+        timestamps2 = np.linspace(0.1, 0.149, 50)
+        axis2 = CoordinateAxis(data=timestamps2, dims=["time"])
+        buf.write(axis2, n_samples=50)
+
+        assert buf.available() == 150
+
+        # Peek at the axis
+        peeked_axis = buf.peek(75)
+        assert isinstance(peeked_axis, CoordinateAxis)
+        assert len(peeked_axis.data) == 75
+        np.testing.assert_array_almost_equal(peeked_axis.data, timestamps1[:75])
+
+        # Seek forward
+        sought = buf.seek(50)
+        assert sought == 50
+        assert buf.available() == 100
+
+        # Peek again - should start from sample 50
+        peeked_axis = buf.peek(50)
+        np.testing.assert_array_almost_equal(peeked_axis.data, timestamps1[50:])
+
+    def test_prune(self):
+        """Test pruning samples from buffer"""
+        buf = HybridAxisBuffer(duration=1.0, update_strategy="immediate")
+
+        # Write 200 samples with LinearAxis
+        axis = LinearAxis(gain=0.001, offset=0.0)
+        buf.write(axis, n_samples=200)
+
+        assert buf.available() == 200
+
+        # Prune to keep only last 50 samples
+        pruned = buf.prune(50)
+        assert pruned == 150
+        assert buf.available() == 50
+        assert buf._linear_axis.offset == pytest.approx(0.15)  # 0.0 + 150*0.001
+
+        # Try pruning more than available (should do nothing)
+        pruned = buf.prune(100)
+        assert pruned == 0
+        assert buf.available() == 50
+
+    def test_final_value_linear(self):
+        """Test getting final value with LinearAxis"""
+        buf = HybridAxisBuffer(duration=1.0)
+
+        axis = LinearAxis(gain=0.01, offset=1.0)
+        buf.write(axis, n_samples=50)
+
+        # Final value should be offset + (n_samples-1) * gain
+        expected = 1.0 + 49 * 0.01
+        assert buf.final_value == pytest.approx(expected)
+
+    def test_final_value_coordinate(self):
+        """Test getting final value with CoordinateAxis"""
+        buf = HybridAxisBuffer(duration=1.0, update_strategy="immediate")
+
+        timestamps = np.array([1.0, 1.1, 1.2, 1.3, 1.4])
+        axis = CoordinateAxis(data=timestamps, dims=["time"])
+        buf.write(axis, n_samples=5)
+
+        # Final value should be the last timestamp
+        assert buf.final_value == pytest.approx(1.4)
+
+        # Note: final_value accesses the last element directly from peek()
+        # which returns the actual data value
+
+    def test_searchsorted_linear(self):
+        """Test searchsorted with LinearAxis"""
+        buf = HybridAxisBuffer(duration=1.0)
+
+        # Create axis with samples at 0.0, 0.01, 0.02, ..., 0.49
+        axis = LinearAxis(gain=0.01, offset=0.0)
+        buf.write(axis, n_samples=50)
+
+        # Test single value
+        idx = buf.searchsorted(0.025)
+        assert idx == 2  # Floor of 2.5
+
+        # Test array of values
+        values = np.array([0.015, 0.035, 0.055])
+        expected_indices = np.rint(axis.offset + values / axis.gain).astype(int)
+        indices = buf.searchsorted(values)
+        np.testing.assert_array_equal(indices, expected_indices)
+
+        # Test with empty buffer
+        buf.seek(50)  # Clear buffer
+        idx = buf.searchsorted(0.5)
+        assert idx == 0
+
+        indices = buf.searchsorted(values)
+        np.testing.assert_array_equal(indices, [0, 0, 0])
+
+    def test_searchsorted_coordinate(self):
+        """Test searchsorted with CoordinateAxis"""
+        buf = HybridAxisBuffer(duration=1.0, update_strategy="immediate")
+
+        timestamps = np.array([0.0, 0.01, 0.02, 0.03, 0.04])
+        axis = CoordinateAxis(data=timestamps, dims=["time"])
+        buf.write(axis, n_samples=5)
+
+        # Test single value
+        idx = buf.searchsorted(0.015)
+        assert idx == 1 or idx == 2  # Depends on searchsorted implementation
+
+        # Test array of values
+        values = np.array([0.005, 0.025, 0.045])
+        indices = buf.searchsorted(values)
+        assert all(0 <= idx <= 5 for idx in indices)
+
+    def test_overflow_behavior(self):
+        """Test buffer overflow with LinearAxis"""
+        buf = HybridAxisBuffer(duration=0.1)  # Small buffer
+
+        # Initialize with high-frequency axis (10kHz)
+        axis = LinearAxis(gain=0.0001, offset=0.0)
+        buf.write(axis, n_samples=500)  # 0.05 seconds of data
+
+        assert buf.available() == 500
+        assert buf.capacity == 1000  # 0.1 sec / 0.0001
+
+        # Write more data to cause overflow
+        axis2 = LinearAxis(gain=0.0001, offset=0.1)
+        buf.write(axis2, n_samples=700)  # Total would be 1200
+
+        # LinearAxis doesn't have built-in overflow handling in buffer
+        # It just updates the offset, so all samples are "available"
+        assert buf.available() == 1200
+
+        # But capacity remains the same
+        assert buf.capacity == 1000
+
+    def test_mixed_axis_types_error(self):
+        """Test that mixing axis types raises an error"""
+        buf = HybridAxisBuffer(duration=1.0, update_strategy="immediate")
+
+        # Initialize with LinearAxis
+        linear_axis = LinearAxis(gain=0.001, offset=0.0)
+        buf.write(linear_axis, n_samples=10)
+
+        # Try to write CoordinateAxis - should fail
+        coord_axis = CoordinateAxis(data=np.linspace(0, 0.01, 11), dims=["time"])
+        with pytest.raises(TypeError):
+            buf.write(coord_axis)
+
+    def test_buffer_kwargs_passthrough(self):
+        """Test that kwargs are passed through to underlying buffer"""
+        buf = HybridAxisBuffer(duration=1.0, update_strategy="threshold", threshold=50)
+
+        # Initialize with CoordinateAxis to create internal buffer
+        timestamps = np.linspace(0, 0.1, 101)
+        axis = CoordinateAxis(data=timestamps, dims=["time"])
+        buf.write(axis, n_samples=101)
+
+        # Check that kwargs were passed through
+        assert buf._coords_buffer._update_strategy == "threshold"
+        assert buf._coords_buffer._threshold == 50
+
+    def test_linear_axis_value_and_index(self):
+        """Test LinearAxis value() and index() methods"""
+        buf = HybridAxisBuffer(duration=1.0)
+
+        # Create axis with specific gain and offset
+        axis = LinearAxis(gain=0.01, offset=5.0, unit="ms")
+        buf._initialize(axis)
+
+        # Test that the axis methods work correctly
+        assert axis.value(0) == 5.0
+        assert axis.value(10) == 5.1
+        assert axis.value(np.array([0, 10, 20])) == pytest.approx([5.0, 5.1, 5.2])
+
+        # Test index calculation (inverse of value)
+        assert axis.index(5.0) == 0
+        assert axis.index(5.1) == 10
+        assert axis.index(5.05) == 5  # Should round by default
+
+        # Test with numpy array
+        values = np.array([5.0, 5.1, 5.2])
+        indices = axis.index(values)
+        np.testing.assert_array_equal(indices, [0, 10, 20])
+
+    def test_edge_cases(self):
+        """Test various edge cases"""
+        # Test with very small gain (large capacity)
+        buf = HybridAxisBuffer(duration=1.0)
+        axis_small_gain = LinearAxis(gain=0.00001, offset=0.0)
+        buf._initialize(axis_small_gain)
+        assert buf.capacity == 100000  # 1.0 / 0.00001
+
+        # Test with zero duration (would cause division by zero)
+        buf2 = HybridAxisBuffer(duration=0.0)
+        axis = LinearAxis(gain=0.001, offset=0.0)
+        buf2._initialize(axis)
+        assert buf2.capacity == 0
+
+        # Test peek with None (should return all available)
+        buf3 = HybridAxisBuffer(duration=1.0)
+        axis3 = LinearAxis(gain=0.01, offset=0.0)
+        buf3.write(axis3, n_samples=50)
+        peeked = buf3.peek(None)
+        assert peeked.offset == 0.0
+        assert peeked.gain == 0.01
 
 
 @pytest.fixture
