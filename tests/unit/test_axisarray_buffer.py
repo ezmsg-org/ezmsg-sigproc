@@ -346,45 +346,45 @@ def coordinate_axis_message():
 
 def test_deferred_initialization_linear(linear_axis_message):
     buf = HybridAxisArrayBuffer(duration=1.0)  # 1 second buffer
-    assert buf.n_unread == 0
+    assert buf.available() == 0
     assert buf._data_buffer is None
-    assert buf._axis_offset == 0.0
-    assert buf._axis_buffer is None
+    assert buf._axis_buffer is not None
+    assert buf._axis_buffer._linear_axis is None
+    assert buf._axis_buffer._coords_buffer is None
     assert buf._template_msg is None
 
     msg = linear_axis_message(fs=100.0)
-    buf.add_message(msg)
+    buf.write(msg)
 
-    assert buf.n_unread == 10
+    assert buf.available() == 10
     assert buf._data_buffer is not None
-    assert buf._data_buffer._maxlen == 100  # 1.0s * 100Hz
-    assert buf._axis_offset == 0.09  # First timestamp is 0.0, last is 0.09
-    assert buf._axis_buffer is None  # Still not initialized for LinearAxis
+    assert buf._data_buffer.capacity == 100  # 1.0s * 100Hz
+    assert buf._axis_buffer._linear_axis.offset == 0.00
     assert buf._template_msg is not None and buf._template_msg.dims == ["time", "ch"]
 
 
 def test_deferred_initialization_coordinate(coordinate_axis_message):
     buf = HybridAxisArrayBuffer(duration=1.0)
     msg = coordinate_axis_message(samples=10, interval=0.01)  # Effective fs = 100Hz
-    buf.add_message(msg)
+    buf.write(msg)
 
-    assert buf.n_unread == 10
+    assert buf.available() == 10
     assert buf._data_buffer is not None
-    assert buf._data_buffer._maxlen == 100
+    assert buf._data_buffer.capacity == 100
     assert buf._axis_buffer is not None
-    assert buf._axis_buffer._maxlen == 100
+    assert buf._axis_buffer.capacity == 100
 
 
 def test_add_and_get_linear(linear_axis_message):
     buf = HybridAxisArrayBuffer(duration=1.0, update_strategy="immediate")
     msg1 = linear_axis_message(samples=10, fs=100.0, offset=0.0)
-    buf.add_message(msg1)
+    buf.write(msg1)
 
     msg2 = linear_axis_message(samples=10, fs=100.0, offset=0.1)
-    buf.add_message(msg2)
+    buf.write(msg2)
 
-    assert buf.n_unread == 20
-    retrieved_msg = buf.get_data(15)
+    assert buf.available() == 20
+    retrieved_msg = buf.read(15)
     assert retrieved_msg.shape == (15, 2)
     assert retrieved_msg.dims == msg1.dims
     # Last sample of msg2 is at 0.1 + 9*0.01 = 0.19. Total unread was 20.
@@ -394,8 +394,8 @@ def test_add_and_get_linear(linear_axis_message):
     np.testing.assert_array_equal(retrieved_msg.data, expected_data)
 
     # Check that the buffer now has 5 samples left
-    assert buf.n_unread == 5
-    remaining_msg = buf.get_data()
+    assert buf.available() == 5
+    remaining_msg = buf.read()
     np.testing.assert_array_equal(remaining_msg.data, msg2.data[5:])
 
 
@@ -403,24 +403,24 @@ def test_get_all_data_default(linear_axis_message):
     buf = HybridAxisArrayBuffer(duration=1.0)
     msg1 = linear_axis_message(samples=10)
     msg2 = linear_axis_message(samples=15)
-    buf.add_message(msg1)
-    buf.add_message(msg2)
+    buf.write(msg1)
+    buf.write(msg2)
 
-    retrieved = buf.get_data()
+    retrieved = buf.read()
     assert retrieved.shape[0] == 25
-    assert buf.n_unread == 0
+    assert buf.available() == 0
 
 
 def test_add_and_get_coordinate(coordinate_axis_message):
     buf = HybridAxisArrayBuffer(duration=1.0, update_strategy="immediate")
     msg1 = coordinate_axis_message(samples=10, start_time=0.0)
-    buf.add_message(msg1)
+    buf.write(msg1)
 
     msg2 = coordinate_axis_message(samples=10, start_time=0.1)
-    buf.add_message(msg2)
+    buf.write(msg2)
 
-    assert buf.n_unread == 20
-    retrieved_msg = buf.get_data(15)
+    assert buf.available() == 20
+    retrieved_msg = buf.read(15)
     assert retrieved_msg.shape == (15, 2)
     assert retrieved_msg.dims == msg1.dims
 
@@ -432,24 +432,24 @@ def test_add_and_get_coordinate(coordinate_axis_message):
     )
     np.testing.assert_allclose(retrieved_msg.axes["time"].data, expected_times)
 
-    assert buf.n_unread == 5
+    assert buf.available() == 5
 
 
 def test_type_mismatch_error(linear_axis_message, coordinate_axis_message):
     buf = HybridAxisArrayBuffer(duration=1.0)
-    buf.add_message(linear_axis_message())
+    buf.write(linear_axis_message())
     with pytest.raises(TypeError):
-        buf.add_message(coordinate_axis_message())
+        buf.write(coordinate_axis_message())
 
 
 def test_peek_linear(linear_axis_message):
     buf = HybridAxisArrayBuffer(duration=1.0, update_strategy="immediate")
     msg1 = linear_axis_message(samples=10, fs=100.0, offset=0.0)
-    buf.add_message(msg1)
+    buf.write(msg1)
     msg2 = linear_axis_message(samples=10, fs=100.0, offset=0.1)
-    buf.add_message(msg2)
+    buf.write(msg2)
 
-    assert buf.n_unread == 20
+    assert buf.available() == 20
     peeked_msg = buf.peek(15)
     assert peeked_msg.shape == (15, 2)
     assert peeked_msg.dims == msg1.dims
@@ -458,24 +458,24 @@ def test_peek_linear(linear_axis_message):
     np.testing.assert_array_equal(peeked_msg.data, expected_data)
 
     # Assert that state has not changed
-    assert buf.n_unread == 20
+    assert buf.available() == 20
     # The underlying _data_buffer._tail should still be 0
     assert buf._data_buffer._tail == 0
 
     # Get the data to prove it was still there
-    retrieved_msg = buf.get_data(15)
+    retrieved_msg = buf.read(15)
     np.testing.assert_array_equal(retrieved_msg.data, expected_data)
-    assert buf.n_unread == 5
+    assert buf.available() == 5
 
 
 def test_peek_coordinate(coordinate_axis_message):
     buf = HybridAxisArrayBuffer(duration=1.0, update_strategy="immediate")
     msg1 = coordinate_axis_message(samples=10, start_time=0.0)
-    buf.add_message(msg1)
+    buf.write(msg1)
     msg2 = coordinate_axis_message(samples=10, start_time=0.1)
-    buf.add_message(msg2)
+    buf.write(msg2)
 
-    assert buf.n_unread == 20
+    assert buf.available() == 20
     peeked_msg = buf.peek(15)
     assert peeked_msg.shape == (15, 2)
     assert peeked_msg.dims == msg1.dims
@@ -487,53 +487,54 @@ def test_peek_coordinate(coordinate_axis_message):
     np.testing.assert_allclose(peeked_msg.axes["time"].data, expected_times)
 
     # Assert that state has not changed
-    assert buf.n_unread == 20
-    assert buf._data_buffer._tail == 0
-    assert buf._axis_buffer._tail == 0
+    assert buf.available() == 20
+    assert buf._data_buffer.tell() == 0
+    assert buf._axis_buffer._coords_buffer.tell() == 0
 
     # Get the data to prove it was still there
-    retrieved_msg = buf.get_data(15)
+    retrieved_msg = buf.read(15)
     np.testing.assert_array_equal(retrieved_msg.data, expected_data)
-    assert buf.n_unread == 5
+    assert buf.available() == 5
 
 
-def test_skip_linear(linear_axis_message):
+def test_seek_linear(linear_axis_message):
     buf = HybridAxisArrayBuffer(duration=1.0, update_strategy="immediate")
     msg1 = linear_axis_message(samples=10, fs=100.0, offset=0.0)
-    buf.add_message(msg1)
+    buf.write(msg1)
     msg2 = linear_axis_message(samples=10, fs=100.0, offset=0.1)
-    buf.add_message(msg2)
+    buf.write(msg2)
 
-    assert buf.n_unread == 20
-    skipped_count = buf.skip(10)
+    assert buf.available() == 20
+    skipped_count = buf.seek(10)
     assert skipped_count == 10
-    assert buf.n_unread == 10
+    assert buf.available() == 10
     assert buf._data_buffer._tail == 10
+    assert buf._axis_buffer._linear_axis.offset == pytest.approx(0.1)
 
     # Get the remaining data
-    retrieved_msg = buf.get_data()
+    retrieved_msg = buf.read()
     assert retrieved_msg.shape == (10, 2)
     np.testing.assert_array_equal(retrieved_msg.data, msg2.data)
     # Offset should be 0.1 (start of msg2)
     assert retrieved_msg.axes["time"].offset == pytest.approx(0.1)
 
 
-def test_skip_coordinate(coordinate_axis_message):
+def test_seek_coordinate(coordinate_axis_message):
     buf = HybridAxisArrayBuffer(duration=1.0, update_strategy="immediate")
     msg1 = coordinate_axis_message(samples=10, start_time=0.0)
-    buf.add_message(msg1)
+    buf.write(msg1)
     msg2 = coordinate_axis_message(samples=10, start_time=0.1)
-    buf.add_message(msg2)
+    buf.write(msg2)
 
-    assert buf.n_unread == 20
-    skipped_count = buf.skip(10)
+    assert buf.available() == 20
+    skipped_count = buf.seek(10)
     assert skipped_count == 10
-    assert buf.n_unread == 10
+    assert buf.available() == 10
     assert buf._data_buffer._tail == 10
-    assert buf._axis_buffer._tail == 10
+    assert buf._axis_buffer.available() == 10
 
     # Get the remaining data
-    retrieved_msg = buf.get_data()
+    retrieved_msg = buf.read()
     assert retrieved_msg.shape == (10, 2)
     np.testing.assert_array_equal(retrieved_msg.data, msg2.data)
     np.testing.assert_allclose(retrieved_msg.axes["time"].data, msg2.axes["time"].data)
@@ -542,61 +543,35 @@ def test_skip_coordinate(coordinate_axis_message):
 def test_last_update(linear_axis_message):
     buf = HybridAxisArrayBuffer(duration=1.0)
     assert buf.last_update is None
-    buf.add_message(linear_axis_message())
+    buf.write(linear_axis_message())
     first_update_time = buf.last_update
     assert first_update_time is not None
     time.sleep(0.01)
-    buf.add_message(linear_axis_message())
+    buf.write(linear_axis_message())
     assert buf.last_update > first_update_time
 
 
 def test_prune(linear_axis_message):
     buf = HybridAxisArrayBuffer(duration=1.0, update_strategy="immediate")
-    buf.add_message(linear_axis_message(samples=20))
-    assert buf.n_unread == 20
+    buf.write(linear_axis_message(samples=20))
+    assert buf.available() == 20
     pruned_count = buf.prune(5)
     assert pruned_count == 15
-    assert buf.n_unread == 5
-    retrieved = buf.get_data()
+    assert buf.available() == 5
+    retrieved = buf.read()
     assert retrieved.shape[0] == 5
 
 
 def test_searchsorted_linear(linear_axis_message):
     buf = HybridAxisArrayBuffer(duration=1.0, update_strategy="immediate")
-    buf.add_message(linear_axis_message(samples=20, fs=100.0, offset=0.1))
+    buf.write(linear_axis_message(samples=20, fs=100.0, offset=0.1))
     # Buffer now has timestamps from 0.1 to 0.29
-    indices = buf.searchsorted(np.array([0.1, 0.15, 0.29]))
+    indices = buf.axis_searchsorted(np.array([0.1, 0.15, 0.29]))
     np.testing.assert_array_equal(indices, np.array([0, 5, 19]))
 
 
 def test_searchsorted_coordinate(coordinate_axis_message):
     buf = HybridAxisArrayBuffer(duration=1.0, update_strategy="immediate")
-    buf.add_message(coordinate_axis_message(samples=20, start_time=0.1, interval=0.01))
-    indices = buf.searchsorted(np.array([0.1, 0.15, 0.29]))
+    buf.write(coordinate_axis_message(samples=20, start_time=0.1, interval=0.01))
+    indices = buf.axis_searchsorted(np.array([0.1, 0.15, 0.29]))
     np.testing.assert_array_equal(indices, np.array([0, 5, 19]))
-
-
-def test_peek_padded_linear(linear_axis_message):
-    buf = HybridAxisArrayBuffer(duration=1.0, update_strategy="immediate")
-    msg1 = linear_axis_message(samples=20, fs=100.0, offset=0.0)
-    buf.add_message(msg1)
-    buf.skip(10)
-    # History: 0.0-0.09, Unread: 0.1-0.19
-    msg, num_padded = buf.peek_padded(n_samples=5, padding=5)
-    assert num_padded == 5
-    assert msg.shape[0] == 10
-    assert msg.axes["time"].offset == pytest.approx(0.05)
-
-
-def test_get_data_padded_coordinate(coordinate_axis_message):
-    buf = HybridAxisArrayBuffer(duration=1.0, update_strategy="immediate")
-    msg1 = coordinate_axis_message(samples=20, start_time=0.0, interval=0.01)
-    buf.add_message(msg1)
-    buf.skip(10)
-    # History: 0.0-0.09, Unread: 0.1-0.19
-    msg, num_padded = buf.get_data_padded(n_samples=5, padding=5)
-    assert num_padded == 5
-    assert msg.shape[0] == 10
-    expected_times = np.arange(10) * 0.01 + 0.05
-    np.testing.assert_allclose(msg.axes["time"].data, expected_times)
-    assert buf.n_unread == 5
