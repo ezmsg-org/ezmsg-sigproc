@@ -153,7 +153,14 @@ class ResampleProcessor(
         # If we have no reference or the source is insufficient for interpolation
         #  then return the empty template
         if ref.is_empty() or src.available() < 3:
-            return src.peek(0)
+            src_axarr = src.peek(0)
+            return replace(
+                src_axarr,
+                axes={
+                    **src_axarr.axes,
+                    self.settings.axis: ref.peek(0),
+                },
+            )
 
         # Build the reference xvec.
         #  Note: The reference axis buffer may grow upon `.peek()`
@@ -174,29 +181,42 @@ class ResampleProcessor(
             xvec_append = ref_xvec[-1] + np.arange(1, n_append + 1) * ref_ax.gain
             ref_xvec = np.hstack((ref_xvec, xvec_append))
 
+        # Get source to train interpolation
+        src_axarr = src.peek()
+        src_axis = src_axarr.axes[self.settings.axis]
+        x = (
+            src_axis.data
+            if hasattr(src_axis, "data")
+            else src_axis.value(np.arange(src_axarr.data.shape[0]))
+        )
+
         # Only resample at reference values that have not been interpolated over previously.
         b_ref = ref_xvec > self.state.last_ref_ax_val
         if not b_project:
             # Not extrapolating -- Do not resample beyond the end of the source buffer.
-            b_ref = np.logical_and(b_ref, ref_xvec <= src.axis_final_value)
+            b_ref = np.logical_and(b_ref, ref_xvec <= x[-1])
         ref_idx = np.where(b_ref)[0]
 
         if len(ref_idx) == 0:
-            # Nothing to interpolate over; return the empty template.
-            return src.peek(0)
+            # Nothing to interpolate over; return empty data
+            null_ref = (
+                replace(ref_ax, data=ref_ax.data[:0])
+                if hasattr(ref_ax, "data")
+                else ref_ax
+            )
+            return replace(
+                src_axarr,
+                data=src_axarr.data[:0, ...],
+                axes={**src_axarr.axes, self.settings.axis: null_ref},
+            )
 
         xnew = ref_xvec[ref_idx]
 
         # Identify source data indices around ref tvec with some padding for better interpolation.
-        src_start_ix = max(0, src.axis_searchsorted(xnew[0]) - 2)
+        src_start_ix = max(
+            0, np.where(x > xnew[0])[0][0] - 2 if np.any(x > xnew[0]) else 0
+        )
 
-        # Get source to train interpolation
-        src_axarr = src.peek()
-        src_axis = src_axarr.axes[self.settings.axis]
-        if isinstance(src_axis, LinearAxis):
-            x = src_axis.value(np.arange(src_axarr.data.shape[0]))
-        else:
-            x = src_axis.data
         x = x[src_start_ix:]
         y = src_axarr.data[src_start_ix:]
 
@@ -237,7 +257,9 @@ class ResampleProcessor(
 
         # Update the state. For state buffers, seek beyond samples that are no longer needed.
         # src: keep at least 1 sample before the final resampled value
-        self.state.src_buffer.seek(max(0, src.axis_searchsorted(xnew[-1]) - 1))
+        seek_ix = np.where(x >= xnew[-1])[0]
+        if len(seek_ix) > 0:
+            self.state.src_buffer.seek(max(0, src_start_ix + seek_ix[0] - 1))
         # ref: remove samples that have been sent to output
         self.state.ref_axis_buffer.seek(ref_idx[-1] + 1)
         self.state.last_ref_ax_val = xnew[-1]
