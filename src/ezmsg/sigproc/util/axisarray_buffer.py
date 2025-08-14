@@ -1,9 +1,10 @@
 import math
 import typing
 
+from array_api_compat import get_namespace
+import numpy as np
 from ezmsg.util.messages.axisarray import AxisArray, LinearAxis, CoordinateAxis
 from ezmsg.util.messages.util import replace
-from array_api_compat import get_namespace
 
 from .buffer import HybridBuffer
 
@@ -109,6 +110,11 @@ class HybridAxisBuffer:
                     f"Buffer initialized with gain={self._linear_axis.gain}, "
                     f"but received gain={axis.gain}."
                 )
+            if self._linear_n_available + n_samples > self.capacity:
+                # Simulate overflow by advancing the offset and decreasing
+                # the number of available samples.
+                n_to_discard = self._linear_n_available + n_samples - self.capacity
+                self.seek(n_to_discard)
             # Update the offset corresponding to the oldest sample in the buffer
             #  by anchoring on the new offset and accounting for the samples already available.
             self._linear_axis.offset = (
@@ -155,6 +161,21 @@ class HybridAxisBuffer:
             return None
 
     @property
+    def first_value(self) -> float | None:
+        """
+        The axis-value (timestamp, typically) of the first sample in the buffer.
+        This does not advance the read head.
+        """
+        if self.available() == 0:
+            return None
+        if self._coords_buffer is not None:
+            return self._coords_buffer.peek_at(0)[0]
+        elif self._linear_axis is not None:
+            return self._linear_axis.value(0)
+        else:
+            return None
+
+    @property
     def gain(self) -> float | None:
         if self._coords_buffer is not None:
             return self._coords_gain_estimate
@@ -164,11 +185,11 @@ class HybridAxisBuffer:
             return None
 
     def searchsorted(
-        self, values: typing.Union[float, Array]
+        self, values: typing.Union[float, Array], side: str = "left"
     ) -> typing.Union[int, Array]:
         if self._coords_buffer is not None:
             return self._coords_buffer.xp.searchsorted(
-                self._coords_buffer.peek(self.available()), values, side="left"
+                self._coords_buffer.peek(self.available()), values, side=side
             )
         else:
             if self.available() == 0:
@@ -178,8 +199,11 @@ class HybridAxisBuffer:
                     _xp = get_namespace(values)
                     return _xp.zeros_like(values, dtype=int)
 
-            # _linear_axis.index(values) uses np.rint
-            return self._linear_axis.index(values)
+            f_inds = (values - self._linear_axis.offset) / self._linear_axis.gain
+            res = np.ceil(f_inds)
+            if side == "right":
+                res[np.isclose(f_inds, res)] += 1
+            return res.astype(int)
 
 
 class HybridAxisArrayBuffer:
@@ -220,6 +244,11 @@ class HybridAxisArrayBuffer:
 
     def is_full(self) -> bool:
         return 0 < self._data_buffer.capacity == self.available()
+
+    @property
+    def axis_first_value(self) -> float | None:
+        """The axis-value (timestamp, typically) of the first sample in the buffer."""
+        return self._axis_buffer.first_value
 
     @property
     def axis_final_value(self) -> float | None:
@@ -283,6 +312,20 @@ class HybridAxisArrayBuffer:
             axes={**self._template_msg.axes, self._axis: out_axis},
         )
 
+    def peek_axis(
+        self, n_samples: int | None = None
+    ) -> LinearAxis | CoordinateAxis | None:
+        """Retrieves the axis data without advancing the read head."""
+        if self._data_buffer is None:
+            return None
+
+        out_axis = self._axis_buffer.peek(n_samples)
+
+        if out_axis is None:
+            return None
+
+        return out_axis
+
     def seek(self, n_samples: int) -> int:
         """Advances the read pointer by n_samples."""
         if self._data_buffer is None:
@@ -317,6 +360,14 @@ class HybridAxisArrayBuffer:
             return 0
 
         return self.seek(n_to_discard)
+
+    @property
+    def axis_gain(self) -> float | None:
+        """
+        The gain of the target axis, which is the time step between samples.
+        This is typically the sampling rate (e.g., 1 / fs).
+        """
+        return self._axis_buffer.gain
 
     def axis_searchsorted(
         self, values: typing.Union[float, Array]
