@@ -10,6 +10,10 @@ def buffer_params():
         "capacity": 100,
         "other_shape": (2,),
         "dtype": np.float32,
+        "update_strategy": "immediate",
+        "threshold": 0,
+        "overflow_strategy": "warn-overwrite",
+        "max_size": 1024**3,  # 1 GB
     }
 
 
@@ -19,12 +23,16 @@ def test_initialization(buffer_params):
     assert not buf.is_full()
     assert buf.is_empty()
     assert buf.capacity == buffer_params["capacity"]
+    assert buf._update_strategy == buffer_params["update_strategy"]
+    assert buf._threshold == buffer_params["threshold"]
+    assert buf._overflow_strategy == buffer_params["overflow_strategy"]
+    assert buf._max_size == buffer_params["max_size"]
     assert buf._buffer.shape[1:] == buffer_params["other_shape"]
     assert buf._buffer.dtype == buffer_params["dtype"]
 
 
 def test_add_and_get_simple(buffer_params):
-    buf = HybridBuffer(**buffer_params, update_strategy="immediate")
+    buf = HybridBuffer(**buffer_params)
     shape = (10, *buffer_params["other_shape"])
     data = np.arange(np.prod(shape), dtype=buffer_params["dtype"]).reshape(shape)
     buf.write(data)
@@ -50,7 +58,7 @@ def test_add_1d_message():
 
 
 def test_get_data_raises_error(buffer_params):
-    buf = HybridBuffer(**buffer_params, update_strategy="immediate")
+    buf = HybridBuffer(**buffer_params)
     data = np.zeros((10, *buffer_params["other_shape"]))
     buf.write(data)
     with pytest.raises(ValueError):
@@ -66,7 +74,7 @@ def test_add_raises_error_on_shape(buffer_params):
 
 
 def test_strategy_on_demand(buffer_params):
-    buf = HybridBuffer(**buffer_params, update_strategy="on_demand")
+    buf = HybridBuffer(**{**buffer_params, "update_strategy": "on_demand"})
 
     n_write_1 = 10
     shape = (n_write_1, *buffer_params["other_shape"])
@@ -100,7 +108,7 @@ def test_strategy_on_demand(buffer_params):
 
 
 def test_strategy_immediate(buffer_params):
-    buf = HybridBuffer(**buffer_params, update_strategy="immediate")
+    buf = HybridBuffer(**buffer_params)
 
     n_write_1 = 10
     shape1 = (n_write_1, *buffer_params["other_shape"])
@@ -124,7 +132,8 @@ def test_strategy_immediate(buffer_params):
 
 
 def test_strategy_threshold(buffer_params):
-    buf = HybridBuffer(**buffer_params, update_strategy="threshold", threshold=15)
+    new_params = {**buffer_params, "update_strategy": "threshold", "threshold": 15}
+    buf = HybridBuffer(**new_params)
 
     shape1 = (10, *buffer_params["other_shape"])
     data1 = np.ones(shape1)
@@ -148,8 +157,8 @@ def test_strategy_threshold(buffer_params):
     assert buf._buff_unread == 15
 
 
-def test_buffer_wrap_around(buffer_params):
-    buf = HybridBuffer(**buffer_params, update_strategy="immediate")
+def test_buffer_overflow_warn_overwrite(buffer_params):
+    buf = HybridBuffer(**buffer_params)
     cap = buffer_params["capacity"]
     # Fill the buffer completely
     buf.write(np.zeros((cap, *buffer_params["other_shape"])))
@@ -160,7 +169,8 @@ def test_buffer_wrap_around(buffer_params):
     # Add more data to cause a wrap + overflow
     shape = (10, *buffer_params["other_shape"])
     data = np.arange(np.prod(shape), dtype=np.float32).reshape(shape)
-    buf.write(data)
+    with pytest.warns(RuntimeWarning):
+        buf.write(data)
     assert buf._head == 10
     assert buf._tail == 10  # Tail moves forward with head during overflow
     assert buf.available() == cap
@@ -176,7 +186,7 @@ def test_buffer_wrap_around(buffer_params):
 
 
 def test_read_wrap_around(buffer_params):
-    buf = HybridBuffer(**buffer_params, update_strategy="immediate")
+    buf = HybridBuffer(**buffer_params)
 
     shape1 = (80, *buffer_params["other_shape"])
     first_data = np.arange(np.prod(shape1), dtype=np.float32).reshape(shape1)
@@ -186,7 +196,8 @@ def test_read_wrap_around(buffer_params):
 
     shape2 = (40, *buffer_params["other_shape"])
     latest_data = np.arange(np.prod(shape2), dtype=np.float32).reshape(shape2) + 1000
-    buf.write(latest_data)  # Overflows the buffer
+    with pytest.warns(RuntimeWarning):
+        buf.write(latest_data)
     assert buf._head == 20
     assert buf._tail == 20  # Tail moves forward with head during overflow
 
@@ -198,10 +209,11 @@ def test_read_wrap_around(buffer_params):
 
 
 def test_overflow_single_message(buffer_params):
-    buf = HybridBuffer(**buffer_params, update_strategy="immediate")
+    buf = HybridBuffer(**buffer_params)
     shape = (200, *buffer_params["other_shape"])
     data = np.arange(np.prod(shape), dtype=np.float32).reshape(shape)
-    buf.write(data)
+    with pytest.warns(RuntimeWarning):
+        buf.write(data)
     assert buf.available() == 100
     retrieved = buf.read()
     np.testing.assert_array_equal(data[-100:], retrieved)
@@ -224,7 +236,7 @@ def test_nd_tensor():
         "other_shape": (3, 4),
         "dtype": np.int16,
     }
-    buf = HybridBuffer(**params, update_strategy="immediate")
+    buf = HybridBuffer(**params)
     shape = (10, *params["other_shape"])
     data = np.arange(np.prod(shape), dtype=params["dtype"]).reshape(shape)
     buf.write(data)
@@ -235,7 +247,7 @@ def test_nd_tensor():
 
 
 def test_get_data_default_all(buffer_params):
-    buf = HybridBuffer(**buffer_params, update_strategy="on_demand")
+    buf = HybridBuffer(**{**buffer_params, "update_strategy": "on_demand"})
     shape1 = (10, *buffer_params["other_shape"])
     data1 = np.ones(shape1)
     buf.write(data1)
@@ -253,7 +265,7 @@ def test_get_data_default_all(buffer_params):
 
 
 def test_interleaved_read_write(buffer_params):
-    buf = HybridBuffer(**buffer_params, update_strategy="immediate")
+    buf = HybridBuffer(**buffer_params)
     # Add 50
     data1 = np.arange(50 * 2).reshape(50, 2)
     buf.write(data1)
@@ -279,7 +291,7 @@ def test_interleaved_read_write(buffer_params):
 
 
 def test_read_to_empty(buffer_params):
-    buf = HybridBuffer(**buffer_params, update_strategy="immediate")
+    buf = HybridBuffer(**buffer_params)
     data = np.arange(30 * 2).reshape(30, 2)
     buf.write(data)
     assert buf.available() == 30
@@ -294,7 +306,7 @@ def test_read_to_empty(buffer_params):
 
 
 def test_read_operation_wraps(buffer_params):
-    buf = HybridBuffer(**buffer_params, update_strategy="immediate")
+    buf = HybridBuffer(**buffer_params)
     # Add 80 samples, tail is at 0, head is at 80
     data1 = np.arange(80 * 2).reshape(80, 2)
     buf.write(data1)
@@ -322,7 +334,7 @@ def test_read_operation_wraps(buffer_params):
 
 
 def test_peek_simple(buffer_params):
-    buf = HybridBuffer(**buffer_params, update_strategy="immediate")
+    buf = HybridBuffer(**buffer_params)
     data = np.arange(20 * 2).reshape(20, 2)
     buf.write(data)
 
@@ -340,7 +352,7 @@ def test_peek_simple(buffer_params):
 
 
 def test_seek_simple(buffer_params):
-    buf = HybridBuffer(**buffer_params, update_strategy="immediate")
+    buf = HybridBuffer(**buffer_params)
     data = np.arange(20 * 2).reshape(20, 2)
     buf.write(data)
 
@@ -354,7 +366,7 @@ def test_seek_simple(buffer_params):
 
 
 def test_peek_and_skip(buffer_params):
-    buf = HybridBuffer(**buffer_params, update_strategy="immediate")
+    buf = HybridBuffer(**buffer_params)
     data = np.arange(20 * 2).reshape(20, 2)
     buf.write(data)
 
@@ -372,7 +384,7 @@ def test_peek_and_skip(buffer_params):
 
 
 def test_tell(buffer_params):
-    buf = HybridBuffer(**buffer_params, update_strategy="immediate")
+    buf = HybridBuffer(**buffer_params)
 
     # 1. Initially empty. tell() should return 0.
     assert buf.tell() == 0
