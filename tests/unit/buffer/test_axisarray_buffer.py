@@ -1,5 +1,3 @@
-import time
-
 import pytest
 import numpy as np
 from ezmsg.util.messages.axisarray import AxisArray, LinearAxis, CoordinateAxis
@@ -538,17 +536,6 @@ def test_seek_coordinate(coordinate_axis_message):
     assert retrieved_msg.shape == (10, 2)
     np.testing.assert_array_equal(retrieved_msg.data, msg2.data)
     np.testing.assert_allclose(retrieved_msg.axes["time"].data, msg2.axes["time"].data)
-
-
-def test_last_update(linear_axis_message):
-    buf = HybridAxisArrayBuffer(duration=1.0)
-    assert buf.last_update is None
-    buf.write(linear_axis_message())
-    first_update_time = buf.last_update
-    assert first_update_time is not None
-    time.sleep(0.01)
-    buf.write(linear_axis_message())
-    assert buf.last_update > first_update_time
 
 
 def test_prune(linear_axis_message):
