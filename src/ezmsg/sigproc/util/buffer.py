@@ -285,7 +285,8 @@ class HybridBuffer:
                     )
                 # Move the tail forward to make room for the new data.
                 self.seek(n_overflow)
-                self._buff_read = 0
+                # Adjust the read pointer to account for the overflow. Should always be 0.
+                self._buff_read = max(0, self._buff_read - n_overflow)
                 self._last_overflow = n_overflow
             elif self._overflow_strategy == "drop":
                 # Drop the overflow samples
