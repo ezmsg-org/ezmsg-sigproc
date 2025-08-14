@@ -78,9 +78,9 @@ def test_sampler():
     assert_messages_equal(trigger_msgs, backup_trigger)
 
     assert len(samples) == n_trigs
-    # Check sample data size
+    # Check sample data size. Note: sampler puts the time axis first.
     assert all(
-        [_.sample.data.shape == (n_chans, int(fs * period_dur)) for _ in samples]
+        [_.sample.data.shape == (int(fs * period_dur), n_chans) for _ in samples]
     )
     # Compare the sample window slice against the trigger timestamps
     latencies = [
