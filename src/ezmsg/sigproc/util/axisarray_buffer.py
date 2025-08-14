@@ -1,5 +1,4 @@
 import math
-import time
 import typing
 
 from ezmsg.util.messages.axisarray import AxisArray, LinearAxis, CoordinateAxis
@@ -191,14 +190,14 @@ class HybridAxisArrayBuffer:
 
     Args:
         duration: The desired duration of the buffer in seconds.
+        axis: The name of the axis to buffer along.
         **kwargs: Additional keyword arguments to pass to the underlying HybridBuffer
-            (e.g., `update_strategy`, `threshold`).
+            (e.g., `update_strategy`, `threshold`, `overflow_strategy`, `max_size`).
     """
 
     _data_buffer: HybridBuffer | None
     _axis_buffer: HybridAxisBuffer
     _template_msg: AxisArray | None
-    _last_update: float | None
 
     def __init__(self, duration: float, axis: str = "time", **kwargs):
         self.duration = duration
@@ -208,7 +207,6 @@ class HybridAxisArrayBuffer:
         # Delay initialization until the first message arrives
         self._data_buffer = None
         self._template_msg = None
-        self._last_update = None
 
     def available(self) -> int:
         """The total number of unread samples currently available in the buffer."""
@@ -270,7 +268,6 @@ class HybridAxisArrayBuffer:
             )
         self._data_buffer.write(msg.data)
         self._axis_buffer.write(msg.axes[self._axis], msg.shape[0])
-        self._last_update = time.time()
 
     def peek(self, n_samples: int | None = None) -> AxisArray | None:
         """Retrieves the oldest unread data as a new AxisArray without advancing the read head."""
