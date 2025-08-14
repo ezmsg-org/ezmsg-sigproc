@@ -216,10 +216,11 @@ class HybridAxisArrayBuffer:
             return 0
         return self._data_buffer.available()
 
-    @property
-    def last_update(self) -> float | None:
-        """The time.time() timestamp of the last update to the buffer."""
-        return self._last_update
+    def is_empty(self) -> bool:
+        return self.available() == 0
+
+    def is_full(self) -> bool:
+        return 0 < self._data_buffer.capacity == self.available()
 
     @property
     def axis_final_value(self) -> float | None:
@@ -279,7 +280,7 @@ class HybridAxisArrayBuffer:
 
         data_array = self._data_buffer.peek(n_samples)
 
-        if data_array is None or data_array.shape[0] == 0:
+        if data_array is None:
             return None
 
         out_axis = self._axis_buffer.peek(n_samples)
