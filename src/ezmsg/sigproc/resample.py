@@ -88,7 +88,7 @@ class ResampleProcessor(
         self.state.src_buffer = HybridAxisArrayBuffer(
             duration=self.settings.buffer_duration,
             axis=self.settings.axis,
-            update_strategy="on_demand",
+            update_strategy="immediate",
             overflow_strategy="grow",
         )
         if self.settings.resample_rate is not None:
@@ -108,6 +108,7 @@ class ResampleProcessor(
         if self.state.ref_axis_buffer is None:
             self.state.ref_axis_buffer = HybridAxisBuffer(
                 duration=self.settings.buffer_duration,
+                update_strategy="immediate",
                 overflow_strategy="grow",
             )
             t0 = ax.data[0] if hasattr(ax, "data") else ax.value(0)
