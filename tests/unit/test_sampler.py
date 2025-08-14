@@ -63,7 +63,7 @@ def test_sampler():
     # Create the sample-generator
     period_dur = period[1] - period[0]
     buffer_dur = 2 * max(period_dur, period[1])
-    gen = SamplerTransformer(
+    proc = SamplerTransformer(
         settings=SamplerSettings(
             buffer_dur, axis="time", period=None, value=None, estimate_alignment=True
         )
@@ -71,8 +71,8 @@ def test_sampler():
 
     # Run the messages through the generator and collect samples.
     samples = []
-    for msg in mix_msgs:
-        samples.extend(gen.send(msg))
+    for msg_ix, msg in enumerate(mix_msgs):
+        samples.extend(proc(msg))
 
     assert_messages_equal(signal_msgs, backup_signal)
     assert_messages_equal(trigger_msgs, backup_trigger)
