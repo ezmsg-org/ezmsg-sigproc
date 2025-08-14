@@ -33,6 +33,7 @@ class HybridBuffer:
             overwrite previously-unread samples.
         max_size: The maximum size of the buffer in bytes.
             If the buffer exceeds this size, it will raise an error.
+        warn_once: If True, will only warn once on overflow when using "warn-overwrite" strategy.
     """
 
     def __init__(
@@ -45,6 +46,7 @@ class HybridBuffer:
         threshold: int = 0,
         overflow_strategy: OverflowStrategy = "grow",
         max_size: int = 1024**3,  # 1 GB default max size
+        warn_once: bool = True,
     ):
         self.xp = array_namespace
         self._capacity = capacity
@@ -53,6 +55,7 @@ class HybridBuffer:
         self._threshold = threshold
         self._overflow_strategy = overflow_strategy
         self._max_size = max_size
+        self._warn_once = warn_once
 
         self._buffer = self.xp.empty((capacity, *other_shape), dtype=dtype)
         self._head = 0  # Write pointer
@@ -63,6 +66,7 @@ class HybridBuffer:
         self._last_overflow = (
             0  # Tracks the last overflow count, overwritten or skipped
         )
+        self._warned = False  # Tracks if we've warned already (for warn_once)
 
     @property
     def capacity(self) -> int:
@@ -251,7 +255,8 @@ class HybridBuffer:
         # If new data is larger than buffer and overflow strategy is "warn-overwrite",
         #  then we can take a shortcut and replace the entire buffer.
         if n_new >= self._capacity and self._overflow_strategy == "warn-overwrite":
-            if n_overflow > 0:
+            if n_overflow > 0 and (not self._warn_once or not self._warned):
+                self._warned = True
                 warnings.warn(
                     f"Buffer overflow: {n_new} samples received, but only {self._capacity - self._buff_unread} available. "
                     f"Overwriting {n_overflow} previous samples.",
@@ -271,11 +276,14 @@ class HybridBuffer:
                     f"Buffer overflow: {n_new} samples received, but only {n_free} available."
                 )
             elif self._overflow_strategy == "warn-overwrite":
-                warnings.warn(
-                    f"Buffer overflow: {n_new} samples received, but only {n_free} available. "
-                    f"Overwriting {n_overflow} previous samples.",
-                    RuntimeWarning,
-                )
+                if not self._warn_once or not self._warned:
+                    self._warned = True
+                    warnings.warn(
+                        f"Buffer overflow: {n_new} samples received, but only {n_free} available. "
+                        f"Overwriting {n_overflow} previous samples.",
+                        RuntimeWarning,
+                    )
+                # Move the tail forward to make room for the new data.
                 self.seek(n_overflow)
                 self._buff_read = 0
                 self._last_overflow = n_overflow
