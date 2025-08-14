@@ -188,6 +188,18 @@ class HybridBuffer:
         idx -= deq_splits[arr_idx]
         return self._deque[arr_idx][idx : idx + 1]
 
+    def peek_last(self) -> Array:
+        """
+        Retrieves the last sample in the buffer without advancing the read head.
+        """
+        if self._deque:
+            return self._deque[-1][-1:]
+        elif self._buff_unread > 0:
+            idx = (self._head - 1 + self._capacity) % self._capacity
+            return self._buffer[idx : idx + 1]
+        else:
+            raise IndexError("Cannot peek last from an empty buffer.")
+
     def seek(self, n_samples: int) -> int:
         """
         Advances the read head by n_samples.

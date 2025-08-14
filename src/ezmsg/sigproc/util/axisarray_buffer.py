@@ -148,7 +148,7 @@ class HybridAxisBuffer:
         This does not advance the read head.
         """
         if self._coords_buffer is not None:
-            return self._coords_buffer.peek_at(self.available() - 1)[0]
+            return self._coords_buffer.peek_last()[0]
         elif self._linear_axis is not None:
             return self._linear_axis.value(self._linear_n_available - 1)
         else:
