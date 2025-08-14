@@ -15,7 +15,14 @@ Array = typing.TypeVar("Array")
 class HybridAxisBuffer:
     """
     A buffer that intelligently handles ezmsg.util.messages.AxisArray _axes_ objects.
-    LinearAxis and CoordinateAxis are supported.
+     LinearAxis is maintained internally by tracking its offset, gain, and the number
+     of samples that have passed through.
+     CoordinateAxis has its data values maintained in a `HybridBuffer`.
+
+    Args:
+        duration: The desired duration of the buffer in seconds.
+        **kwargs: Additional keyword arguments to pass to the underlying HybridBuffer
+            (e.g., `update_strategy`, `threshold`, `overflow_strategy`, `max_size`).
     """
 
     _coords_buffer: HybridBuffer | None
@@ -54,7 +61,7 @@ class HybridAxisBuffer:
     def is_full(self) -> bool:
         if self._coords_buffer is not None:
             return self._coords_buffer.is_full()
-        return self.capacity > 0 and self.available() == self.capacity
+        return 0 < self.capacity == self.available()
 
     def _initialize(self, first_axis: LinearAxis | CoordinateAxis) -> None:
         if hasattr(first_axis, "data"):
@@ -74,10 +81,10 @@ class HybridAxisBuffer:
                 dtype=first_axis.data.dtype,
                 **self.buffer_kwargs,
             )
-            self._coords_template = replace(first_axis, data=first_axis.data[:0])
+            self._coords_template = replace(first_axis, data=first_axis.data[:0].copy())
         else:
             # Initialize a LinearAxis buffer
-            self._linear_axis = first_axis
+            self._linear_axis = replace(first_axis, offset=first_axis.offset)
             self._linear_n_available = 0
 
     def write(self, axis: LinearAxis | CoordinateAxis, n_samples: int) -> None:
@@ -141,7 +148,7 @@ class HybridAxisBuffer:
         This does not advance the read head.
         """
         if self._coords_buffer is not None:
-            return self._coords_buffer.peek(self.available())[-1]
+            return self._coords_buffer.peek_at(self.available() - 1)[0]
         elif self._linear_axis is not None:
             return self._linear_axis.value(self._linear_n_available - 1)
         else:
