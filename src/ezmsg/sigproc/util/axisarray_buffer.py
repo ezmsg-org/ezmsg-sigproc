@@ -370,10 +370,10 @@ class HybridAxisArrayBuffer:
         return self._axis_buffer.gain
 
     def axis_searchsorted(
-        self, values: typing.Union[float, Array]
+        self, values: typing.Union[float, Array], side: str = "left"
     ) -> typing.Union[int, Array]:
         """
         Find the indices into which the given values would be inserted
         into the target axis data to maintain order.
         """
-        return self._axis_buffer.searchsorted(values)
+        return self._axis_buffer.searchsorted(values, side=side)
