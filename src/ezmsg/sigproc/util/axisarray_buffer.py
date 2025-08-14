@@ -227,14 +227,6 @@ class HybridAxisArrayBuffer:
         return self._axis_buffer.final_value
 
     def _initialize(self, first_msg: AxisArray) -> None:
-        in_axis_idx = first_msg.get_axis_idx(self._axis)
-        if in_axis_idx > 0:
-            # TODO: Maybe we can support non-first axes in the future?
-            raise ValueError(
-                f"Axis '{self._axis}' must be the first axis in the message, "
-                f"but found at index {in_axis_idx}."
-            )
-
         # Create a template message that has everything except the data are length 0
         #  and the target axis is missing.
         self._template_msg = replace(
@@ -257,16 +249,18 @@ class HybridAxisArrayBuffer:
 
     def write(self, msg: AxisArray) -> None:
         """Adds an AxisArray message to the buffer, initializing on the first call."""
+        in_axis_idx = msg.get_axis_idx(self._axis)
+        if in_axis_idx > 0:
+            # This class assumes that the target axis is the first axis.
+            # If it is not, we move it to the front.
+            dims = list(msg.dims)
+            dims.insert(0, dims.pop(in_axis_idx))
+            _xp = get_namespace(msg.data)
+            msg = replace(msg, data=_xp.moveaxis(msg.data, in_axis_idx, 0), dims=dims)
+
         if self._data_buffer is None:
             self._initialize(msg)
 
-        in_axis_idx = msg.get_axis_idx(self._axis)
-        if in_axis_idx > 0:
-            # TODO: Maybe we can support non-first axes in the future?
-            raise ValueError(
-                f"Axis '{self._axis}' must be the first axis in the message, "
-                f"but found at index {in_axis_idx}."
-            )
         self._data_buffer.write(msg.data)
         self._axis_buffer.write(msg.axes[self._axis], msg.shape[0])
 

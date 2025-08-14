@@ -118,20 +118,12 @@ class ResampleProcessor(
         """
         Add a new data message to the buffer and update the reference axis if needed.
         """
-        ax_idx = message.get_axis_idx(self.settings.axis)
-        if ax_idx != 0:
-            # TODO: HybridAxisArrayBuffer currently expects the primary axis to be at index 0,
-            #  but will be modified to allow the primary axis to be at any index. Then we can remove this.
-            dims = list(message.dims)
-            dims.insert(0, dims.pop(ax_idx))
-            message = replace(
-                message, data=np.moveaxis(message.data, ax_idx, 0), dims=dims
-            )
-
+        # Note: The src_buffer will copy and permute message if ax_idx != 0
         self.state.src_buffer.write(message)
 
         # If we are resampling at a prescribed rate (i.e., not by reference msgs),
         #  then we use this opportunity to extend our synthetic reference axis.
+        ax_idx = message.get_axis_idx(self.settings.axis)
         if self.settings.resample_rate is not None and message.data.shape[ax_idx] > 0:
             in_ax = message.axes[self.settings.axis]
             in_t_end = (

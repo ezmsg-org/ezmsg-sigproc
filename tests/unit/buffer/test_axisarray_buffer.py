@@ -562,3 +562,22 @@ def test_searchsorted_coordinate(coordinate_axis_message):
     buf.write(coordinate_axis_message(samples=20, start_time=0.1, interval=0.01))
     indices = buf.axis_searchsorted(np.array([0.1, 0.15, 0.29]))
     np.testing.assert_array_equal(indices, np.array([0, 5, 19]))
+
+
+def test_permute_dims(linear_axis_message):
+    buf = HybridAxisArrayBuffer(duration=1.0, axis="time", update_strategy="immediate")
+    msg = linear_axis_message(samples=10, fs=100.0, offset=0.0)
+    # Swap the axes
+    msg.dims = ["ch", "time"]
+    msg.data = np.ascontiguousarray(msg.data.T)
+    # Write the message; it should automatically permute the dimensions back to ["time", "ch"]
+    buf.write(msg)
+    assert buf.available() == 10
+    assert buf._data_buffer is not None
+    assert buf._data_buffer.capacity == 100  # 1.0s * 100Hz
+    assert buf._axis_buffer._linear_axis.offset == 0.00
+    assert buf._template_msg is not None and buf._template_msg.dims == ["time", "ch"]
+    assert msg.dims == ["ch", "time"]  # Unchanged
+    retrieved = buf.read()
+    assert retrieved.dims == ["time", "ch"]
+    assert retrieved.shape == (10, 2)
