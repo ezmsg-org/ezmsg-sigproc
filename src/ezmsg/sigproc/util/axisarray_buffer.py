@@ -19,7 +19,8 @@ class HybridAxisBuffer:
      CoordinateAxis has its data values maintained in a `HybridBuffer`.
 
     Args:
-        duration: The desired duration of the buffer in seconds.
+        duration: The desired duration of the buffer in seconds. This is non-limiting
+         when managing a LinearAxis.
         **kwargs: Additional keyword arguments to pass to the underlying HybridBuffer
             (e.g., `update_strategy`, `threshold`, `overflow_strategy`, `max_size`).
     """

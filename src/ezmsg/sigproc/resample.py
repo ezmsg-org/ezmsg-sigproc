@@ -1,13 +1,11 @@
 import asyncio
-import dataclasses
+import math
 import time
-import typing
 
 import numpy as np
-import numpy.typing as npt
 import scipy.interpolate
 import ezmsg.core as ez
-from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.axisarray import AxisArray, LinearAxis
 from ezmsg.util.messages.util import replace
 
 from .base import (
@@ -15,6 +13,7 @@ from .base import (
     BaseConsumerUnit,
     processor_state,
 )
+from .util.axisarray_buffer import HybridAxisArrayBuffer, HybridAxisBuffer
 
 
 class ResampleSettings(ez.Settings):
@@ -23,7 +22,7 @@ class ResampleSettings(ez.Settings):
     resample_rate: float | None = None
     """target resample rate in Hz. If None, the resample rate will be determined by the reference signal."""
 
-    max_chunk_delay: float = 0.0
+    max_chunk_delay: float = np.inf
     """Maximum delay between outputs in seconds. If the delay exceeds this value, the transformer will extrapolate."""
 
     fill_value: str = "extrapolate"
@@ -34,23 +33,42 @@ class ResampleSettings(ez.Settings):
     See scipy.interpolate.interp1d for more options.
     """
 
-
-@dataclasses.dataclass
-class ResampleBuffer:
-    data: npt.NDArray
-    tvec: npt.NDArray
-    template: AxisArray
-    last_update: float
+    buffer_duration: float = 2.0
 
 
 @processor_state
 class ResampleState:
-    signal_buffer: ResampleBuffer | None = None
-    ref_axis: tuple[typing.Union[AxisArray.TimeAxis, AxisArray.CoordinateAxis], int] = (
-        AxisArray.TimeAxis(fs=1.0),
-        0,
-    )
-    last_t_out: float | None = None
+    src_buffer: HybridAxisArrayBuffer | None = None
+    """
+    Buffer for the incoming signal data. This is the source for training the interpolation function.
+    Its contents are rarely empty because we usually hold back some data to allow for accurate
+    interpolation and optionally extrapolation.
+    """
+
+    ref_axis_buffer: HybridAxisBuffer | None = None
+    """
+    The buffer for the reference axis (usually a time axis). The interpolation function
+    will be evaluated at the reference axis values.
+    When resample_rate is None, this buffer will be filled with the axis from incoming 
+    _reference_ messages.
+    When resample_rate is not None (i.e., prescribed float resample_rate), this buffer 
+    is filled with a synthetic axis that is generated from the incoming signal messages.
+    """
+
+    last_ref_ax_val: float | None = None
+    """
+    The last value of the reference axis that was returned. This helps us to know
+    what the _next_ returned value should be, and to avoid returning the same value.
+    TODO: We can eliminate this variable if we maintain "by convention" that the 
+    reference axis always has 1 value at its start that we exclude from the resampling.
+    """
+
+    last_write_time: float = -np.inf
+    """
+    Wall clock time of the last write to the signal buffer.
+    This is used to determine if we need to extrapolate the reference axis
+    if we have not received an update within max_chunk_delay.
+    """
 
 
 class ResampleProcessor(
@@ -60,169 +78,136 @@ class ResampleProcessor(
         ax_idx: int = message.get_axis_idx(self.settings.axis)
         sample_shape = message.data.shape[:ax_idx] + message.data.shape[ax_idx + 1 :]
         ax = message.axes[self.settings.axis]
-        in_fs = (1 / ax.gain) if hasattr(ax, "gain") else None
-        return hash((message.key, in_fs) + sample_shape)
+        gain = ax.gain if hasattr(ax, "gain") else None
+        return hash((message.key, gain) + sample_shape)
 
     def _reset_state(self, message: AxisArray) -> None:
         """
         Reset the internal state based on the incoming message.
-        If resample_rate is None, the output is driven by the reference signal.
-        The input will still determine the template (except the primary axis) and the buffer.
         """
-        ax_idx: int = message.get_axis_idx(self.settings.axis)
-        ax = message.axes[self.settings.axis]
-        in_dat = message.data
-        in_tvec = (
-            ax.data
-            if hasattr(ax, "data")
-            else ax.value(np.arange(in_dat.shape[ax_idx]))
+        self.state.src_buffer = HybridAxisArrayBuffer(
+            duration=self.settings.buffer_duration,
+            axis=self.settings.axis,
+            update_strategy="on_demand",
+            overflow_strategy="grow",
         )
-        if ax_idx != 0:
-            in_dat = np.moveaxis(in_dat, ax_idx, 0)
-
-        if self.settings.resample_rate is None:
-            # Output is driven by input.
-            # We cannot include the resampled axis until we see reference data.
-            out_axes = {
-                k: v for k, v in message.axes.items() if k != self.settings.axis
-            }
-            # last_t_out also driven by reference data.
-            # self.state.last_t_out = None
-        else:
-            out_axes = {
-                **message.axes,
-                self.settings.axis: AxisArray.TimeAxis(
-                    fs=self.settings.resample_rate, offset=in_tvec[0]
-                ),
-            }
-            self.state.last_t_out = in_tvec[0] - 1 / self.settings.resample_rate
-        template = replace(message, data=in_dat[:0], axes=out_axes)
-        self.state.signal_buffer = ResampleBuffer(
-            data=in_dat[:0],
-            tvec=in_tvec[:0],
-            template=template,
-            last_update=time.time(),
-        )
-
-    def _process(self, message: AxisArray) -> None:
-        # The incoming message will be added to the buffer.
-        buf = self.state.signal_buffer
-
-        # If our outputs are driven by reference signal, create the template's output axis if not already created.
-        if (
-            self.settings.resample_rate is None
-            and self.settings.axis not in self.state.signal_buffer.template.axes
-        ):
-            buf = self.state.signal_buffer
-            buf.template.axes[self.settings.axis] = self.state.ref_axis[0]
-            if hasattr(buf.template.axes[self.settings.axis], "gain"):
-                buf.template = replace(
-                    buf.template,
-                    axes={
-                        **buf.template.axes,
-                        self.settings.axis: replace(
-                            buf.template.axes[self.settings.axis],
-                            offset=self.state.last_t_out,
-                        ),
-                    },
-                )
-                # Note: last_t_out was set on the first call to push_reference.
-
-        # Append the new data to the buffer
-        ax_idx: int = message.get_axis_idx(self.settings.axis)
-        in_dat: npt.NDArray = message.data
-        if ax_idx != 0:
-            in_dat = np.moveaxis(in_dat, ax_idx, 0)
-        ax = message.axes[self.settings.axis]
-        in_tvec = (
-            ax.data if hasattr(ax, "data") else ax.value(np.arange(in_dat.shape[0]))
-        )
-        buf.data = np.concatenate((buf.data, in_dat), axis=0)
-        buf.tvec = np.hstack((buf.tvec, in_tvec))
-        buf.last_update = time.time()
+        if self.settings.resample_rate is not None:
+            # If we are resampling at a prescribed rate, then we synthesize a reference axis
+            self.state.ref_axis_buffer = HybridAxisBuffer(
+                duration=self.settings.buffer_duration,
+            )
+            in_ax = message.axes[self.settings.axis]
+            out_gain = 1 / self.settings.resample_rate
+            t0 = in_ax.data[0] if hasattr(in_ax, "data") else in_ax.value(0)
+            self.state.last_ref_ax_val = t0 - out_gain
+        self.state.last_write_time = -np.inf
 
     def push_reference(self, message: AxisArray) -> None:
         ax = message.axes[self.settings.axis]
         ax_idx = message.get_axis_idx(self.settings.axis)
-        n_new = message.data.shape[ax_idx]
-        if self.state.ref_axis[1] == 0:
-            self.state.ref_axis = (ax, n_new)
-        else:
-            if hasattr(ax, "gain"):
-                # Rate and offset don't need to change; we simply increment our sample counter.
-                self.state.ref_axis = (
-                    self.state.ref_axis[0],
-                    self.state.ref_axis[1] + n_new,
-                )
-            else:
-                # Extend our time axis with the new data.
-                new_tvec = np.concatenate(
-                    (self.state.ref_axis[0].data, ax.data), axis=0
-                )
-                self.state.ref_axis = (
-                    replace(self.state.ref_axis[0], data=new_tvec),
-                    self.state.ref_axis[1] + n_new,
-                )
+        if self.state.ref_axis_buffer is None:
+            self.state.ref_axis_buffer = HybridAxisBuffer(
+                duration=self.settings.buffer_duration,
+                overflow_strategy="grow",
+            )
+            t0 = ax.data[0] if hasattr(ax, "data") else ax.value(0)
+            self.state.last_ref_ax_val = t0 - ax.gain
+        self.state.ref_axis_buffer.write(ax, n_samples=message.data.shape[ax_idx])
 
-        if self.settings.resample_rate is None and self.state.last_t_out is None:
-            # This reference axis will become THE output axis.
-            # If last_t_out has not previously been set, we set it to the sample before this reference data.
-            if hasattr(self.state.ref_axis[0], "gain"):
-                ref_tvec = self.state.ref_axis[0].value(np.arange(2))
-            else:
-                ref_tvec = self.state.ref_axis[0].data[:2]
-            self.state.last_t_out = 2 * ref_tvec[0] - ref_tvec[1]
+    def _process(self, message: AxisArray) -> None:
+        """
+        Add a new data message to the buffer and update the reference axis if needed.
+        """
+        ax_idx = message.get_axis_idx(self.settings.axis)
+        if ax_idx != 0:
+            # TODO: HybridAxisArrayBuffer currently expects the primary axis to be at index 0,
+            #  but will be modified to allow the primary axis to be at any index. Then we can remove this.
+            dims = list(message.dims)
+            dims.insert(0, dims.pop(ax_idx))
+            message = replace(
+                message, data=np.moveaxis(message.data, ax_idx, 0), dims=dims
+            )
+
+        self.state.src_buffer.write(message)
+
+        # If we are resampling at a prescribed rate (i.e., not by reference msgs),
+        #  then we use this opportunity to extend our synthetic reference axis.
+        if self.settings.resample_rate is not None and message.data.shape[ax_idx] > 0:
+            in_ax = message.axes[self.settings.axis]
+            in_t_end = (
+                in_ax.data[-1]
+                if hasattr(in_ax, "data")
+                else in_ax.value(message.data.shape[ax_idx] - 1)
+            )
+            out_gain = 1 / self.settings.resample_rate
+            prev_t_end = self.state.last_ref_ax_val
+            n_synth = math.ceil((in_t_end - prev_t_end) * self.settings.resample_rate)
+            synth_ref_axis = LinearAxis(
+                unit="s", gain=out_gain, offset=prev_t_end + out_gain
+            )
+            self.state.ref_axis_buffer.write(synth_ref_axis, n_samples=n_synth)
+
+        self.state.last_write_time = time.time()
 
     def __next__(self) -> AxisArray:
-        buf = self.state.signal_buffer
-
-        if buf is None:
+        if self.state.src_buffer is None or self.state.ref_axis_buffer is None:
+            # If we have not received any data, or we require reference data
+            #  that we do not yet have, then return an empty template.
             return AxisArray(data=np.array([]), dims=[""], axes={}, key="null")
 
-        # buffer is empty or ref-driven && empty-reference; return the empty template
-        if (buf.tvec.size == 0) or (
-            self.settings.resample_rate is None and self.state.ref_axis[1] < 3
-        ):
-            # Note: empty template's primary axis' offset might be meaningless.
-            return buf.template
+        src = self.state.src_buffer
+        ref = self.state.ref_axis_buffer
 
-        # Identify the output timestamps at which we will resample the buffer
-        b_project = False
-        if self.settings.resample_rate is None:
-            # Rely on reference signal to determine output timestamps
-            if hasattr(self.state.ref_axis[0], "data"):
-                ref_tvec = self.state.ref_axis[0].data
-            else:
-                n_avail = self.state.ref_axis[1]
-                ref_tvec = self.state.ref_axis[0].value(np.arange(n_avail))
+        # If we have no reference or the source is insufficient for interpolation
+        #  then return the empty template
+        if ref.is_empty() or src.available() < 3:
+            return src.peek(0)
+
+        # Build the reference xvec.
+        #  Note: The reference axis buffer may grow upon `.peek()`
+        #   as it flushes data from its deque to its buffer.
+        ref_ax = ref.peek()
+        if hasattr(ref_ax, "data"):
+            ref_xvec = ref_ax.data
         else:
-            # Get output timestamps from resample_rate and what we've collected so far
-            t_begin = self.state.last_t_out + 1 / self.settings.resample_rate
-            t_end = buf.tvec[-1]
-            if self.settings.max_chunk_delay > 0 and time.time() > (
-                buf.last_update + self.settings.max_chunk_delay
-            ):
-                # We've waiting too long between pushes. We will have to extrapolate.
-                b_project = True
-                t_end += self.settings.max_chunk_delay
-            ref_tvec = np.arange(t_begin, t_end, 1 / self.settings.resample_rate)
+            ref_xvec = ref_ax.value(np.arange(ref.available()))
 
-        # Which samples can we resample?
-        b_ref = ref_tvec > self.state.last_t_out
+        # If we do not rely on an external reference, and we have not received new data in a while,
+        #  then extrapolate our reference vector out beyond the delay limit.
+        b_project = self.settings.resample_rate is not None and time.time() > (
+            self.state.last_write_time + self.settings.max_chunk_delay
+        )
+        if b_project:
+            n_append = math.ceil(self.settings.max_chunk_delay / ref_ax.gain)
+            xvec_append = ref_xvec[-1] + np.arange(1, n_append + 1) * ref_ax.gain
+            ref_xvec = np.hstack((ref_xvec, xvec_append))
+
+        # Only resample at reference values that have not been interpolated over previously.
+        b_ref = ref_xvec > self.state.last_ref_ax_val
         if not b_project:
-            b_ref = np.logical_and(b_ref, ref_tvec <= buf.tvec[-1])
+            # Not extrapolating -- Do not resample beyond the end of the source buffer.
+            b_ref = np.logical_and(b_ref, ref_xvec <= src.axis_final_value)
         ref_idx = np.where(b_ref)[0]
 
-        if len(ref_idx) < 2:
-            # Not enough data to resample; return the empty template.
-            return buf.template
+        if len(ref_idx) == 0:
+            # Nothing to interpolate over; return the empty template.
+            return src.peek(0)
 
-        tnew = ref_tvec[ref_idx]
-        # Slice buf to minimal range around tnew with some padding for better interpolation.
-        buf_start_ix = max(0, np.searchsorted(buf.tvec, tnew[0]) - 2)
-        buf_stop_ix = np.searchsorted(buf.tvec, tnew[-1], side="right") + 2
-        x = buf.tvec[buf_start_ix:buf_stop_ix]
-        y = buf.data[buf_start_ix:buf_stop_ix]
+        xnew = ref_xvec[ref_idx]
+
+        # Identify source data indices around ref tvec with some padding for better interpolation.
+        src_start_ix = max(0, src.axis_searchsorted(xnew[0]) - 2)
+
+        # Get source to train interpolation
+        src_axarr = src.peek()
+        src_axis = src_axarr.axes[self.settings.axis]
+        if isinstance(src_axis, LinearAxis):
+            x = src_axis.value(np.arange(src_axarr.data.shape[0]))
+        else:
+            x = src_axis.data
+        x = x[src_start_ix:]
+        y = src_axarr.data[src_start_ix:]
+
         if (
             isinstance(self.settings.fill_value, str)
             and self.settings.fill_value == "last"
@@ -240,37 +225,30 @@ class ResampleProcessor(
             fill_value=fill_value,
             assume_sorted=True,
         )
-        resampled_data = f(tnew)
-        if hasattr(buf.template.axes[self.settings.axis], "data"):
-            repl_axis = replace(buf.template.axes[self.settings.axis], data=tnew)
+
+        # Calculate output
+        resampled_data = f(xnew)
+
+        # Create output message
+        if hasattr(ref_ax, "data"):
+            out_ax = replace(ref_ax, data=xnew)
         else:
-            repl_axis = replace(buf.template.axes[self.settings.axis], offset=tnew[0])
+            out_ax = replace(ref_ax, offset=xnew[0])
         result = replace(
-            buf.template,
+            src_axarr,
             data=resampled_data,
             axes={
-                **buf.template.axes,
-                self.settings.axis: repl_axis,
+                **src_axarr.axes,
+                self.settings.axis: out_ax,
             },
         )
 
-        # Update state to move past samples that are no longer be needed
-        self.state.last_t_out = tnew[-1]
-        buf.data = buf.data[max(0, buf_stop_ix - 3) :]
-        buf.tvec = buf.tvec[max(0, buf_stop_ix - 3) :]
-        buf.last_update = time.time()
-
-        if self.settings.resample_rate is None:
-            # Update self.state.ref_axis to remove samples that have been used in the output
-            if hasattr(self.state.ref_axis[0], "data"):
-                new_ref_ax = replace(
-                    self.state.ref_axis[0],
-                    data=self.state.ref_axis[0].data[ref_idx[-1] + 1 :],
-                )
-            else:
-                next_offset = self.state.ref_axis[0].value(ref_idx[-1] + 1)
-                new_ref_ax = replace(self.state.ref_axis[0], offset=next_offset)
-            self.state.ref_axis = (new_ref_ax, self.state.ref_axis[1] - len(ref_idx))
+        # Update the state. For state buffers, seek beyond samples that are no longer needed.
+        # src: keep at least 1 sample before the final resampled value
+        self.state.src_buffer.seek(max(0, src.axis_searchsorted(xnew[-1]) - 1))
+        # ref: remove samples that have been sent to output
+        self.state.ref_axis_buffer.seek(ref_idx[-1] + 1)
+        self.state.last_ref_ax_val = xnew[-1]
 
         return result
 
