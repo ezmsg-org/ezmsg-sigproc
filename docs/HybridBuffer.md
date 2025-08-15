@@ -65,7 +65,7 @@ Additionally, one can configure the HybridBuffer overflow_strategy to 'raise', w
 A couple notes:
 
 * helper methods `peek_at(k, allow_flush=False)` (False is default), and `peek_last(k)` will retrieve the k-th sample from the combined buffer-and-deque without flushing the deque. Be cautious relying on repeated calls to `peek_at(k, allow_flush=False)` as it may scan the items in the deque and their shapes to determine where to read from which is slow.
-* It's probably possible to modify `read()` to recognize when a flush would cause an overflow but not if some of the data were read out first, then do a 2-stage `seek(n_unread_in_buffer)`, `peek(n_unread_in_buffer)`, then `seek(n_remaining)` which would trigger a `flush()`, and finally `peek(n_remaining)`, then combine the results from the 2 seek operations. If you're encountering this corner case and your probably is not solved by increasing the capacity of the buffer, then let us know, and we will make this change. 
+* It may be possible to modify `read()` to recognize when a flush would cause an overflow but not if some of the data were read out first, then do a 2-stage `seek(n_unread_in_buffer)`, `peek(n_unread_in_buffer)`, then `seek(n_remaining)` which would trigger a `flush()`, and finally `peek(n_remaining)`, then combine the results from the 2 seek operations. If you're encountering this corner case and your problem is not solved by increasing the capacity of the buffer, then let us know, and we will make this change.
 
 ### Advanced Pointer Manipulation
 
@@ -81,4 +81,4 @@ For a `CoordinateAxis`, the `HybridAxisBuffer` maintains the `data` in a `Hybrid
 
 ## HybridAxisArrayBuffer
 
-This is a convenience class that combines the `HybridAxisBuffer` and `HybridBuffer` into a single object that can be used to manage both axis and data in a single buffer. It is particularly useful when you need to manage both the axis information and the data samples together. Its `write` method expects an `AxisArary` object and its `peek` and `read` methods return an `AxisArray` object. Note that the return object's `.data` field might be a view on the data in the buffer so it should not be modified in place. Similarly so for the `CoordinateAxis` data.
+This is a convenience class that combines the `HybridAxisBuffer` and `HybridBuffer` into a single object that can be used to manage both axis and data in a single object. This class is particularly useful when you need to manage both the axis information and the data samples together, as is the case for an `AxisArray` object. Its `write` method expects an `AxisArary` object and its `peek` and `read` methods return an `AxisArray` object. Note that the return object's `.data` field might be a view on the data in the buffer so it should not be modified in place. Similarly so for the `CoordinateAxis` data.
