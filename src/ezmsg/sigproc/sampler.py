@@ -4,6 +4,7 @@ import copy
 import traceback
 import typing
 
+import numpy as np
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import (
     AxisArray,
@@ -131,28 +132,25 @@ class SamplerTransformer(
                 del self._state.triggers[trig_ix]
                 continue
 
-            t_start = trig.timestamp + trig.period[0]
-            t_stop = trig.timestamp + trig.period[1]
+            trig_range = trig.timestamp + np.array(trig.period)
 
             # If the previous iteration had insufficient data for the trigger timestamp + period,
             #  and buffer-management removed data required for the trigger, then we will never be able
             #  to accommodate this trigger. Discard it. An increase in buffer_dur is recommended.
-            if t_start < buff_t_range[0]:
+            if trig_range[0] < buff_t_range[0]:
                 ez.logger.warning(
                     f"Sampling failed: Buffer span {buff_t_range} begins beyond the "
-                    f"requested sample period start: {t_start}"
+                    f"requested sample period start: {trig_range[0]}"
                 )
                 del self._state.triggers[trig_ix]
                 continue
 
-            if t_stop > buff_t_range[1]:
+            if trig_range[1] > buff_t_range[1]:
                 # We don't *yet* have enough data to satisfy this trigger.
                 continue
 
             # We know we have enough data in the buffer to satisfy this trigger.
-            buff_idx = self._state.buffer.axis_searchsorted(
-                [t_start, t_stop], side="right"
-            )
+            buff_idx = self._state.buffer.axis_searchsorted(trig_range, side="right")
             self._state.buffer.seek(buff_idx[0])  # FFWD to starting position.
             buff_axarr = self._state.buffer.peek(buff_idx[1] - buff_idx[0])
             self._state.buffer.seek(-buff_idx[0])  # Rewind it back.
