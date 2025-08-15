@@ -44,6 +44,7 @@ class SamplerSettings(ez.Settings):
         None (default) will choose the first axis in the first input.
         Note: (for now) the axis must exist in the msg .axes and be of type AxisArray.LinearAxis
     """
+
     period: tuple[float, float] | None = None
     """Optional default period (in seconds) if unspecified in SampleTriggerMessage."""
 
