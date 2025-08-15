@@ -181,23 +181,28 @@ class TestHybridAxisBuffer:
         axis = LinearAxis(gain=0.01, offset=0.0)
         buf.write(axis, n_samples=50)
 
-        # Test single value
-        idx = buf.searchsorted(0.025)
-        assert idx == 2  # Floor of 2.5
+        sim_values = axis.value(np.arange(50))
 
-        # Test array of values
-        values = np.array([0.015, 0.035, 0.055])
-        expected_indices = np.rint(axis.offset + values / axis.gain).astype(int)
-        indices = buf.searchsorted(values)
-        np.testing.assert_array_equal(indices, expected_indices)
+        # Test single value in between
+        test_val = 0.025
+        expected = np.searchsorted(sim_values, test_val)
+        idx = buf.searchsorted(test_val)
+        assert idx == expected
+
+        # Test array of values, at least one of which should be equal to an axis value
+        values = np.array([0.015, 0.035, 0.055, 0.1])
+        for side in ["left", "right"]:
+            expected_indices = np.searchsorted(sim_values, values, side=side)
+            indices = buf.searchsorted(values, side=side)
+            np.testing.assert_array_equal(indices, expected_indices)
 
         # Test with empty buffer
         buf.seek(50)  # Clear buffer
-        idx = buf.searchsorted(0.5)
-        assert idx == 0
-
-        indices = buf.searchsorted(values)
-        np.testing.assert_array_equal(indices, [0, 0, 0])
+        sim_values = sim_values[50:]
+        assert buf.searchsorted(test_val) == np.searchsorted(sim_values, test_val)
+        np.testing.assert_array_equal(
+            buf.searchsorted(values), np.searchsorted(sim_values, values)
+        )
 
     def test_searchsorted_coordinate(self):
         """Test searchsorted with CoordinateAxis"""
