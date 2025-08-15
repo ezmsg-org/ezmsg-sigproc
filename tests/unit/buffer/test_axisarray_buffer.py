@@ -236,9 +236,10 @@ class TestHybridAxisBuffer:
         axis2 = LinearAxis(gain=0.0001, offset=0.1)
         buf.write(axis2, n_samples=700)  # Total would be 1200
 
-        # LinearAxis doesn't have built-in overflow handling in buffer
-        # It just updates the offset, so all samples are "available"
-        assert buf.available() == 1200
+        # Even though LinearAxis doesn't have a true capacity limit,
+        #  we simulate one anyway to stay in sync with sister buffers
+        #  (e.g., in HybridAxisArrayBuffer)
+        assert buf.available() == 1000
 
         # But capacity remains the same
         assert buf.capacity == 1000
