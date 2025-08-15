@@ -14,6 +14,7 @@ from .base import (
     processor_state,
 )
 from .util.axisarray_buffer import HybridAxisArrayBuffer, HybridAxisBuffer
+from .util.buffer import UpdateStrategy
 
 
 class ResampleSettings(ez.Settings):
@@ -34,6 +35,13 @@ class ResampleSettings(ez.Settings):
     """
 
     buffer_duration: float = 2.0
+
+    buffer_update_strategy: UpdateStrategy = "immediate"
+    """
+    The buffer update strategy. See :obj:`ezmsg.sigproc.util.buffer.UpdateStrategy`.
+    If you expect to push data much more frequently than it is resampled, then "on_demand"
+    might be more efficient. For most other scenarios, "immediate" is best.
+    """
 
 
 @processor_state
@@ -88,7 +96,7 @@ class ResampleProcessor(
         self.state.src_buffer = HybridAxisArrayBuffer(
             duration=self.settings.buffer_duration,
             axis=self.settings.axis,
-            update_strategy="immediate",
+            update_strategy=self.settings.buffer_update_strategy,
             overflow_strategy="grow",
         )
         if self.settings.resample_rate is not None:
@@ -108,7 +116,7 @@ class ResampleProcessor(
         if self.state.ref_axis_buffer is None:
             self.state.ref_axis_buffer = HybridAxisBuffer(
                 duration=self.settings.buffer_duration,
-                update_strategy="immediate",
+                update_strategy=self.settings.buffer_update_strategy,
                 overflow_strategy="grow",
             )
             t0 = ax.data[0] if hasattr(ax, "data") else ax.value(0)

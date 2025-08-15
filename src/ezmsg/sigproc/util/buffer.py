@@ -147,10 +147,10 @@ class HybridBuffer:
             )
         n_samples = min(n_samples, self.available())
 
-        self._flush_if_needed()
-
         if n_samples == 0:
             return self._buffer[:0]
+
+        self._flush_if_needed(n_samples=n_samples)
 
         if self._tail + n_samples > self._capacity:
             # discontiguous read (wraps around)
@@ -166,14 +166,15 @@ class HybridBuffer:
 
         return data
 
-    def peek_at(self, idx: int) -> Array:
+    def peek_at(self, idx: int, allow_flush: bool = False) -> Array:
         """
         Retrieves a specific sample from the buffer without advancing the read head.
-        Note: This method can read into the deque if the requested sample is beyond
-         the unread samples in the buffer, but it will not cause a flush.
 
         Args:
             idx: The index of the sample to retrieve, relative to the read head.
+            allow_flush: If True, allows flushing the deque to the buffer if the
+                requested sample is not in the buffer. If False and the sample is
+                in the deque, the sample will be retrieved from the deque (slow!).
 
         Returns:
             An array containing the requested sample. This may be a view or a copy.
@@ -181,16 +182,21 @@ class HybridBuffer:
         if idx < 0 or idx >= self.available():
             raise IndexError(f"Index {idx} out of bounds for unread samples.")
 
-        if idx < self._buff_unread:
-            # The requested sample is within the unread samples in the buffer.
-            idx = (self._tail + idx) % self._capacity
-            return self._buffer[idx : idx + 1]
-        # The requested sample is in the deque.
-        idx -= self._buff_unread
-        deq_splits = self.xp.cumsum([0] + [_.shape[0] for _ in self._deque], dtype=int)
-        arr_idx = self.xp.searchsorted(deq_splits, idx, side="right") - 1
-        idx -= deq_splits[arr_idx]
-        return self._deque[arr_idx][idx : idx + 1]
+        if not allow_flush and idx >= self._buff_unread:
+            # The requested sample is in the deque.
+            idx -= self._buff_unread
+            deq_splits = self.xp.cumsum(
+                [0] + [_.shape[0] for _ in self._deque], dtype=int
+            )
+            arr_idx = self.xp.searchsorted(deq_splits, idx, side="right") - 1
+            idx -= deq_splits[arr_idx]
+            return self._deque[arr_idx][idx : idx + 1]
+
+        self._flush_if_needed(n_samples=idx + 1)
+
+        # The requested sample is within the unread samples in the buffer.
+        idx = (self._tail + idx) % self._capacity
+        return self._buffer[idx : idx + 1]
 
     def peek_last(self) -> Array:
         """
@@ -215,8 +221,7 @@ class HybridBuffer:
         Returns:
             The number of samples actually skipped.
         """
-        if n_samples > self._buff_unread:
-            self._flush_if_needed()
+        self._flush_if_needed(n_samples=n_samples)
 
         n_to_seek = max(min(n_samples, self._buff_unread), -self._buff_read)
 
@@ -229,8 +234,12 @@ class HybridBuffer:
 
         return n_to_seek
 
-    def _flush_if_needed(self):
-        if self._update_strategy == "on_demand" and self._deque:
+    def _flush_if_needed(self, n_samples: int | None = None):
+        if (
+            self._update_strategy == "on_demand"
+            and self._deque
+            and (n_samples is None or n_samples > self._buff_unread)
+        ):
             self.flush()
 
     def flush(self):
