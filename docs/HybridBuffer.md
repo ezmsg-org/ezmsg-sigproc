@@ -59,7 +59,6 @@ C. "drop": As much as possible of the data from the deque are copied into the ci
 
 D. "grow": The HybridBuffer will attempt to grow the circular buffer to the lesser of double its current size or the size required to accommodate all read + unread + deque data. If the buffer cannot grow (e.g., due to memory constraints; default max_size is 1GB), it will raise an error.
    * deq_len=0; available=20, tell=8
-   * The diagram is actually incorrect. The _read_ (blue) samples are preserved from 0 to 7, and the _unread_ + deque samples are written after that, from 8 to 27. I'm just too lazy to chang
 
 Additionally, one can configure the HybridBuffer overflow_strategy to 'raise', which will raise an error if there is insufficient space (empty or read samples) in the buffer to perform the flush.
 
