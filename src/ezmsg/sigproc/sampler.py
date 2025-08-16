@@ -1,18 +1,19 @@
 import asyncio
 from collections import deque
+import copy
 import traceback
 import typing
 
 import numpy as np
-import numpy.typing as npt
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import (
     AxisArray,
-    slice_along_axis,
 )
 from ezmsg.util.messages.util import replace
 
 from .util.profile import profile_subpub
+from .util.axisarray_buffer import HybridAxisArrayBuffer
+from .util.buffer import UpdateStrategy
 from .util.message import SampleMessage, SampleTriggerMessage
 from .base import (
     BaseStatefulTransformer,
@@ -43,6 +44,7 @@ class SamplerSettings(ez.Settings):
         None (default) will choose the first axis in the first input.
         Note: (for now) the axis must exist in the msg .axes and be of type AxisArray.LinearAxis
     """
+
     period: tuple[float, float] | None = None
     """Optional default period (in seconds) if unspecified in SampleTriggerMessage."""
 
@@ -51,20 +53,25 @@ class SamplerSettings(ez.Settings):
 
     estimate_alignment: bool = True
     """
-    If true, use message timestamp fields and reported sampling rate to estimate sample-accurate alignment for samples.
+    If true, use message timestamp fields and reported sampling rate to estimate
+     sample-accurate alignment for samples.
     If false, sampling will be limited to incoming message rate -- "Block timing"
     NOTE: For faster-than-realtime playback --  Incoming timestamps must reflect
     "realtime" operation for estimate_alignment to operate correctly.
     """
 
+    buffer_update_strategy: UpdateStrategy = "immediate"
+    """
+    The buffer update strategy. See :obj:`ezmsg.sigproc.util.buffer.UpdateStrategy`.
+    If you expect to push data much more frequently than triggers, then "on_demand"
+    might be more efficient. For most other scenarios, "immediate" is best.
+    """
+
 
 @processor_state
 class SamplerState:
-    fs: float = 0.0
-    offset: float | None = None
-    buffer: npt.NDArray | None = None
+    buffer: HybridAxisArrayBuffer | None = None
     triggers: deque[SampleTriggerMessage] | None = None
-    n_samples: int = 0
 
 
 class SamplerTransformer(
@@ -73,6 +80,16 @@ class SamplerTransformer(
     def __call__(
         self, message: AxisArray | SampleTriggerMessage
     ) -> list[SampleMessage]:
+        # TODO: Currently we have a single entry point that accepts both
+        #  data and trigger messages and we choose a code path based on
+        #  the message type. However, in the future we will likely replace
+        #  SampleTriggerMessage with an agumented form of AxisArray,
+        #  leveraging its attrs field, which makes this a bit harder.
+        #  We should probably force callers of this object to explicitly
+        #  call `push_trigger` for trigger messages. This will also
+        #  simplify typing somewhat because `push_trigger` should not
+        #  return anything yet we currently have it returning an empty
+        #  list just to be compatible with __call__.
         if isinstance(message, AxisArray):
             return super().__call__(message)
         else:
@@ -82,102 +99,75 @@ class SamplerTransformer(
         # Compute hash based on message properties that require state reset
         axis = self.settings.axis or message.dims[0]
         axis_idx = message.get_axis_idx(axis)
-        fs = 1.0 / message.get_axis(axis).gain
         sample_shape = (
             message.data.shape[:axis_idx] + message.data.shape[axis_idx + 1 :]
         )
-        return hash((fs, sample_shape, axis_idx, message.key))
+        return hash((sample_shape, message.key))
 
     def _reset_state(self, message: AxisArray) -> None:
-        axis = self.settings.axis or message.dims[0]
-        axis_idx = message.get_axis_idx(axis)
-        axis_info = message.get_axis(axis)
-        self._state.fs = 1.0 / axis_info.gain
-        self._state.buffer = None
+        self._state.buffer = HybridAxisArrayBuffer(
+            duration=self.settings.buffer_dur,
+            axis=self.settings.axis or message.dims[0],
+            update_strategy=self.settings.buffer_update_strategy,
+            overflow_strategy="warn-overwrite",  # True circular buffer
+        )
         if self._state.triggers is None:
             self._state.triggers = deque()
         self._state.triggers.clear()
-        self._state.n_samples = message.data.shape[axis_idx]
 
     def _process(self, message: AxisArray) -> list[SampleMessage]:
-        axis = self.settings.axis or message.dims[0]
-        axis_idx = message.get_axis_idx(axis)
-        axis_info = message.get_axis(axis)
-        self._state.offset = axis_info.offset
+        self._state.buffer.write(message)
 
-        # Update buffer
-        self._state.buffer = (
-            message.data
-            if self._state.buffer is None
-            else np.concatenate((self._state.buffer, message.data), axis=axis_idx)
+        # How much data in the buffer?
+        buff_t_range = (
+            self._state.buffer.axis_first_value,
+            self._state.buffer.axis_final_value,
         )
 
-        # Calculate timestamps associated with buffer.
-        buffer_offset = np.arange(self._state.buffer.shape[axis_idx], dtype=float)
-        buffer_offset -= buffer_offset[-message.data.shape[axis_idx]]
-        buffer_offset *= axis_info.gain
-        buffer_offset += axis_info.offset
-
-        # ... for each trigger, collect the message (if possible) and append to msg_out
-        msg_out: list[SampleMessage] = []
-        for trig in list(self._state.triggers):
+        # Process in reverse order so that we can remove triggers safely as we iterate.
+        msgs_out: list[SampleMessage] = []
+        for trig_ix in range(len(self._state.triggers) - 1, -1, -1):
+            trig = self._state.triggers[trig_ix]
             if trig.period is None:
-                # This trigger was malformed; drop it.
-                self._state.triggers.remove(trig)
+                ez.logger.warning("Sampling failed: trigger period not specified")
+                del self._state.triggers[trig_ix]
+                continue
+
+            trig_range = trig.timestamp + np.array(trig.period)
 
             # If the previous iteration had insufficient data for the trigger timestamp + period,
             #  and buffer-management removed data required for the trigger, then we will never be able
             #  to accommodate this trigger. Discard it. An increase in buffer_dur is recommended.
-            if (trig.timestamp + trig.period[0]) < buffer_offset[0]:
+            if trig_range[0] < buff_t_range[0]:
                 ez.logger.warning(
-                    f"Sampling failed: Buffer span {buffer_offset[0]} is beyond the "
-                    f"requested sample period start: {trig.timestamp + trig.period[0]}"
+                    f"Sampling failed: Buffer span {buff_t_range} begins beyond the "
+                    f"requested sample period start: {trig_range[0]}"
                 )
-                self._state.triggers.remove(trig)
+                del self._state.triggers[trig_ix]
+                continue
 
-            t_start = trig.timestamp + trig.period[0]
-            if t_start >= buffer_offset[0]:
-                start = np.searchsorted(buffer_offset, t_start)
-                stop = start + int(
-                    np.round(self._state.fs * (trig.period[1] - trig.period[0]))
-                )
-                if self._state.buffer.shape[axis_idx] > stop:
-                    # Trigger period fully enclosed in buffer.
-                    msg_out.append(
-                        SampleMessage(
-                            trigger=trig,
-                            sample=replace(
-                                message,
-                                data=slice_along_axis(
-                                    self._state.buffer, slice(start, stop), axis_idx
-                                ),
-                                axes={
-                                    **message.axes,
-                                    axis: replace(
-                                        axis_info, offset=buffer_offset[start]
-                                    ),
-                                },
-                            ),
-                        )
-                    )
-                    self._state.triggers.remove(trig)
+            if trig_range[1] > buff_t_range[1]:
+                # We don't *yet* have enough data to satisfy this trigger.
+                continue
 
-        # Trim buffer
-        buf_len = int(self.settings.buffer_dur * self._state.fs)
-        self._state.buffer = slice_along_axis(
-            self._state.buffer, np.s_[-buf_len:], axis_idx
-        )
+            # We know we have enough data in the buffer to satisfy this trigger.
+            buff_idx = self._state.buffer.axis_searchsorted(trig_range, side="right")
+            self._state.buffer.seek(buff_idx[0])  # FFWD to starting position.
+            buff_axarr = self._state.buffer.peek(buff_idx[1] - buff_idx[0])
+            self._state.buffer.seek(-buff_idx[0])  # Rewind it back.
+            # Note: buffer will trim itself as needed based on buffer_dur.
 
-        return msg_out
+            # Prepare output and drop trigger
+            msgs_out.append(SampleMessage(trigger=copy.copy(trig), sample=buff_axarr))
+            del self._state.triggers[trig_ix]
+
+        msgs_out.reverse()  # in-place
+        return msgs_out
 
     def push_trigger(self, message: SampleTriggerMessage) -> list[SampleMessage]:
         # Input is a trigger message that we will use to sample the buffer.
 
-        if (
-            self._state.buffer is None
-            or not self._state.fs
-            or self._state.offset is None
-        ):
+        if self._state.buffer is None:
             # We've yet to see any data; drop the trigger.
             return []
 
@@ -194,11 +184,9 @@ class SamplerTransformer(
             return []
 
         # Check that period is compatible with buffer duration.
-        max_buf_len = int(np.round(self.settings.buffer_dur * self._state.fs))
-        req_buf_len = int(np.round((_period[1] - _period[0]) * self._state.fs))
-        if req_buf_len >= max_buf_len:
+        if (_period[1] - _period[0]) > self.settings.buffer_dur:
             ez.logger.warning(
-                f"Sampling failed: {_period=} >= {self.settings.buffer_dur=}"
+                f"Sampling failed: trigger period {_period=} >= buffer capacity {self.settings.buffer_dur=}"
             )
             return []
 
@@ -206,7 +194,7 @@ class SamplerTransformer(
         if not self.settings.estimate_alignment:
             # Override the trigger timestamp with the next sample's likely timestamp.
             trigger_ts = (
-                self._state.offset + (self.state.n_samples + 1) / self._state.fs
+                self._state.buffer.axis_final_value + self._state.buffer.axis_gain
             )
 
         new_trig_msg = replace(

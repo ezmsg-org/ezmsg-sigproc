@@ -5,14 +5,12 @@ from frozendict import frozendict
 
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.sigproc.util.message import SampleTriggerMessage
-from ezmsg.sigproc.sampler import (
-    sampler,
-)
+from ezmsg.sigproc.sampler import SamplerTransformer, SamplerSettings
 
 from tests.helpers.util import assert_messages_equal
 
 
-def test_sampler_gen():
+def test_sampler():
     data_dur = 10.0
     chunk_period = 0.1
     fs = 500.0
@@ -65,22 +63,24 @@ def test_sampler_gen():
     # Create the sample-generator
     period_dur = period[1] - period[0]
     buffer_dur = 2 * max(period_dur, period[1])
-    gen = sampler(
-        buffer_dur, axis="time", period=None, value=None, estimate_alignment=True
+    proc = SamplerTransformer(
+        settings=SamplerSettings(
+            buffer_dur, axis="time", period=None, value=None, estimate_alignment=True
+        )
     )
 
     # Run the messages through the generator and collect samples.
     samples = []
-    for msg in mix_msgs:
-        samples.extend(gen.send(msg))
+    for msg_ix, msg in enumerate(mix_msgs):
+        samples.extend(proc(msg))
 
     assert_messages_equal(signal_msgs, backup_signal)
     assert_messages_equal(trigger_msgs, backup_trigger)
 
     assert len(samples) == n_trigs
-    # Check sample data size
+    # Check sample data size. Note: sampler puts the time axis first.
     assert all(
-        [_.sample.data.shape == (n_chans, int(fs * period_dur)) for _ in samples]
+        [_.sample.data.shape == (int(fs * period_dur), n_chans) for _ in samples]
     )
     # Compare the sample window slice against the trigger timestamps
     latencies = [

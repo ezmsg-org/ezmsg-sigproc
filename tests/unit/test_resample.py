@@ -11,18 +11,23 @@ from ezmsg.sigproc.resample import ResampleProcessor
 
 @pytest.fixture
 def irregular_messages() -> list[AxisArray]:
+    """
+    10.2 seconds of 128 Hz (jittery intervals) data split unevenly
+    into 10 messages + a duplicate after the first message.
+    """
     nch = 3
     avg_fs = 128.0
     dur = 10.2
     ntimes = int(avg_fs * dur)
     tvec = np.arange(ntimes) / avg_fs
+    np.random.seed(42)  # For reproducibility
     tvec += np.random.normal(0, 0.2 / avg_fs, ntimes)
     tvec = np.sort(tvec)
     n_msgs = 10
     splits = np.sort(np.random.choice(np.arange(ntimes), n_msgs - 1))
-    # prepend splits with a `0` and `splits[0]. The latter is to test what happens with an empty message.
-    # Append with `ntimes` to ensure all samples are sent.
-    splits = np.hstack(([0, splits[0]], splits, [ntimes]))
+    splits = np.hstack(([0], splits, [ntimes]))  # Ensure we have the borders.
+    # Ensure we have a duplicate after the first message
+    splits = np.insert(splits, 1, [splits[1]])
     msgs = []
     ch_ax = AxisArray.CoordinateAxis(
         data=np.arange(nch).astype(str), dims=["ch"], unit="label"
@@ -48,6 +53,7 @@ def irregular_messages() -> list[AxisArray]:
 
 @pytest.fixture
 def reference_messages() -> list[AxisArray]:
+    """10 seconds of data at 500 Hz, split evenly into 10 messages."""
     nch = 1
     fs = 500.0
     dur = 10.0
@@ -81,7 +87,7 @@ async def test_resample(
     )
     expected_data = f(newx)
 
-    resample = ResampleProcessor(resample_rate=resample_rate)
+    resample = ResampleProcessor(resample_rate=resample_rate, buffer_duration=4.0)
     results = []
     n_returned = 0
     for msg_ix, msg in enumerate(irregular_messages):
@@ -90,9 +96,10 @@ async def test_resample(
         resample(msg)
         result = next(resample)
         msg_len = result.data.shape[0]
-        assert np.allclose(
+        b_match = np.allclose(
             result.data, expected_data[n_returned : n_returned + msg_len]
         )
+        assert b_match, f"Message {msg_ix} data mismatch."
         results.append(result)
         n_returned += result.data.shape[0]
 
