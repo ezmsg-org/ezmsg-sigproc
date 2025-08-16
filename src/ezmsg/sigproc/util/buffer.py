@@ -109,12 +109,29 @@ class HybridBuffer:
         ):
             self.flush()
 
+    def _estimate_overflow(self, n_samples: int) -> int:
+        """
+        Estimates the number of samples that would overflow we requested n_samples
+        from the buffer.
+        """
+        if n_samples > self.available():
+            raise ValueError(
+                f"Requested {n_samples} samples, but only {self.available()} are available."
+            )
+        n_overflow = 0
+        if self._deque and (n_samples > self._buff_unread):
+            # We would cause a flush, but would that cause an overflow?
+            n_free = self._capacity - self._buff_unread
+            n_overflow = max(0, self._deque_len - n_free)
+        return n_overflow
+
     def read(
         self,
         n_samples: int | None = None,
-    ) -> tuple[Array, int]:
+    ) -> Array:
         """
-        Retrieves the oldest unread samples from the buffer with padding and advances the read head.
+        Retrieves the oldest unread samples from the buffer with padding
+        and advances the read head.
 
         Args:
             n_samples: The number of samples to retrieve. If None, returns all
@@ -122,12 +139,37 @@ class HybridBuffer:
 
         Returns:
             An array containing the requested samples. This may be a view or a copy.
+            Note: The result may have more samples than the buffer.capacity as it
+            may include samples from the deque in the output.
         """
-        data = self.peek(n_samples)
-        self.seek(data.shape[0])
+        n_samples = n_samples if n_samples is not None else self.available()
+        data = None
+        offset = 0
+        n_overflow = self._estimate_overflow(n_samples)
+        if n_overflow > 0:
+            first_read = self._buff_unread
+            if (n_overflow - first_read) < self.capacity or (
+                self._overflow_strategy == "drop"
+            ):
+                # We can prevent the overflow (or at least *some* if using "drop"
+                # strategy) by reading the samples in the buffer first to make room.
+                data = self.xp.empty(
+                    (n_samples, *self._buffer.shape[1:]), dtype=self._buffer.dtype
+                )
+                self.peek(first_read, out=data[:first_read])
+                offset += first_read
+                self.seek(first_read)
+                n_samples -= first_read
+        if data is None:
+            data = self.peek(n_samples)
+            self.seek(data.shape[0])
+        else:
+            d2 = self.peek(n_samples, out=data[offset:])
+            self.seek(d2.shape[0])
+
         return data
 
-    def peek(self, n_samples: int | None = None) -> Array:
+    def peek(self, n_samples: int | None = None, out: Array | None = None) -> Array:
         """
         Retrieves the oldest unread samples from the buffer with padding without
         advancing the read head.
@@ -138,6 +180,8 @@ class HybridBuffer:
 
         Returns:
             An array containing the requested samples. This may be a view or a copy.
+            Note: The result may have more samples than the buffer.capacity as it
+            may include samples from the deque in the output.
         """
         if n_samples is None:
             n_samples = self.available()
@@ -145,7 +189,10 @@ class HybridBuffer:
             raise ValueError(
                 f"Requested to peek {n_samples} samples, but only {self.available()} are available."
             )
-        n_samples = min(n_samples, self.available())
+        if out is not None and out.shape[0] < n_samples:
+            raise ValueError(
+                f"Output array shape {out.shape} is smaller than requested {n_samples} samples."
+            )
 
         if n_samples == 0:
             return self._buffer[:0]
@@ -156,15 +203,23 @@ class HybridBuffer:
             # discontiguous read (wraps around)
             part1_len = self._capacity - self._tail
             part2_len = n_samples - part1_len
-            data = self.xp.empty(
-                (n_samples, *self._buffer.shape[1:]), dtype=self._buffer.dtype
+            out = (
+                out
+                if out is not None
+                else self.xp.empty(
+                    (n_samples, *self._buffer.shape[1:]), dtype=self._buffer.dtype
+                )
             )
-            data[:part1_len] = self._buffer[self._tail :]
-            data[part1_len:] = self._buffer[:part2_len]
+            out[:part1_len] = self._buffer[self._tail :]
+            out[part1_len:] = self._buffer[:part2_len]
         else:
-            data = self._buffer[self._tail : self._tail + n_samples]
+            if out is not None:
+                out[:] = self._buffer[self._tail : self._tail + n_samples]
+            else:
+                # No output array provided, just return a view
+                out = self._buffer[self._tail : self._tail + n_samples]
 
-        return data
+        return out
 
     def peek_at(self, idx: int, allow_flush: bool = False) -> Array:
         """
@@ -247,12 +302,11 @@ class HybridBuffer:
         Transfers all data from the deque to the circular buffer.
         Note: This may overwrite data depending on the overflow strategy,
             which will invalidate previous state variables.
-            TODO: if 'warn-overwrite', also keep a member variable
-             to track how many samples were overwritten.
         """
         if not self._deque:
             return
 
+        # TODO: Defer copying the data out of the _deque until we can copy it into the buffer.
         all_new_data = self.xp.concatenate(list(self._deque), axis=0)
         self._deque.clear()
         self._deque_len = 0
@@ -271,7 +325,11 @@ class HybridBuffer:
                     f"Overwriting {n_overflow} previous samples.",
                     RuntimeWarning,
                 )
+            # deque_offset = max(0, n_new - self._capacity)
+            # TODO: Iterate over the deque and copy data into the buffer.
             self._buffer[:] = all_new_data[-self._capacity :, ...]
+            # self._deque.clear()
+            # self._deque_len = 0
             self._head = 0
             self._tail = 0
             self._buff_unread = self._capacity
@@ -299,16 +357,20 @@ class HybridBuffer:
                 self._last_overflow = n_overflow
             elif self._overflow_strategy == "drop":
                 # Drop the overflow samples
+                # TODO: Edit the deque to remove the overflow samples.
                 all_new_data = all_new_data[:n_free, ...]
                 n_new = all_new_data.shape[0]
                 self._last_overflow = n_overflow
                 if n_new == 0:
+                    # self._deque.clear()
+                    # self._deque_len = 0
                     return
             elif self._overflow_strategy == "grow":
                 self._grow_buffer(self._capacity + n_new)
                 self._last_overflow = 0
 
         # Copy data to buffer
+        # TODO: loop over the deque
         space_til_end = self._capacity - self._head
         if n_new > space_til_end:
             # Two-part copy (wraps around)
@@ -319,13 +381,17 @@ class HybridBuffer:
         else:
             # Single-part copy
             self._buffer[self._head : self._head + n_new] = all_new_data
-
         self._head = (self._head + n_new) % self._capacity
+        # TODO: End loop
+
         self._buff_unread += n_new
         if (self._buff_read > self._tail) or (self._tail > self._head):
             # We have wrapped around the buffer; our count of read samples
             #  is simply the buffer capacity minus the count of unread samples.
             self._buff_read = self._capacity - self._buff_unread
+
+        # self._deque.clear()
+        # self._deque_len = 0
 
     def _grow_buffer(self, min_capacity: int):
         """

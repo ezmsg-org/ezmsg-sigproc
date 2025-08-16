@@ -89,6 +89,64 @@ class TestHybridBufferOverflow:
         with pytest.raises(OverflowError):
             buf.write(np.zeros((11, 2)))
 
+    def test_read_prevent_overwrite(self, buffer_params):
+        """
+        This test ensures that the read method can prevent an overwrite by reading
+        the data in two parts if a flush would cause an overflow.
+        """
+        # Scenario 1: Preventable overwrite
+        buf = HybridBuffer(
+            **{
+                **buffer_params,
+                "update_strategy": "on_demand",
+                "overflow_strategy": "raise",
+            }
+        )
+        # 1. Fill buffer with 80 samples
+        buf.write(np.zeros((80, 2)))
+        buf.flush()
+        assert buf.available() == 80
+        assert buf._buff_unread == 80
+
+        # 2. Add 30 samples to deque.
+        # Flushing now would cause an overflow of 10 samples (30 new > 20 free).
+        # This is a preventable overflow since 10 < capacity (100).
+        data_in_deque = np.arange(30 * 2).reshape(30, 2)
+        buf.write(data_in_deque)
+        assert buf.available() == 110
+
+        # 3. Reading 90 samples should trigger the two-part read.
+        # It should first read the 80 from the buffer, then flush and read 10 more.
+        read_data = buf.read(90)
+        assert read_data.shape[0] == 90
+        np.testing.assert_array_equal(read_data[:80], np.zeros((80, 2)))
+        np.testing.assert_array_equal(read_data[80:], data_in_deque[:10])
+        assert buf.available() == 20  # 20 samples remaining in the buffer
+
+        # Scenario 2: Unpreventable overwrite
+        # An overflow is unpreventable if (n_overflow - n_buffered) >= capacity
+        buf = HybridBuffer(
+            **{
+                **buffer_params,
+                "update_strategy": "on_demand",
+                "overflow_strategy": "raise",
+            }
+        )
+        # 1. Fill buffer with 10 samples
+        buf.write(np.zeros((10, 2)))
+        buf.flush()
+
+        # 2. Add 200 samples to deque.
+        # n_overflow = 200 - (100 - 10) = 110.
+        # (n_overflow - n_buffered) = 110 - 10 = 100.
+        # 100 >= 100 is True, so this should be unpreventable.
+        buf.write(np.arange(200 * 2).reshape(200, 2))
+
+        # 3. Reading should raise an OverflowError because the two-part read
+        #    cannot be performed.
+        with pytest.raises(OverflowError):
+            buf.read(20)
+
 
 class TestHybridAxisBufferOverflow:
     def test_hybrid_axis_buffer_overflow_raise(self):

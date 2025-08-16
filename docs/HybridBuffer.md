@@ -15,14 +15,15 @@ The following diagram illustrates the states of the HybridBuffer across data wri
 A. In the initial state, the buffer is empty, with no data in either the deque or the circular buffer.
    * deq_len=0; available=0, tell=0
 
-B. After adding 4 samples, the deque contains the new data, but the circular buffer is still empty.
+B. After we `write()` 4 samples, the deque contains the new data, but the circular buffer is still empty.
    * deq_len=4; available=4, tell=0
 
-C. After adding 4 more samples, the deque now has 2 messages, each with 4 samples, and the circular buffer remains untouched.
+C. After we `write()` 4 more samples, the deque now has 2 messages, each with 4 samples, and the circular buffer remains untouched.
    * deq_len=8; available=8, tell=0
 
-D. D-F depict a single call to `read(4)` which is implemented as calls to other methods. If we don't have 4 unread samples in the circular buffer, but we do have >= 4 samples 'available' (i.e., from the deque), then a `flush()` is performed: the entirety of the data in the deque are copied to the circular buffer and the deque is cleared.
+D. Panels D-F depict a single call to `read(4)` which is implemented as calls to other methods. If we don't have 4 unread samples in the circular buffer, but we do have >= 4 samples 'available' (i.e., including the deque), then a `flush()` is performed: the entirety of the data in the deque are copied to the circular buffer and the deque is cleared.
     * deq_len=0; available=8, tell=0
+    * TODO: Currently `flush()` copies the data twice, once from the deque to a contiguous array, and then from that contiguous array to the circular buffer. This should be optimized to copy directly from the deque to the circular buffer.
 
 E. Next we `peek(4)` which returns the first 4 samples from the circular buffer; the return value may be a view on the data if the data are contiguous in the circular buffer, or a copy if the data are not contiguous. Note that the tail (read pointer) does not advance with `peek()`.
     * deq_len=0; available=8, tell=0
@@ -30,10 +31,10 @@ E. Next we `peek(4)` which returns the first 4 samples from the circular buffer;
 F. Finally, we `seek(4)` to advance the tail.
    * deq_len=0; available=4, tell=4
 
-G. We add 4 more samples, which are appended to the deque, leaving the circular buffer unchanged from the previous step.
+G. We `write()` 4 more samples, which are appended to the deque, leaving the circular buffer unchanged from the previous step.
    * deq_len=4; available=8, tell=4
 
-H. We then `read(4)` again. This time, a `flush()` is not triggered because we have enough unread samples in the circular buffer but `peek(4)` and `seek(4)` are still called. The read pointer advances by 4, leaving 0 unread samples in the circular buffer and 4 in the deque.
+H. We then `read(4)` again. This time, a `flush()` is not triggered because we have enough unread samples in the circular buffer, but `peek(4)` and `seek(4)` are still called. The read pointer advances by 4, leaving 0 unread samples in the circular buffer and 4 in the deque.
    * deq_len=4; available=0, tell=8
 
 Note: `peek(n)` and `seek(n)`, where `n` > `n_available` will raise an error. However, `peek(None)` will return all available samples without error, and `seek(None)` will advance the tail to the end of the available data.
@@ -62,10 +63,12 @@ D. "grow": The HybridBuffer will attempt to grow the circular buffer to the less
 
 Additionally, one can configure the HybridBuffer overflow_strategy to 'raise', which will raise an error if there is insufficient space (empty or read samples) in the buffer to perform the flush.
 
-A couple notes:
+There are a few mitigations to defer flushing to help prevent overflows:
 
-* helper methods `peek_at(k, allow_flush=False)` (False is default), and `peek_last(k)` will retrieve the k-th sample from the combined buffer-and-deque without flushing the deque. Be cautious relying on repeated calls to `peek_at(k, allow_flush=False)` as it may scan the items in the deque and their shapes to determine where to read from which is slow.
-* It may be possible to modify `read()` to recognize when a flush would cause an overflow but not if some of the data were read out first, then do a 2-stage `seek(n_unread_in_buffer)`, `peek(n_unread_in_buffer)`, then `seek(n_remaining)` which would trigger a `flush()`, and finally `peek(n_remaining)`, then combine the results from the 2 seek operations. If you're encountering this corner case and your problem is not solved by increasing the capacity of the buffer, then let us know, and we will make this change.
+* If the requested number of samples to read, peek, or seek is less than the number of unread samples in the circular buffer, then no flush is performed.
+* Helper methods `peek_at(k, allow_flush=False)` (False is default), and `peek_last()` will retrieve the target sample from the buffer-OR-deque without flushing.
+  * Be cautious relying on repeated calls to `peek_at(k, allow_flush=False)` as it scans over the items in the deque which can be slow.
+* When calling `read(n)`, if a flush is necessary, and it will cause an overflow, and the overflow could be prevented with a pre-emptive read up to `n`, then it will do the read in 2 parts. First it will call `peek(n_unread_in_buffer)` and `seek(n_unread_in_buffer)` to read the unread samples in the circular buffer. Second, it will call `peek(n_remaining)` and `seek(n_remaining)` to trigger a flush -- which should no longer cause an overflow -- then read the remaining requested samples and stitch them together.
 
 ### Advanced Pointer Manipulation
 
@@ -73,7 +76,7 @@ The previous section describes how `read`, `peek`, `seek`, and `peek_at` functio
 
 ## HybridAxisBuffer
 
-The `HybridAxisBuffer` carries the semantics of the `HybridBuffer` but it is designed to handle either a `LinearAxis` or a `CoordinateAxis`, but its `write` method expects an axis object and its `peek` and `read` methods return an axis, not the data.
+The `HybridAxisBuffer` carries the semantics of the `HybridBuffer` but it is designed to handle either a `LinearAxis` or a `CoordinateAxis`. Its `write` method expects an axis object and its `peek` and `read` methods return an axis, not just the data.
 
 For a `LinearAxis`, the `HybridAxisBuffer` simply maintains the `gain`, the `offset`, and the 'number of samples available'. Since this does not store actual data, it has no capacity. If this object is intended to be synchronized with another `HybridBuffer`-using object that does have a capacity, then the other object should be manipulated first and then the number of samples actually moved should be used to call the `HybridAxisBuffer`'s methods, otherwise these objects will be out of sync.
 
