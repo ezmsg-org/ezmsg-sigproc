@@ -306,12 +306,7 @@ class HybridBuffer:
         if not self._deque:
             return
 
-        # TODO: Defer copying the data out of the _deque until we can copy it into the buffer.
-        all_new_data = self.xp.concatenate(list(self._deque), axis=0)
-        self._deque.clear()
-        self._deque_len = 0
-
-        n_new = all_new_data.shape[0]
+        n_new = self._deque_len
         n_free = self._capacity - self._buff_unread
         n_overflow = max(0, n_new - n_free)
 
@@ -325,73 +320,88 @@ class HybridBuffer:
                     f"Overwriting {n_overflow} previous samples.",
                     RuntimeWarning,
                 )
-            # deque_offset = max(0, n_new - self._capacity)
-            # TODO: Iterate over the deque and copy data into the buffer.
-            self._buffer[:] = all_new_data[-self._capacity :, ...]
-            # self._deque.clear()
-            # self._deque_len = 0
+
+            # We need to grab the last `self._capacity` samples from the deque
+            samples_to_copy = self._capacity
+            copied_samples = 0
+            for block in reversed(self._deque):
+                if copied_samples >= samples_to_copy:
+                    break
+                n_to_copy = min(block.shape[0], samples_to_copy - copied_samples)
+                start_idx = block.shape[0] - n_to_copy
+                self._buffer[
+                    samples_to_copy - copied_samples - n_to_copy : samples_to_copy
+                    - copied_samples
+                ] = block[start_idx:]
+                copied_samples += n_to_copy
+
             self._head = 0
             self._tail = 0
             self._buff_unread = self._capacity
             self._buff_read = 0
             self._last_overflow = n_overflow
-            return
 
-        if n_overflow > 0:
-            if self._overflow_strategy == "raise":
-                raise OverflowError(
-                    f"Buffer overflow: {n_new} samples received, but only {n_free} available."
-                )
-            elif self._overflow_strategy == "warn-overwrite":
-                if not self._warn_once or not self._warned:
-                    self._warned = True
-                    warnings.warn(
-                        f"Buffer overflow: {n_new} samples received, but only {n_free} available. "
-                        f"Overwriting {n_overflow} previous samples.",
-                        RuntimeWarning,
-                    )
-                # Move the tail forward to make room for the new data.
-                self.seek(n_overflow)
-                # Adjust the read pointer to account for the overflow. Should always be 0.
-                self._buff_read = max(0, self._buff_read - n_overflow)
-                self._last_overflow = n_overflow
-            elif self._overflow_strategy == "drop":
-                # Drop the overflow samples
-                # TODO: Edit the deque to remove the overflow samples.
-                all_new_data = all_new_data[:n_free, ...]
-                n_new = all_new_data.shape[0]
-                self._last_overflow = n_overflow
-                if n_new == 0:
-                    # self._deque.clear()
-                    # self._deque_len = 0
-                    return
-            elif self._overflow_strategy == "grow":
-                self._grow_buffer(self._capacity + n_new)
-                self._last_overflow = 0
-
-        # Copy data to buffer
-        # TODO: loop over the deque
-        space_til_end = self._capacity - self._head
-        if n_new > space_til_end:
-            # Two-part copy (wraps around)
-            part1_len = space_til_end
-            part2_len = n_new - part1_len
-            self._buffer[self._head :] = all_new_data[:part1_len]
-            self._buffer[:part2_len] = all_new_data[part1_len:]
         else:
-            # Single-part copy
-            self._buffer[self._head : self._head + n_new] = all_new_data
-        self._head = (self._head + n_new) % self._capacity
-        # TODO: End loop
+            if n_overflow > 0:
+                if self._overflow_strategy == "raise":
+                    raise OverflowError(
+                        f"Buffer overflow: {n_new} samples received, but only {n_free} available."
+                    )
+                elif self._overflow_strategy == "warn-overwrite":
+                    if not self._warn_once or not self._warned:
+                        self._warned = True
+                        warnings.warn(
+                            f"Buffer overflow: {n_new} samples received, but only {n_free} available. "
+                            f"Overwriting {n_overflow} previous samples.",
+                            RuntimeWarning,
+                        )
+                    # Move the tail forward to make room for the new data.
+                    self.seek(n_overflow)
+                    # Adjust the read pointer to account for the overflow. Should always be 0.
+                    self._buff_read = max(0, self._buff_read - n_overflow)
+                    self._last_overflow = n_overflow
+                elif self._overflow_strategy == "drop":
+                    # Drop the overflow samples from the deque
+                    samples_to_drop = n_overflow
+                    while samples_to_drop > 0 and self._deque:
+                        block = self._deque[-1]
+                        if samples_to_drop >= block.shape[0]:
+                            samples_to_drop -= block.shape[0]
+                            self._deque.pop()
+                        else:
+                            block = self._deque.pop()
+                            self._deque.append(block[:-samples_to_drop])
+                            samples_to_drop = 0
+                    n_new -= n_overflow
+                    self._last_overflow = n_overflow
 
-        self._buff_unread += n_new
-        if (self._buff_read > self._tail) or (self._tail > self._head):
-            # We have wrapped around the buffer; our count of read samples
-            #  is simply the buffer capacity minus the count of unread samples.
-            self._buff_read = self._capacity - self._buff_unread
+                elif self._overflow_strategy == "grow":
+                    self._grow_buffer(self._capacity + n_new)
+                    self._last_overflow = 0
 
-        # self._deque.clear()
-        # self._deque_len = 0
+            # Copy data to buffer by iterating over the deque
+            for block in self._deque:
+                n_block = block.shape[0]
+                space_til_end = self._capacity - self._head
+                if n_block > space_til_end:
+                    # Two-part copy (wraps around)
+                    part1_len = space_til_end
+                    part2_len = n_block - part1_len
+                    self._buffer[self._head :] = block[:part1_len]
+                    self._buffer[:part2_len] = block[part1_len:]
+                else:
+                    # Single-part copy
+                    self._buffer[self._head : self._head + n_block] = block
+                self._head = (self._head + n_block) % self._capacity
+
+            self._buff_unread += n_new
+            if (self._buff_read > self._tail) or (self._tail > self._head):
+                # We have wrapped around the buffer; our count of read samples
+                #  is simply the buffer capacity minus the count of unread samples.
+                self._buff_read = self._capacity - self._buff_unread
+
+        self._deque.clear()
+        self._deque_len = 0
 
     def _grow_buffer(self, min_capacity: int):
         """
