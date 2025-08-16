@@ -140,12 +140,10 @@ class TestHybridBufferOverflow:
         # n_overflow = 200 - (100 - 10) = 110.
         # (n_overflow - n_buffered) = 110 - 10 = 100.
         # 100 >= 100 is True, so this should be unpreventable.
-        buf.write(np.arange(200 * 2).reshape(200, 2))
-
-        # 3. Reading should raise an OverflowError because the two-part read
-        #    cannot be performed.
+        # In fact, the write process recognizes this so it raises an OverflowError
+        # even before we flush.
         with pytest.raises(OverflowError):
-            buf.read(20)
+            buf.write(np.arange(200 * 2).reshape(200, 2))
 
 
 class TestHybridAxisBufferOverflow:

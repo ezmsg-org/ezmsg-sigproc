@@ -100,6 +100,19 @@ class HybridBuffer:
                 f"Block shape {block.shape[1:]} does not match buffer's other_shape {other_shape}"
             )
 
+        # Most overflow strategies are handled during flush, but there are a couple
+        # scenarios that can be evaluated on write to give immediate feedback.
+        new_len = self._deque_len + block.shape[0]
+        if new_len > self._capacity and self._overflow_strategy == "raise":
+            raise OverflowError(
+                f"Buffer overflow: {new_len} samples awaiting in deque exceeds buffer capacity {self._capacity}."
+            )
+        elif new_len * block.dtype.itemsize > self._max_size:
+            raise OverflowError(
+                f"deque contents would exceed max_size ({self._max_size}) on subsequent flush."
+                "Are you reading samples frequently enough?"
+            )
+
         self._deque.append(block)
         self._deque_len += block.shape[0]
 
