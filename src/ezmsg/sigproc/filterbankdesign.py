@@ -6,19 +6,20 @@ import numpy.typing as npt
 
 from ezmsg.util.messages.util import replace
 from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.sigproc.base import (
+
+from .base import (
     BaseStatefulTransformer,
     processor_state,
 )
 
-from ezmsg.sigproc.filterbank import (
+from .filterbank import (
     FilterbankTransformer,
     FilterbankSettings,
     FilterbankMode,
     MinPhaseMode,
 )
 
-from kaiser import KaiserFilterSettings, kaiser_design_fun
+from .kaiser import KaiserFilterSettings, kaiser_design_fun
 
 
 class FilterbankDesignSettings(ez.Settings):
