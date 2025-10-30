@@ -32,6 +32,8 @@ Various filter implementations for signal processing.
    ezmsg.sigproc.cheby
    ezmsg.sigproc.combfilter
    ezmsg.sigproc.adaptive_lattice_notch
+   ezmsg.sigproc.firfilter
+   ezmsg.sigproc.kaiser
    ezmsg.sigproc.ewmfilter
    ezmsg.sigproc.filterbank
    ezmsg.sigproc.gaussiansmoothing
