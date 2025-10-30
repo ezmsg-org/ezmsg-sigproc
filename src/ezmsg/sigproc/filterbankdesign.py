@@ -59,6 +59,10 @@ class FilterbankDesignTransformer(
         FilterbankDesignSettings, AxisArray, AxisArray, FilterbankDesignState
     ],
 ):
+    """
+    Transformer that designs and applies a filterbank based on Kaiser windowed FIR filters.
+    """
+
     @classmethod
     def get_message_type(cls, dir: str) -> type[AxisArray]:
         if dir in ("in", "out"):
