@@ -36,6 +36,7 @@ Various filter implementations for signal processing.
    ezmsg.sigproc.kaiser
    ezmsg.sigproc.ewmfilter
    ezmsg.sigproc.filterbank
+   ezmsg.sigproc.filterbankdesign
    ezmsg.sigproc.gaussiansmoothing
 
 Spectral Analysis
