@@ -488,10 +488,7 @@ def test_fbcca_empty_message():
 
 
 def test_fbcca_multidim():
-    """Test FBCCA with additional dimensions.
-
-    Note: Using softmax_beta=0 to avoid softmax broadcasting bug with multidim data.
-    """
+    """Test FBCCA with additional dimensions (e.g., trials)."""
     fs = 250.0
     dur = 2.0
     n_times = int(dur * fs)
@@ -528,7 +525,6 @@ def test_fbcca_multidim():
         ch_dim="ch",
         freqs=[10.0, 12.0],
         harmonics=3,
-        softmax_beta=0.0,  # Avoid softmax to work around implementation bug
     )
 
     transformer = FBCCATransformer(settings=settings)
@@ -580,10 +576,7 @@ def test_fbcca_custom_target_freq_dim():
 
 
 def test_streaming_fbcca_basic():
-    """Test basic StreamingFBCCA functionality.
-
-    Note: Using softmax_beta=0 to avoid softmax broadcasting bug with windowed data.
-    """
+    """Test basic StreamingFBCCA functionality."""
     fs = 250.0
     dur = 10.0  # Need longer duration for windowing
     n_times = int(dur * fs)
@@ -616,7 +609,6 @@ def test_streaming_fbcca_basic():
         window_shift=2.0,
         harmonics=3,
         subbands=3,
-        softmax_beta=0.0,  # Avoid softmax to work around implementation bug
     )
 
     transformer = StreamingFBCCATransformer(settings=settings)
@@ -633,10 +625,7 @@ def test_streaming_fbcca_basic():
 
 
 def test_streaming_fbcca_no_filterbank():
-    """Test StreamingFBCCA without filterbank (plain CCA).
-
-    Note: Using softmax_beta=0 to avoid softmax broadcasting bug with windowed data.
-    """
+    """Test StreamingFBCCA without filterbank (plain CCA)."""
     fs = 250.0
     dur = 10.0
     n_times = int(dur * fs)
@@ -666,7 +655,6 @@ def test_streaming_fbcca_no_filterbank():
         window_dur=4.0,
         window_shift=2.0,
         harmonics=3,
-        softmax_beta=0.0,  # Avoid softmax to work around implementation bug
     )
 
     transformer = StreamingFBCCATransformer(settings=settings)

@@ -326,7 +326,7 @@ def cca_rho_max(X: np.ndarray, Y: np.ndarray) -> float:
 def calc_softmax(cv: np.ndarray, axis: int, beta: float = 1.0):
     # Calculate softmax with shifting to avoid overflow
     # (https://doi.org/10.1093/imanum/draa038)
-    cv = cv - cv.max(axis=axis)
+    cv = cv - cv.max(axis=axis, keepdims=True)
     cv = np.exp(beta * cv)
-    cv = cv / np.sum(cv, axis=axis)
+    cv = cv / np.sum(cv, axis=axis, keepdims=True)
     return cv
