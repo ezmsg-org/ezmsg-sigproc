@@ -153,7 +153,7 @@ def calculate_expected_windows(
         # 1:1 mode. Each input (block) yields a new output.
         # If the window length is smaller than the block size then we only the tail of each block.
         first = max(min(msg_block_size, data_len) - win_len, 0)
-        if tvec[::msg_block_size].shape[0] < n_msgs:
+        if tvec[first::msg_block_size].shape[0] < n_msgs:
             expected = np.concatenate(
                 (expected[:, first::msg_block_size], expected[:, -1:]), axis=1
             )

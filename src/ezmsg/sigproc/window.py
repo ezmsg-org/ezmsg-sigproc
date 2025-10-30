@@ -209,13 +209,15 @@ class WindowTransformer(
         )
 
         # Create a vector of buffer timestamps to track axis `offset` in output(s)
-        buffer_tvec = xp.asarray(range(self._state.buffer.shape[axis_idx]), dtype=float)
+        buffer_t0 = 0.0
+        buffer_tlen = self._state.buffer.shape[axis_idx]
 
         # Adjust so first _new_ sample at index 0.
-        buffer_tvec -= buffer_tvec[-message.data.shape[axis_idx]]
+        buffer_t0 -= self._state.buffer.shape[axis_idx] - message.data.shape[axis_idx]
+
         # Convert form indices to 'units' (probably seconds).
-        buffer_tvec *= axis_info.gain
-        buffer_tvec += axis_info.offset
+        buffer_t0 *= axis_info.gain
+        buffer_t0 += axis_info.offset
 
         if self.settings.window_shift is not None and self._state.shift_deficit > 0:
             n_skip = min(self._state.buffer.shape[axis_idx], self._state.shift_deficit)
@@ -223,7 +225,8 @@ class WindowTransformer(
                 self._state.buffer = slice_along_axis(
                     self._state.buffer, slice(n_skip, None), axis_idx
                 )
-                buffer_tvec = buffer_tvec[n_skip:]
+                buffer_t0 += n_skip * axis_info.gain
+                buffer_tlen -= n_skip
                 self._state.shift_deficit -= n_skip
 
         # Generate outputs.
@@ -250,7 +253,9 @@ class WindowTransformer(
                 + (1,)
                 + self._state.buffer.shape[axis_idx:]
             )
-            win_offset = buffer_tvec[-self._state.window_samples]
+            win_offset = buffer_t0 + axis_info.gain * (
+                buffer_tlen - self._state.window_samples
+            )
         elif self._state.buffer.shape[axis_idx] >= self._state.window_samples:
             # Deterministic window shifts.
             sliding_win_fun = (
@@ -264,10 +269,7 @@ class WindowTransformer(
                 axis_idx,
                 step=self._state.window_shift_samples,
             )
-            offset_view = sliding_win_fun(buffer_tvec, self._state.window_samples, 0)[
-                :: self._state.window_shift_samples
-            ]
-            win_offset = offset_view[0, 0]
+            win_offset = buffer_t0
 
             # Drop expired beginning of buffer and update shift_deficit
             multi_shift = self._state.window_shift_samples * out_dat.shape[axis_idx]

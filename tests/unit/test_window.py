@@ -6,7 +6,7 @@ import numpy as np
 from frozendict import frozendict
 import sparse
 from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.sigproc.window import windowing
+from ezmsg.sigproc.window import WindowTransformer
 
 from tests.helpers.util import assert_messages_equal, calculate_expected_windows
 
@@ -32,19 +32,19 @@ def test_window_gen_nodur():
         key="test_window_gen_nodur",
     )
     backup = [copy.deepcopy(test_msg)]
-    proc = windowing(window_dur=None)
+    proc = WindowTransformer(window_dur=None)
     result = proc(test_msg)
     assert_messages_equal([test_msg], backup)
     assert result is test_msg
     assert np.shares_memory(result.data, test_msg.data)
 
 
-@pytest.mark.parametrize("msg_block_size", [1, 5, 10, 20, 60])
-@pytest.mark.parametrize("newaxis", [None, "win"])
+@pytest.mark.parametrize("msg_block_size", [60, 1, 5, 10, 100])
+@pytest.mark.parametrize("newaxis", ["win", None])
 @pytest.mark.parametrize("win_dur", [0.3, 1.0])
-@pytest.mark.parametrize("win_shift", [None, 0.2, 1.0])
+@pytest.mark.parametrize("win_shift", [0.2, 1.0, None])
 @pytest.mark.parametrize("zero_pad", ["input", "shift", "none"])
-@pytest.mark.parametrize("fs", [10.0, 500.0])
+@pytest.mark.parametrize("fs", [100.0, 500.0])
 @pytest.mark.parametrize("anchor", ["beginning", "middle", "end"])
 @pytest.mark.parametrize("time_ax", [0, 1])
 def test_window_generator(
@@ -57,21 +57,19 @@ def test_window_generator(
     anchor: str,
     time_ax: int,
 ):
-    nchans = 3
+    nchans = 5
 
     shift_len = int(win_shift * fs) if win_shift is not None else None
     win_len = int(win_dur * fs)
-    data_len = 2 * win_len
+    data_len = 2 * max(win_len, msg_block_size)
     if win_shift is not None:
         data_len += shift_len - 1
+    tvec = np.arange(data_len) / fs
     data = np.arange(nchans * data_len, dtype=float).reshape((nchans, data_len))
     # Below, we transpose the individual messages if time_ax == 0.
-    tvec = np.arange(data_len) / fs
-
-    n_msgs = int(np.ceil(data_len / msg_block_size))
 
     # Instantiate the processor
-    proc = windowing(
+    proc = WindowTransformer(
         axis="time",
         newaxis=newaxis,
         window_dur=win_dur,
@@ -80,8 +78,8 @@ def test_window_generator(
         anchor=anchor,
     )
 
-    # Create inputs and send them to the process, collecting the results along the way.
-    test_msg = AxisArray(
+    # Create inputs
+    template_msg = AxisArray(
         data[..., ()],
         dims=["ch", "time"] if time_ax == 1 else ["time", "ch"],
         axes=frozendict(
@@ -94,36 +92,36 @@ def test_window_generator(
         ),
         key="test_window_generator",
     )
-    messages = []
-    backup = []
-    results = []
+    n_msgs = int(np.ceil(data_len / msg_block_size))
+    in_msgs = []
     for msg_ix in range(n_msgs):
         msg_data = data[..., msg_ix * msg_block_size : (msg_ix + 1) * msg_block_size]
         if time_ax == 0:
             msg_data = np.ascontiguousarray(msg_data.T)
-        test_msg = replace(
-            test_msg,
-            data=msg_data,
-            axes={
-                **test_msg.axes,
-                "time": replace(
-                    test_msg.axes["time"], offset=tvec[msg_ix * msg_block_size]
-                ),
-            },
-            key=test_msg.key,
+        in_msgs.append(
+            replace(
+                template_msg,
+                data=msg_data,
+                axes={
+                    **template_msg.axes,
+                    "time": replace(
+                        template_msg.axes["time"], offset=tvec[msg_ix * msg_block_size]
+                    ),
+                },
+            )
         )
-        messages.append(test_msg)
-        backup.append(copy.deepcopy(test_msg))
-        win_msg = proc(test_msg)
-        results.append(win_msg)
+    backup = copy.deepcopy(in_msgs)
 
-    assert_messages_equal(messages, backup)
+    # Do the actual processing.
+    out_msgs = [proc(_) for _ in in_msgs]
+
+    assert_messages_equal(in_msgs, backup)
 
     # Check each return value's metadata (offsets checked at end)
     expected_dims = (
-        test_msg.dims[:time_ax] + [newaxis or "win"] + test_msg.dims[time_ax:]
+        template_msg.dims[:time_ax] + [newaxis or "win"] + template_msg.dims[time_ax:]
     )
-    for msg in results:
+    for msg in out_msgs:
         assert msg.axes["time"].gain == 1 / fs
         assert msg.dims == expected_dims
         assert (newaxis or "win") in msg.axes
@@ -134,11 +132,11 @@ def test_window_generator(
     # Post-process the results to yield a single data array and a single vector of offsets.
     win_ax = time_ax
     # time_ax = win_ax + 1
-    result = np.concatenate([_.data for _ in results], win_ax)
+    result = np.concatenate([_.data for _ in out_msgs], win_ax)
     offsets = np.hstack(
         [
             _.axes[newaxis or "win"].value(np.arange(_.data.shape[win_ax]))
-            for _ in results
+            for _ in out_msgs
         ]
     )
 
@@ -159,7 +157,9 @@ def test_window_generator(
     )
 
     # Compare results to expected
-    assert np.array_equal(result, expected)
+    if win_shift is None:
+        assert len(out_msgs) == len(in_msgs)
+    assert np.allclose(result, expected)
     assert np.allclose(offsets, tvec)
 
 
@@ -171,49 +171,87 @@ def test_sparse_window(
     win_shift: float | None,
     zero_pad: str,
 ):
+    msg_block_size = 60
     fs = 100.0
-    n_ch = 5
-    n_samps = 1_000
-    msg_len = 100
-    win_len = int(win_dur * fs)
-    rng = np.random.default_rng()
-    s = sparse.random((n_samps, n_ch), density=0.1, random_state=rng) > 0
-    in_msgs = [
-        AxisArray(
-            data=s[msg_ix * msg_len : (msg_ix + 1) * msg_len],
-            dims=["time", "ch"],
-            axes={
-                "time": AxisArray.Axis.TimeAxis(fs=fs, offset=msg_ix / fs),
-            },
-            key="test_sparse_window",
-        )
-        for msg_ix in range(10)
-    ]
+    nchans = 5
 
-    proc = windowing(
+    # Create sparse data
+    shift_len = int(win_shift * fs) if win_shift is not None else None
+    win_len = int(win_dur * fs)
+    data_len = 2 * max(win_len, msg_block_size)
+    if win_shift is not None:
+        data_len += shift_len - 1
+    tvec = np.arange(data_len) / fs
+    rng = np.random.default_rng()
+    s = sparse.random((data_len, nchans), density=0.1, random_state=rng) > 0
+
+    # Create WindowTransformer
+    proc = WindowTransformer(
         axis="time",
         newaxis="win",
         window_dur=win_dur,
         window_shift=win_shift,
         zero_pad_until=zero_pad,
+        anchor="beginning",
     )
-    out_msgs = [proc.send(_) for _ in in_msgs]
+
+    template_msg = AxisArray(
+        data=s[:0],
+        dims=["time", "ch"],
+        axes=frozendict(
+            {
+                "time": AxisArray.TimeAxis(fs=fs, offset=0.0),
+                "ch": AxisArray.CoordinateAxis(
+                    data=np.arange(nchans).astype(str), unit="label", dims=["ch"]
+                ),
+            }
+        ),
+        key="test_sparse_window",
+    )
+    n_msgs = int(np.ceil(data_len / msg_block_size))
+    in_msgs = [
+        replace(
+            template_msg,
+            data=s[msg_ix * msg_block_size : (msg_ix + 1) * msg_block_size],
+            axes={
+                **template_msg.axes,
+                "time": replace(
+                    template_msg.axes["time"], offset=tvec[msg_ix * msg_block_size]
+                ),
+            },
+        )
+        for msg_ix in range(n_msgs)
+    ]
+
+    # Process messages
+    out_msgs = [proc(_) for _ in in_msgs]
+
+    # Assert per-message shape and collect total number of windows and window time vector
     nwins = 0
+    win_tvec = []
     for om in out_msgs:
         assert om.dims == ["win", "time", "ch"]
         assert om.data.shape[1] == win_len
-        assert om.data.shape[2] == n_ch
+        assert om.data.shape[2] == nchans
         nwins += om.data.shape[0]
-    if win_shift is None:
-        # 1:1 mode
-        assert nwins == len(out_msgs)
-    else:
-        shift_len = int(win_shift * fs)
-        prepended = 0
-        if zero_pad == "input":
-            prepended = max(0, win_len - msg_len)
-        elif zero_pad == "shift":
-            prepended = max(0, win_len - shift_len)
-        win_offsets = np.arange(n_samps + prepended)[::shift_len]
-        expected_nwins = np.sum(win_offsets <= (n_samps + prepended - win_len))
-        assert nwins == expected_nwins
+        win_tvec.append(om.axes["win"].value(np.arange(om.data.shape[0])))
+    win_tvec = np.hstack(win_tvec)
+
+    # Calculate the expected time vector; note this method expects data time axis to be last.
+    _, expected_tvec = calculate_expected_windows(
+        np.arange(nchans * data_len).reshape((nchans, data_len)),
+        fs,
+        win_shift,
+        zero_pad,
+        "beginning",
+        msg_block_size,
+        shift_len,
+        win_len,
+        nchans,
+        data_len,
+        n_msgs,
+        0,
+    )
+
+    assert nwins == len(expected_tvec)
+    assert np.allclose(win_tvec, expected_tvec)

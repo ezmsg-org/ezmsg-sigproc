@@ -263,6 +263,14 @@ class FilterByDesignTransformer(
             axis = self.state.filter.settings.axis
             fs = 1 / message.axes[axis].gain
             coefs = design_fun(fs)
+
+            # Convert BA to SOS if requested
+            if coefs is not None and self.settings.coef_type == "sos":
+                if isinstance(coefs, tuple) and len(coefs) == 2:
+                    # It's BA format, convert to SOS
+                    b, a = coefs
+                    coefs = scipy.signal.tf2sos(b, a)
+
             self.state.filter.update_coefficients(
                 coefs, coef_type=self.settings.coef_type
             )
@@ -282,6 +290,14 @@ class FilterByDesignTransformer(
         axis = message.dims[0] if self.settings.axis is None else self.settings.axis
         fs = 1 / message.axes[axis].gain
         coefs = design_fun(fs)
+
+        # Convert BA to SOS if requested
+        if coefs is not None and self.settings.coef_type == "sos":
+            if isinstance(coefs, tuple) and len(coefs) == 2:
+                # It's BA format, convert to SOS
+                b, a = coefs
+                coefs = scipy.signal.tf2sos(b, a)
+
         new_settings = FilterSettings(
             axis=axis, coef_type=self.settings.coef_type, coefs=coefs
         )
