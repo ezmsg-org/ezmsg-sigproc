@@ -53,6 +53,7 @@ Spectral and frequency domain analysis tools.
    ezmsg.sigproc.spectrum
    ezmsg.sigproc.wavelets
    ezmsg.sigproc.bandpower
+   ezmsg.sigproc.fbcca
 
 Sampling & Resampling
 ---------------------
