@@ -29,12 +29,6 @@ from .filterbankdesign import (
 class FBCCASettings(ez.Settings):
     """
     Settings for :obj:`FBCCATransformer`
-    Evaluates the presence of periodic content at various frequencies in the input signal using CCA
-
-    ## Further reading:
-    * [Lin et. al. 2007](https://ieeexplore.ieee.org/document/4015614)
-    * [Nakanishi et. al. 2015](https://doi.org/10.1371%2Fjournal.pone.0140703)
-    * [Chen et. al. 2015](http://dx.doi.org/10.1088/1741-2560/12/4/046008)
     """
 
     time_dim: str
@@ -95,6 +89,22 @@ class FBCCASettings(ez.Settings):
 
 
 class FBCCATransformer(BaseTransformer[FBCCASettings, AxisArray, AxisArray]):
+    """
+    A canonical-correlation (CCA) signal decoder for detection of periodic activity in multi-channel timeseries
+    recordings. It is particularly useful for detecting the presence of steady-state evoked responses in multi-channel
+    EEG data. Please see Lin et. al. 2007 for a description on the use of CCA to detect the presence of SSVEP in EEG
+    data.
+    This implementation also includes the "Filterbank" extension of the CCA decoding approach which utilizes a
+    filterbank to decompose input multi-channel EEG data into several frequency sub-bands; each of which is analyzed
+    with CCA, then combined using a weighted sum; allowing CCA to more readily identify harmonic content in EEG data.
+    Read more about this approach in Chen et. al. 2015.
+
+    ## Further reading:
+    * [Lin et. al. 2007](https://ieeexplore.ieee.org/document/4015614)
+    * [Nakanishi et. al. 2015](https://doi.org/10.1371%2Fjournal.pone.0140703)
+    * [Chen et. al. 2015](http://dx.doi.org/10.1088/1741-2560/12/4/046008)
+    """
+
     def _process(self, message: AxisArray) -> AxisArray:
         """
         Input: AxisArray with at least a time_dim, and ch_dim
@@ -218,7 +228,11 @@ class FBCCA(BaseTransformerUnit[FBCCASettings, AxisArray, AxisArray, FBCCATransf
 
 
 class StreamingFBCCASettings(FBCCASettings):
-    """Perform rolling/streaming FBCCA on incoming EEG"""
+    """
+    Perform rolling/streaming FBCCA on incoming EEG.
+    Decomposes the input multi-channel timeseries data into multiple sub-bands using a FilterbankDesign Transformer,
+    then accumulates data using Window into short-time observations for analysis using an FBCCA Transformer.
+    """
 
     window_dur: float = 4.0  # sec
     window_shift: float = 0.5  # sec
