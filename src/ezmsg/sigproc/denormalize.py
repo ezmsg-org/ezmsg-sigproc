@@ -22,15 +22,13 @@ class DenormalizeSettings(ez.Settings):
 
 
 @processor_state
-class DenormalizeRateState:
+class DenormalizeState:
     gains: npt.NDArray | None = None
     offsets: npt.NDArray | None = None
 
 
 class DenormalizeTransformer(
-    BaseStatefulTransformer[
-        DenormalizeSettings, AxisArray, AxisArray, DenormalizeRateState
-    ]
+    BaseStatefulTransformer[DenormalizeSettings, AxisArray, AxisArray, DenormalizeState]
 ):
     """
     Scales data from a normalized distribution (mean=0, std=1) to a denormalized
@@ -78,7 +76,7 @@ class DenormalizeTransformer(
         )
 
 
-class DenormalizeRateUnit(
+class DenormalizeUnit(
     BaseTransformerUnit[
         DenormalizeSettings, AxisArray, AxisArray, DenormalizeTransformer
     ]
