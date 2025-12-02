@@ -146,3 +146,4 @@ cython_debug/
 
 src/ezmsg/sigproc/__version__.py
 uv.lock
+*.local.json
