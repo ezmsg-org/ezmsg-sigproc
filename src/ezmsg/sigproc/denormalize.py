@@ -12,10 +12,10 @@ from ezmsg.util.messages.util import replace
 
 class DenormalizeSettings(ez.Settings):
     low_rate: float = 2.0
-    """Low end of probable firing rate after denormalization (Hz)."""
+    """Low end of probable rate after denormalization (Hz)."""
 
     high_rate: float = 40.0
-    """High end of probable firing rate after denormalization (Hz)."""
+    """High end of probable rate after denormalization (Hz)."""
 
     distribution: str = "uniform"
     """Distribution to sample rates from. Options are 'uniform', 'normal', or 'constant'."""
@@ -32,6 +32,14 @@ class DenormalizeTransformer(
         DenormalizeSettings, AxisArray, AxisArray, DenormalizeRateState
     ]
 ):
+    """
+    Scales data from a normalized distribution (mean=0, std=1) to a denormalized
+    distribution using random per-channel offsets and gains designed to keep the
+    99.9% CIs between 0 and 2x the offset.
+
+    This is useful for simulating realistic firing rates from normalized data.
+    """
+
     def _reset_state(self, message: AxisArray) -> None:
         ax_ix = message.get_axis_idx("ch")
         nch = message.data.shape[ax_ix]

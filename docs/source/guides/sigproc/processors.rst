@@ -52,6 +52,13 @@ ezmsg.sigproc.decimate
     :members:
 
 
+ezmsg.sigproc.denormalize
+------------------------
+
+.. automodule:: ezmsg.sigproc.denormalize
+    :members:
+
+
 ezmsg.sigproc.downsample
 --------------------------
 
