@@ -1,3 +1,4 @@
+from array_api_compat import get_namespace
 import typing
 
 import numpy as np
@@ -12,6 +13,7 @@ from ezmsg.util.messages.axisarray import (
 
 from .spectral import OptionsEnum
 from .base import (
+    BaseTransformer,
     BaseStatefulTransformer,
     BaseTransformerUnit,
     processor_state,
@@ -213,3 +215,70 @@ def ranged_aggregate(
     return RangedAggregateTransformer(
         RangedAggregateSettings(axis=axis, bands=bands, operation=operation)
     )
+
+
+class AggregateSettings(ez.Settings):
+    """Settings for :obj:`Aggregate`."""
+
+    axis: str
+    """The name of the axis to aggregate over. This axis will be removed from the output."""
+
+    operation: AggregationFunction = AggregationFunction.MEAN
+    """:obj:`AggregationFunction` to apply."""
+
+
+class AggregateTransformer(BaseTransformer[AggregateSettings, AxisArray, AxisArray]):
+    """
+    Transformer that aggregates an entire axis using a specified operation.
+
+    Unlike :obj:`RangedAggregateTransformer` which aggregates over specific ranges/bands
+    and preserves the axis (with one value per band), this transformer aggregates the
+    entire axis and removes it from the output, reducing dimensionality by one.
+    """
+
+    def _process(self, message: AxisArray) -> AxisArray:
+        xp = get_namespace(message.data)
+        axis_idx = message.get_axis_idx(self.settings.axis)
+        op = self.settings.operation
+
+        if op == AggregationFunction.NONE:
+            raise ValueError(
+                "AggregationFunction.NONE is not supported for full-axis aggregation"
+            )
+
+        if op == AggregationFunction.TRAPEZOID:
+            # Trapezoid integration requires x-coordinates
+            target_axis = message.get_axis(self.settings.axis)
+            if hasattr(target_axis, "data"):
+                x = target_axis.data
+            else:
+                x = target_axis.value(np.arange(message.data.shape[axis_idx]))
+            agg_data = np.trapezoid(np.asarray(message.data), x=x, axis=axis_idx)
+        else:
+            # Try array-API compatible function first, fall back to numpy
+            func_name = op.value
+            if hasattr(xp, func_name):
+                agg_data = getattr(xp, func_name)(message.data, axis=axis_idx)
+            else:
+                agg_data = AGGREGATORS[op](message.data, axis=axis_idx)
+
+        new_dims = list(message.dims)
+        new_dims.pop(axis_idx)
+
+        new_axes = dict(message.axes)
+        new_axes.pop(self.settings.axis, None)
+
+        return replace(
+            message,
+            data=agg_data,
+            dims=new_dims,
+            axes=new_axes,
+        )
+
+
+class AggregateUnit(
+    BaseTransformerUnit[AggregateSettings, AxisArray, AxisArray, AggregateTransformer]
+):
+    """Unit that aggregates an entire axis using a specified operation."""
+
+    SETTINGS = AggregateSettings
