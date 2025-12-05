@@ -5,6 +5,7 @@ authors = [
   { name = "Griffin Milsap", email = "griffin.milsap@gmail.com" },
   { name = "Preston Peranich", email = "pperanich@gmail.com" },
   { name = "Chadwick Boulay", email = "chadwick.boulay@gmail.com" },
+  { name = "Kyle McGraw", email = "kmcgraw@blackrockneuro.com" },
 ]
 license = "MIT"
 readme = "README.md"
