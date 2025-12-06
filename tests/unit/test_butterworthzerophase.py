@@ -6,7 +6,7 @@ from frozendict import frozendict
 
 from ezmsg.sigproc.butterworthzerophase import (
     ButterworthZeroPhaseSettings,
-    butter_zero_phase,
+    ButterworthZeroPhaseTransformer,
 )
 
 
@@ -102,7 +102,7 @@ def test_butterworth_zero_phase_matches_scipy(
         expected = np.moveaxis(y, -1, time_ax)
 
     axis_name = "time" if time_ax != 0 else None
-    zp = butter_zero_phase(
+    zp = ButterworthZeroPhaseTransformer(
         axis=axis_name,
         order=order,
         cuton=cuton,
@@ -118,7 +118,7 @@ def test_butterworth_zero_phase_matches_scipy(
 
 
 def test_butterworth_zero_phase_empty_msg():
-    zp = butter_zero_phase(
+    zp = ButterworthZeroPhaseTransformer(
         axis="time", order=4, cuton=0.1, cutoff=10.0, coef_type="sos"
     )
     msg = AxisArray(
@@ -149,7 +149,7 @@ def test_butterworth_zero_phase_update_settings_changes_output():
         key="test_butterworth_zero_phase_update",
     )
 
-    zp = butter_zero_phase(
+    zp = ButterworthZeroPhaseTransformer(
         axis="time", order=4, cutoff=30.0, coef_type="sos", padtype="odd", padlen=None
     )
     y1 = zp(msg).data
