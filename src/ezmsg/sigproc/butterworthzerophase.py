@@ -26,6 +26,7 @@ class ButterworthZeroPhaseSettings(ButterworthFilterSettings):
     Must be one of {'odd', 'even', 'constant', None}.
     Default is None for no padding.
     """
+
     padlen: int | None = 0
     """
     Length of the padding to use in `scipy.signal.filtfilt`.
@@ -129,36 +130,3 @@ class ButterworthZeroPhase(
     ]
 ):
     SETTINGS = ButterworthZeroPhaseSettings
-
-
-def butter_zero_phase(
-    axis: str | None,
-    order: int = 0,
-    cuton: float | None = None,
-    cutoff: float | None = None,
-    coef_type: str = "ba",
-    wn_hz: bool = True,
-    padtype: str | None = None,
-    padlen: int | None = 0,
-) -> ButterworthZeroPhaseTransformer:
-    """
-    Convenience generator wrapping filter_gen_by_design for Butterworth Zero Phase filters.
-    Apply Butterworth Zero Phase filter to streaming data. Uses :obj:`scipy.signal.butter` to design the filter.
-    See :obj:`ButterworthZeroPhaseSettings.filter_specs` for an explanation of specifying different
-    filter types (lowpass, highpass, bandpass, bandstop) from the parameters.
-
-    Returns:
-        :obj:`ButterworthZeroPhaseTransformer`
-    """
-    return ButterworthZeroPhaseTransformer(
-        ButterworthZeroPhaseSettings(
-            axis=axis,
-            order=order,
-            cuton=cuton,
-            cutoff=cutoff,
-            coef_type=coef_type,
-            wn_hz=wn_hz,
-            padtype=padtype,
-            padlen=padlen,
-        )
-    )
