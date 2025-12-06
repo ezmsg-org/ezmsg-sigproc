@@ -1,7 +1,7 @@
 import numpy as np
 import scipy.signal as sps
 
-from ezmsg.sigproc.pmc_fir import parks_mcclellan_design_fun
+from ezmsg.sigproc.fir_pmc import parks_mcclellan_design_fun
 
 
 def test_pmcfir_behavior():

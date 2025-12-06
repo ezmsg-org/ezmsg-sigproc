@@ -8,7 +8,7 @@ from ezmsg.util.messagelogger import MessageLogger
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.terminate import TerminateOnTotal
 
-from ezmsg.sigproc.pmc_fir import ParksMcClellanFIR
+from ezmsg.sigproc.fir_pmc import ParksMcClellanFIR
 
 
 def test_pmc_fir_system():
