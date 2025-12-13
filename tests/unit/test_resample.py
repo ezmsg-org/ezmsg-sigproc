@@ -1,12 +1,11 @@
 import asyncio
 
-import pytest
 import numpy as np
+import pytest
 import scipy.interpolate
+from ezmsg.sigproc.resample import ResampleProcessor
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.chunker import array_chunker
-
-from ezmsg.sigproc.resample import ResampleProcessor
 
 
 @pytest.fixture
@@ -29,9 +28,7 @@ def irregular_messages() -> list[AxisArray]:
     # Ensure we have a duplicate after the first message
     splits = np.insert(splits, 1, [splits[1]])
     msgs = []
-    ch_ax = AxisArray.CoordinateAxis(
-        data=np.arange(nch).astype(str), dims=["ch"], unit="label"
-    )
+    ch_ax = AxisArray.CoordinateAxis(data=np.arange(nch).astype(str), dims=["ch"], unit="label")
     for msg_ix, split in enumerate(splits[:-1]):
         split_tvec = tvec[split : splits[msg_ix + 1]]
         data = np.random.randn(len(split_tvec), nch)
@@ -40,9 +37,7 @@ def irregular_messages() -> list[AxisArray]:
                 data=data,
                 dims=["time", "ch"],
                 axes={
-                    "time": AxisArray.CoordinateAxis(
-                        data=split_tvec, dims=["time"], unit="s"
-                    ),
+                    "time": AxisArray.CoordinateAxis(data=split_tvec, dims=["time"], unit="s"),
                     "ch": ch_ax,
                 },
                 key="irregular_messages",
@@ -60,16 +55,12 @@ def reference_messages() -> list[AxisArray]:
     ntimes = int(fs * dur)
     n_msgs = 10
     data = np.arange(np.prod((ntimes, nch))).reshape(ntimes, nch)
-    return list(
-        array_chunker(data, chunk_len=ntimes // n_msgs, axis=0, fs=fs, tzero=0.0)
-    )
+    return list(array_chunker(data, chunk_len=ntimes // n_msgs, axis=0, fs=fs, tzero=0.0))
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("resample_rate", [None, 128.0])
-async def test_resample(
-    irregular_messages, reference_messages: list[AxisArray], resample_rate: float | None
-):
+async def test_resample(irregular_messages, reference_messages: list[AxisArray], resample_rate: float | None):
     ref_cat = AxisArray.concatenate(*reference_messages, dim="time")
     # Calculate expected. This only works if interp1d `kind` is "nearest" or "linear"
     x = np.hstack([_.axes["time"].data for _ in irregular_messages])
@@ -82,9 +73,7 @@ async def test_resample(
             irregular_messages[-1].axes["time"].data[-1],
             1 / resample_rate,
         )
-    f = scipy.interpolate.interp1d(
-        x, y, axis=0, kind="linear", fill_value="extrapolate"
-    )
+    f = scipy.interpolate.interp1d(x, y, axis=0, kind="linear", fill_value="extrapolate")
     expected_data = f(newx)
 
     resample = ResampleProcessor(resample_rate=resample_rate, buffer_duration=4.0)
@@ -96,9 +85,7 @@ async def test_resample(
         resample(msg)
         result = next(resample)
         msg_len = result.data.shape[0]
-        b_match = np.allclose(
-            result.data, expected_data[n_returned : n_returned + msg_len]
-        )
+        b_match = np.allclose(result.data, expected_data[n_returned : n_returned + msg_len])
         assert b_match, f"Message {msg_ix} data mismatch."
         results.append(result)
         n_returned += result.data.shape[0]
@@ -120,9 +107,7 @@ async def test_resample(
 @pytest.mark.asyncio
 async def test_resample_project(irregular_messages):
     new_rate = 128.0
-    resample = ResampleProcessor(
-        resample_rate=new_rate, max_chunk_delay=0.1, fill_value="last"
-    )
+    resample = ResampleProcessor(resample_rate=new_rate, max_chunk_delay=0.1, fill_value="last")
     results = []
     n_returned = 0
     for msg_ix, msg in enumerate(irregular_messages[:-1]):

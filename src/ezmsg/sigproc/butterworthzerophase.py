@@ -34,9 +34,7 @@ class ButterworthZeroPhaseSettings(ButterworthFilterSettings):
     """
 
 
-class ButterworthZeroPhaseTransformer(
-    FilterByDesignTransformer[ButterworthZeroPhaseSettings, BACoeffs | SOSCoeffs]
-):
+class ButterworthZeroPhaseTransformer(FilterByDesignTransformer[ButterworthZeroPhaseSettings, BACoeffs | SOSCoeffs]):
     """Zero-phase (filtfilt) Butterworth using your design function."""
 
     def get_design_function(
@@ -51,9 +49,7 @@ class ButterworthZeroPhaseTransformer(
             wn_hz=self.settings.wn_hz,
         )
 
-    def update_settings(
-        self, new_settings: typing.Optional[SettingsType] = None, **kwargs
-    ) -> None:
+    def update_settings(self, new_settings: typing.Optional[SettingsType] = None, **kwargs) -> None:
         """
         Update settings and mark that filter coefficients need to be recalculated.
 
@@ -91,11 +87,7 @@ class ButterworthZeroPhaseTransformer(
             self._fs_cache = fs
             self.state.needs_redesign = False
 
-        if (
-            self._coefs_cache is None
-            or self.settings.order <= 0
-            or message.data.size <= 0
-        ):
+        if self._coefs_cache is None or self.settings.order <= 0 or message.data.size <= 0:
             return message
 
         x = message.data
@@ -125,8 +117,6 @@ class ButterworthZeroPhaseTransformer(
 
 
 class ButterworthZeroPhase(
-    BaseFilterByDesignTransformerUnit[
-        ButterworthZeroPhaseSettings, ButterworthZeroPhaseTransformer
-    ]
+    BaseFilterByDesignTransformerUnit[ButterworthZeroPhaseSettings, ButterworthZeroPhaseTransformer]
 ):
     SETTINGS = ButterworthZeroPhaseSettings

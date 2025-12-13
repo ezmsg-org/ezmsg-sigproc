@@ -1,11 +1,10 @@
 import numpy as np
 import scipy.signal as sps
-from ezmsg.util.messages.axisarray import AxisArray
-
 from ezmsg.sigproc.fir_hilbert import (
     FIRHilbertEnvelopeTransformer,
     FIRHilbertFilterTransformer,
 )
+from ezmsg.util.messages.axisarray import AxisArray
 
 
 def axisarray(x: np.ndarray, fs: float, t0: float = 0.0) -> AxisArray:
@@ -36,9 +35,7 @@ def _ncorr(x, y, lag):
     return float(np.dot(x2, y2) / denom) if denom > 0 else -1.0
 
 
-def _best_corr_with_small_lag(
-    a: np.ndarray, b: np.ndarray, max_lag: int = 20
-) -> tuple[float, int]:
+def _best_corr_with_small_lag(a: np.ndarray, b: np.ndarray, max_lag: int = 20) -> tuple[float, int]:
     assert a.size == b.size
 
     lags = np.arange(-max_lag, max_lag + 1)
@@ -92,9 +89,7 @@ def test_fir_hilbert_matches_scipy_oracle_with_delay():
     xb = xb[trim_bp:-trim_bp]
     assert xb.size > 4000
 
-    tr = FIRHilbertFilterTransformer(
-        axis="time", order=500, f_lo=82, f_hi=98, trans_lo=2, trans_hi=2
-    )
+    tr = FIRHilbertFilterTransformer(axis="time", order=500, f_lo=82, f_hi=98, trans_lo=2, trans_hi=2)
     y_class = tr(axisarray(xb, fs)).data.squeeze()
 
     taps = tr.get_taps()
@@ -196,9 +191,7 @@ def test_fir_hilbert_envelope_internal_consistency_oracle():
     x_real_full = np.concatenate([np.zeros(dly, dtype=x_bp.dtype), x_bp[:-dly]])
 
     L = min(env_node.size, x_real_full.size, y_imag_full.size)
-    env_oracle_full = np.abs(
-        x_real_full[:L].astype(np.complex64) + 1j * y_imag_full[:L].astype(np.complex64)
-    )
+    env_oracle_full = np.abs(x_real_full[:L].astype(np.complex64) + 1j * y_imag_full[:L].astype(np.complex64))
     env_cmp_full = env_node[:L]
 
     guard = max(dly, Nbp)
@@ -209,9 +202,7 @@ def test_fir_hilbert_envelope_internal_consistency_oracle():
         env_oracle = env_oracle_full
         env_cmp = env_cmp_full
 
-    co, lag = _best_corr_with_small_lag(
-        env_cmp.astype(float), env_oracle.astype(float), max_lag=5
-    )
+    co, lag = _best_corr_with_small_lag(env_cmp.astype(float), env_oracle.astype(float), max_lag=5)
     assert co > 0.995 and abs(lag) <= 1
 
 

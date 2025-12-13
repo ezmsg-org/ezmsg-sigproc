@@ -60,7 +60,7 @@ class FIRHilbertFilterSettings(FilterBaseSettings):
 
     weight_pass: float = 1.0
     """
-    Weight for Hilbert pass region. 
+    Weight for Hilbert pass region.
     """
 
     weight_stop_lo: float = 1.0
@@ -74,7 +74,7 @@ class FIRHilbertFilterSettings(FilterBaseSettings):
     """
 
     norm_band: tuple[float, float] | None = None
-    """ 
+    """
     Optional normalization band (f_lo, f_hi) in Hz for gain normalization.
     If None, no normalization is applied.
     """
@@ -128,9 +128,7 @@ def fir_hilbert_design_fun(
         if bands[i] <= bands[i - 1]:
             bands[i] = np.nextafter(bands[i - 1], np.inf)
     if bands[-2] >= nyq:
-        ez.logger.warning(
-            "Hilbert upper stopband collapsed; using 2-band (stop/pass) design."
-        )
+        ez.logger.warning("Hilbert upper stopband collapsed; using 2-band (stop/pass) design.")
         bands = bands[:-3] + [nyq]
         desired = desired[:-1]
         weight = weight[:-1]
@@ -139,9 +137,7 @@ def fir_hilbert_design_fun(
     g = None
     if norm_freq is not None:
         if norm_freq < f1 or norm_freq > f2:
-            ez.logger.warning(
-                "Invalid normalization frequency specifications. Skipping normalization."
-            )
+            ez.logger.warning("Invalid normalization frequency specifications. Skipping normalization.")
         else:
             f0 = float(norm_freq)
             w = 2.0 * np.pi * (np.asarray([f0], dtype=np.float64) / fs)
@@ -152,13 +148,9 @@ def fir_hilbert_design_fun(
         if lo < f1 or hi > f2:
             lo = max(lo, f1)
             hi = min(hi, f2)
-            ez.logger.warning(
-                "Normalization band outside passband. Clipping to passband for normalization."
-            )
+            ez.logger.warning("Normalization band outside passband. Clipping to passband for normalization.")
         if lo >= hi:
-            ez.logger.warning(
-                "Invalid normalization band specifications. Skipping normalization."
-            )
+            ez.logger.warning("Invalid normalization band specifications. Skipping normalization.")
         else:
             freqs = np.linspace(lo, hi, 2048, dtype=np.float64)
             w = 2.0 * np.pi * (np.asarray(freqs, dtype=np.float64) / fs)
@@ -169,9 +161,7 @@ def fir_hilbert_design_fun(
     return (b, a)
 
 
-class FIRHilbertFilterTransformer(
-    FilterByDesignTransformer[FIRHilbertFilterSettings, BACoeffs]
-):
+class FIRHilbertFilterTransformer(FilterByDesignTransformer[FIRHilbertFilterSettings, BACoeffs]):
     def get_design_function(self) -> typing.Callable[[float], BACoeffs | None]:
         if self.settings.coef_type != "ba":
             ez.logger.error("FIRHilbert only supports coef_type='ba'.")
@@ -198,11 +188,7 @@ class FIRHilbertFilterTransformer(
         return b.size if b is not None else None
 
 
-class FIRHilbertFilterUnit(
-    BaseFilterByDesignTransformerUnit[
-        FIRHilbertFilterSettings, FIRHilbertFilterTransformer
-    ]
-):
+class FIRHilbertFilterUnit(BaseFilterByDesignTransformerUnit[FIRHilbertFilterSettings, FIRHilbertFilterTransformer]):
     SETTINGS = FIRHilbertFilterSettings
 
 
@@ -214,9 +200,7 @@ class FIRHilbertEnvelopeState:
 
 
 class FIRHilbertEnvelopeTransformer(
-    BaseStatefulTransformer[
-        FIRHilbertFilterSettings, AxisArray, AxisArray, FIRHilbertEnvelopeState
-    ]
+    BaseStatefulTransformer[FIRHilbertFilterSettings, AxisArray, AxisArray, FIRHilbertEnvelopeState]
 ):
     """
     Processor for computing the envelope of a signal using the Hilbert transform.
@@ -304,9 +288,7 @@ class FIRHilbertEnvelopeTransformer(
 
         if self._state.delay_buf is None:
             lead_shape = x.shape[:-1]
-            self._state.delay_buf = np.zeros(
-                lead_shape + (self._state.dly,), dtype=x.dtype
-            )
+            self._state.delay_buf = np.zeros(lead_shape + (self._state.dly,), dtype=x.dtype)
 
         x_cat = np.concatenate([self._state.delay_buf, x], axis=-1)
         x_delayed_full = x_cat[..., : -self._state.dly]

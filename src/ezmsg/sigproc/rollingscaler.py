@@ -71,11 +71,7 @@ class RollingScalerState:
     min_samples: int | None = None
 
 
-class RollingScalerProcessor(
-    BaseAdaptiveTransformer[
-        RollingScalerSettings, AxisArray, AxisArray, RollingScalerState
-    ]
-):
+class RollingScalerProcessor(BaseAdaptiveTransformer[RollingScalerSettings, AxisArray, AxisArray, RollingScalerState]):
     """
     Processor for rolling z-score normalization of input `AxisArray` messages.
 
@@ -119,40 +115,23 @@ class RollingScalerProcessor(
         self._state.N = 0
         self._state.M2 = np.zeros(ch)
         self._state.k_samples = (
-            int(
-                np.ceil(
-                    self.settings.window_size / message.axes[self.settings.axis].gain
-                )
-            )
+            int(np.ceil(self.settings.window_size / message.axes[self.settings.axis].gain))
             if self.settings.window_size is not None
             else self.settings.k_samples
         )
         if self._state.k_samples is not None and self._state.k_samples < 1:
-            ez.logger.warning(
-                "window_size smaller than sample gain; setting k_samples to 1."
-            )
+            ez.logger.warning("window_size smaller than sample gain; setting k_samples to 1.")
             self._state.k_samples = 1
         elif self._state.k_samples is None:
-            ez.logger.warning(
-                "k_samples is None; z-score accumulation will be unbounded."
-            )
+            ez.logger.warning("k_samples is None; z-score accumulation will be unbounded.")
         self._state.samples = deque(maxlen=self._state.k_samples)
         self._state.min_samples = (
-            int(
-                np.ceil(
-                    self.settings.min_seconds / message.axes[self.settings.axis].gain
-                )
-            )
+            int(np.ceil(self.settings.min_seconds / message.axes[self.settings.axis].gain))
             if self.settings.window_size is not None
             else self.settings.min_samples
         )
-        if (
-            self._state.k_samples is not None
-            and self._state.min_samples > self._state.k_samples
-        ):
-            ez.logger.warning(
-                "min_samples is greater than k_samples; adjusting min_samples to k_samples."
-            )
+        if self._state.k_samples is not None and self._state.min_samples > self._state.k_samples:
+            ez.logger.warning("min_samples is greater than k_samples; adjusting min_samples to k_samples.")
             self._state.min_samples = self._state.k_samples
 
     def _add_batch_stats(self, x: npt.NDArray) -> None:
@@ -161,10 +140,7 @@ class RollingScalerProcessor(
         mean_b = np.mean(x, axis=0)
         M2_b = np.sum((x - mean_b) ** 2, axis=0)
 
-        if (
-            self._state.k_samples is not None
-            and len(self._state.samples) == self._state.k_samples
-        ):
+        if self._state.k_samples is not None and len(self._state.samples) == self._state.k_samples:
             n_old, mean_old, M2_old = self._state.samples.popleft()
             N_T = self._state.N
             N_new = N_T - n_old
@@ -177,9 +153,7 @@ class RollingScalerProcessor(
                 delta = mean_old - self._state.mean
                 self._state.N = N_new
                 self._state.mean = (N_T * self._state.mean - n_old * mean_old) / N_new
-                self._state.M2 = (
-                    self._state.M2 - M2_old - (delta * delta) * (N_T * n_old / N_new)
-                )
+                self._state.M2 = self._state.M2 - M2_old - (delta * delta) * (N_T * n_old / N_new)
 
         N_A = self._state.N
         N = N_A + n_b

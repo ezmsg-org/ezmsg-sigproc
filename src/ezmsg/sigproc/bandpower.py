@@ -3,18 +3,18 @@ from dataclasses import field
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 
-from .spectrogram import SpectrogramSettings, SpectrogramTransformer
 from .aggregate import (
     AggregationFunction,
-    RangedAggregateTransformer,
     RangedAggregateSettings,
+    RangedAggregateTransformer,
 )
 from .base import (
     BaseProcessor,
-    CompositeProcessor,
     BaseStatefulProcessor,
     BaseTransformerUnit,
+    CompositeProcessor,
 )
+from .spectrogram import SpectrogramSettings, SpectrogramTransformer
 
 
 class BandPowerSettings(ez.Settings):
@@ -22,16 +22,12 @@ class BandPowerSettings(ez.Settings):
     Settings for ``BandPower``.
     """
 
-    spectrogram_settings: SpectrogramSettings = field(
-        default_factory=SpectrogramSettings
-    )
+    spectrogram_settings: SpectrogramSettings = field(default_factory=SpectrogramSettings)
     """
     Settings for spectrogram calculation.
     """
 
-    bands: list[tuple[float, float]] | None = field(
-        default_factory=lambda: [(17, 30), (70, 170)]
-    )
+    bands: list[tuple[float, float]] | None = field(default_factory=lambda: [(17, 30), (70, 170)])
     """
     (min, max) tuples of band limits in Hz.
     """
@@ -46,9 +42,7 @@ class BandPowerTransformer(CompositeProcessor[BandPowerSettings, AxisArray, Axis
         settings: BandPowerSettings,
     ) -> dict[str, BaseProcessor | BaseStatefulProcessor]:
         return {
-            "spectrogram": SpectrogramTransformer(
-                settings=settings.spectrogram_settings
-            ),
+            "spectrogram": SpectrogramTransformer(settings=settings.spectrogram_settings),
             "aggregate": RangedAggregateTransformer(
                 settings=RangedAggregateSettings(
                     axis="freq",
@@ -59,9 +53,7 @@ class BandPowerTransformer(CompositeProcessor[BandPowerSettings, AxisArray, Axis
         }
 
 
-class BandPower(
-    BaseTransformerUnit[BandPowerSettings, AxisArray, AxisArray, BandPowerTransformer]
-):
+class BandPower(BaseTransformerUnit[BandPowerSettings, AxisArray, AxisArray, BandPowerTransformer]):
     SETTINGS = BandPowerSettings
 
 

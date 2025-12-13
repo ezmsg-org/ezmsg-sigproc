@@ -1,9 +1,9 @@
 import typing
 
+import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
 import pywt
-import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
@@ -12,7 +12,7 @@ from .base import (
     BaseTransformerUnit,
     processor_state,
 )
-from .filterbank import filterbank, FilterbankMode, MinPhaseMode
+from .filterbank import FilterbankMode, MinPhaseMode, filterbank
 
 
 class CWTSettings(ez.Settings):
@@ -37,9 +37,7 @@ class CWTState:
     last_conv_samp: npt.NDArray | None = None
 
 
-class CWTTransformer(
-    BaseStatefulTransformer[CWTSettings, AxisArray, AxisArray, CWTState]
-):
+class CWTTransformer(BaseStatefulTransformer[CWTSettings, AxisArray, AxisArray, CWTState]):
     def _hash_message(self, message: AxisArray) -> int:
         ax_idx = message.get_axis_idx(self.settings.axis)
         in_shape = message.data.shape[:ax_idx] + message.data.shape[ax_idx + 1 :]
@@ -107,25 +105,18 @@ class CWTTransformer(
         # Create output template
         ax_idx = message.get_axis_idx(self.settings.axis)
         in_shape = message.data.shape[:ax_idx] + message.data.shape[ax_idx + 1 :]
-        freqs = (
-            pywt.scale2frequency(wavelet, scales, precision)
-            / message.axes[self.settings.axis].gain
-        )
+        freqs = pywt.scale2frequency(wavelet, scales, precision) / message.axes[self.settings.axis].gain
         dummy_shape = in_shape + (len(scales), 0)
         self._state.template = AxisArray(
             np.zeros(dummy_shape, dtype=dt_cplx if wavelet.complex_cwt else dt_data),
-            dims=message.dims[:ax_idx]
-            + message.dims[ax_idx + 1 :]
-            + ["freq", self.settings.axis],
+            dims=message.dims[:ax_idx] + message.dims[ax_idx + 1 :] + ["freq", self.settings.axis],
             axes={
                 **message.axes,
                 "freq": AxisArray.CoordinateAxis(unit="Hz", data=freqs, dims=["freq"]),
             },
             key=message.key,
         )
-        self._state.last_conv_samp = np.zeros(
-            dummy_shape[:-1] + (1,), dtype=self._state.template.data.dtype
-        )
+        self._state.last_conv_samp = np.zeros(dummy_shape[:-1] + (1,), dtype=self._state.template.data.dtype)
 
     def _process(self, message: AxisArray) -> AxisArray:
         conv_msg = self._state.fbgen.send(message)

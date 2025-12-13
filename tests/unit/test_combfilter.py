@@ -1,12 +1,11 @@
 import numpy as np
 import pytest
-from scipy import signal
-from ezmsg.util.messages.axisarray import AxisArray
-
 from ezmsg.sigproc.combfilter import (
-    comb_design_fun,
     CombFilterTransformer,
+    comb_design_fun,
 )
+from ezmsg.util.messages.axisarray import AxisArray
+from scipy import signal
 
 
 def test_comb_filter_design():
@@ -121,9 +120,7 @@ def test_comb_filter_frequency_response():
         assert notch_mag[idx] < 0.5  # significant attenuation
 
         # Peak should amplify at harmonics
-        assert peak_mag[idx] > (
-            1.5 * peak_mag[0]
-        )  # passed peak is larger than stopped non-peak.
+        assert peak_mag[idx] > (1.5 * peak_mag[0])  # passed peak is larger than stopped non-peak.
 
 
 def test_nyquist_limitation():
@@ -265,9 +262,7 @@ def test_comb_filter_update_settings():
         dims=["time", "ch"],
         axes={
             "time": AxisArray.TimeAxis(fs=fs, offset=0),
-            "ch": AxisArray.CoordinateAxis(
-                data=np.arange(n_chans).astype(str), dims=["ch"]
-            ),
+            "ch": AxisArray.CoordinateAxis(data=np.arange(n_chans).astype(str), dims=["ch"]),
         },
         key="test_comb_filter_update_settings",
     )
@@ -280,10 +275,7 @@ def test_comb_filter_update_settings():
         # Return dims: (fund_freqs, harmonics, channels)
         return np.array(
             [
-                [
-                    fft_result[np.argmin(np.abs(fft_freqs - (i * fund)))]
-                    for i in range(1, n_harmonics + 1)
-                ]
+                [fft_result[np.argmin(np.abs(fft_freqs - (i * fund)))] for i in range(1, n_harmonics + 1)]
                 for fund in fund_freqs
             ]
         )
@@ -307,12 +299,8 @@ def test_comb_filter_update_settings():
 
     # Check that 50Hz components are attenuated in ch0 but 60Hz in ch1 is less affected
     power1 = _calc_power(result1, fund_freqs=[50, 60], n_harmonics=2)
-    assert np.all(
-        (power1[0, :, 0] / power0[0, :, 0]) < 0.02
-    )  # 50Hz and harmonics should be attenuated
-    assert np.all(
-        (power1[1, :, 1] / power0[1, :, 1]) > 0.9
-    )  # 60Hz and harmonics should be mostly preserved
+    assert np.all((power1[0, :, 0] / power0[0, :, 0]) < 0.02)  # 50Hz and harmonics should be attenuated
+    assert np.all((power1[1, :, 1] / power0[1, :, 1]) > 0.9)  # 60Hz and harmonics should be mostly preserved
 
     # Update settings - change to target 60Hz
     proc.update_settings(fundamental_freq=60.0)
@@ -324,9 +312,5 @@ def test_comb_filter_update_settings():
     power2 = _calc_power(result2, fund_freqs=[50, 60], n_harmonics=2)
 
     # Verify that the filter behavior changed correctly
-    assert np.all(
-        (power2[0, :, 0] / power0[0, :, 0]) > 0.9
-    )  # 50Hz and harmonics should be mostly preserved
-    assert np.all(
-        (power2[1, :, 1] / power0[1, :, 1]) < 0.02
-    )  # 60Hz and harmonics should be attenuated
+    assert np.all((power2[0, :, 0] / power0[0, :, 0]) > 0.9)  # 50Hz and harmonics should be mostly preserved
+    assert np.all((power2[1, :, 1] / power0[1, :, 1]) < 0.02)  # 60Hz and harmonics should be attenuated

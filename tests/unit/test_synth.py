@@ -1,17 +1,16 @@
 import asyncio  # noqa: F401
 import time
 
+import ezmsg.core as ez
 import numpy as np
 import pytest
-
-import ezmsg.core as ez
-from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.sigproc.synth import (
-    clock,
     aclock,
     acounter,
+    clock,
     sin,
 )
+from ezmsg.util.messages.axisarray import AxisArray
 
 
 # TEST CLOCK
@@ -94,9 +93,7 @@ async def test_acounter(
         assert "time" in msg.axes
         assert msg.axes["time"].gain == 1 / fs
         assert "ch" in msg.axes
-        assert np.array_equal(
-            msg.axes["ch"].data, np.array([f"Ch{_}" for _ in range(n_ch)])
-        )
+        assert np.array_equal(msg.axes["ch"].data, np.array([f"Ch{_}" for _ in range(n_ch)]))
 
     agg = AxisArray.concatenate(*messages, dim="time")
 
@@ -127,13 +124,9 @@ def test_sin_gen(freq: float = 1.0, amp: float = 1.0, phase: float = 0.0):
     axis_idx = 0
 
     messages = []
-    for split_dat in np.array_split(
-        np.arange(n_samples)[:, None], n_msgs, axis=axis_idx
-    ):
+    for split_dat in np.array_split(np.arange(n_samples)[:, None], n_msgs, axis=axis_idx):
         _time_axis = AxisArray.TimeAxis(fs=srate, offset=float(split_dat[0, 0]))
-        messages.append(
-            AxisArray(split_dat, dims=["time", "ch"], axes={"time": _time_axis})
-        )
+        messages.append(AxisArray(split_dat, dims=["time", "ch"], axes={"time": _time_axis}))
 
     def f_test(t):
         return amp * np.sin(2 * np.pi * freq * t + phase)
@@ -145,6 +138,4 @@ def test_sin_gen(freq: float = 1.0, amp: float = 1.0, phase: float = 0.0):
         assert np.allclose(res.data, f_test(msg.data / srate))
         results.append(res)
     concat_ax_arr = AxisArray.concatenate(*results, dim="time")
-    assert np.allclose(
-        concat_ax_arr.data, f_test(np.arange(n_samples) / srate)[:, None]
-    )
+    assert np.allclose(concat_ax_arr.data, f_test(np.arange(n_samples) / srate)[:, None])

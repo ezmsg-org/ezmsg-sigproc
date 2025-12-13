@@ -1,20 +1,21 @@
-from dataclasses import field
 import os
+from dataclasses import field
 
 import ezmsg.core as ez
-from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.sigproc.spectrum import (
-    SpectralTransform,
     SpectralOutput,
-    WindowFunction,
+    SpectralTransform,
     Spectrum,
     SpectrumSettings,
+    WindowFunction,
 )
-from ezmsg.sigproc.window import Window, WindowSettings
 from ezmsg.sigproc.synth import EEGSynth, EEGSynthSettings
-from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
+from ezmsg.sigproc.window import Window, WindowSettings
 from ezmsg.util.messagecodec import message_log
+from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
+from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.terminate import TerminateOnTotal, TerminateOnTotalSettings
+
 from tests.helpers.util import (
     get_test_fn,
 )
@@ -25,9 +26,7 @@ class SpectrumSettingsTest(ez.Settings):
     window_settings: WindowSettings
     spectrum_settings: SpectrumSettings
     log_settings: MessageLoggerSettings
-    term_settings: TerminateOnTotalSettings = field(
-        default_factory=TerminateOnTotalSettings
-    )
+    term_settings: TerminateOnTotalSettings = field(default_factory=TerminateOnTotalSettings)
 
 
 class SpectrumIntegrationTest(ez.Collection):

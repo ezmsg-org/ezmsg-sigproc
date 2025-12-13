@@ -1,14 +1,12 @@
 import numpy as np
 import pytest
-
-from ezmsg.util.messages.axisarray import AxisArray
-
 from ezmsg.sigproc.math.abs import abs
 from ezmsg.sigproc.math.clip import clip
 from ezmsg.sigproc.math.difference import const_difference
 from ezmsg.sigproc.math.invert import invert
 from ezmsg.sigproc.math.log import log
 from ezmsg.sigproc.math.scale import scale
+from ezmsg.util.messages.axisarray import AxisArray
 
 
 def test_abs():
@@ -46,9 +44,7 @@ def test_const_difference(value: float, subtrahend: bool):
 
     proc = const_difference(value, subtrahend)
     msg_out = proc.send(msg_in)
-    assert np.array_equal(
-        msg_out.data, (in_dat - value) if subtrahend else (value - in_dat)
-    )
+    assert np.array_equal(msg_out.data, (in_dat - value) if subtrahend else (value - in_dat))
 
 
 def test_invert():

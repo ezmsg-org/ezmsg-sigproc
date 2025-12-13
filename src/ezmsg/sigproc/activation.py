@@ -1,10 +1,10 @@
-import scipy.special
 import ezmsg.core as ez
+import scipy.special
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
-from .spectral import OptionsEnum
 from .base import BaseTransformer, BaseTransformerUnit
+from .spectral import OptionsEnum
 
 
 class ActivationFunction(OptionsEnum):
@@ -50,20 +50,14 @@ class ActivationTransformer(BaseTransformer[ActivationSettings, AxisArray, AxisA
             # str type handling
             function = self.settings.function.lower()
             if function not in ActivationFunction.options():
-                raise ValueError(
-                    f"Unrecognized activation function {function}. Must be one of {ACTIVATIONS.keys()}"
-                )
-            function = list(ACTIVATIONS.keys())[
-                ActivationFunction.options().index(function)
-            ]
+                raise ValueError(f"Unrecognized activation function {function}. Must be one of {ACTIVATIONS.keys()}")
+            function = list(ACTIVATIONS.keys())[ActivationFunction.options().index(function)]
             func = ACTIVATIONS[function]
 
         return replace(message, data=func(message.data))
 
 
-class Activation(
-    BaseTransformerUnit[ActivationSettings, AxisArray, AxisArray, ActivationTransformer]
-):
+class Activation(BaseTransformerUnit[ActivationSettings, AxisArray, AxisArray, ActivationTransformer]):
     SETTINGS = ActivationSettings
 
 

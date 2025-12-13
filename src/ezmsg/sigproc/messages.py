@@ -1,9 +1,8 @@
-import warnings
 import time
+import warnings
 
 import numpy.typing as npt
 from ezmsg.util.messages.axisarray import AxisArray
-
 
 # UPCOMING: TSMessage Deprecation
 # TSMessage is deprecated because it doesn't handle multiple time axes well.

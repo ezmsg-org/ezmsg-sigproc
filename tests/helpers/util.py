@@ -3,9 +3,9 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
-from numpy.lib.stride_tricks import sliding_window_view
-from frozendict import frozendict
 from ezmsg.util.messages.axisarray import AxisArray
+from frozendict import frozendict
+from numpy.lib.stride_tricks import sliding_window_view
 
 
 def get_test_fn(test_name: str | None = None, extension: str = "txt") -> Path:
@@ -56,16 +56,12 @@ def create_messages_with_periodic_signal(
     for s_p in sin_params:
         offs = s_p.get("offset", 0.0)
         b_t = np.logical_and(t_vec >= offs, t_vec <= offs + s_p["dur"])
-        data[b_t] += s_p.get("a", 1.0) * np.sin(
-            2 * np.pi * s_p["f"] * t_vec[b_t] + s_p.get("p", 0)
-        )
+        data[b_t] += s_p.get("a", 1.0) * np.sin(2 * np.pi * s_p["f"] * t_vec[b_t] + s_p.get("p", 0))
 
     # How will we split the data into messages? With a rolling window or non-overlapping?
     if win_step_dur is not None:
         win_step = int(win_step_dur * fs)
-        data_splits = sliding_window_view(data, (int(msg_dur * fs),), axis=0)[
-            ::win_step
-        ]
+        data_splits = sliding_window_view(data, (int(msg_dur * fs),), axis=0)[::win_step]
     else:
         n_msgs = int(t_end / msg_dur)
         data_splits = np.array_split(data, n_msgs, axis=0)
@@ -73,9 +69,7 @@ def create_messages_with_periodic_signal(
     # Create the output messages
     offset = 0.0
     messages = []
-    _ch_axis = AxisArray.CoordinateAxis(
-        data=np.array([f"Ch{_}" for _ in range(n_ch)]), unit="label", dims=["ch"]
-    )
+    _ch_axis = AxisArray.CoordinateAxis(data=np.array([f"Ch{_}" for _ in range(n_ch)]), unit="label", dims=["ch"])
     for split_dat in data_splits:
         _time_axis = AxisArray.TimeAxis(fs=fs, offset=offset)
         messages.append(
@@ -127,7 +121,8 @@ def calculate_expected_windows(
     win_ax,
 ):
     """
-    Used by unit/test_window and integration/ezmsg/test_window to calculate the expected output of a windowing operation.
+    Used by unit/test_window and integration/ezmsg/test_window to calculate the expected output of a
+    windowing operation.
     """
     # For the calculation, we assume time_ax is last then transpose if necessary at the end.
     expected = orig.copy()
@@ -141,9 +136,7 @@ def calculate_expected_windows(
         n_cut = win_len
     n_keep = win_len - n_cut
     if n_keep > 0:
-        expected = np.concatenate(
-            (np.zeros((nchans, win_len))[..., -n_keep:], expected), axis=-1
-        )
+        expected = np.concatenate((np.zeros((nchans, win_len))[..., -n_keep:], expected), axis=-1)
         tvec = np.hstack(((np.arange(-win_len, 0) / fs)[-n_keep:], tvec))
     # Moving window -- assumes step size of 1
     expected = sliding_window_view(expected, win_len, axis=-1)
@@ -154,9 +147,7 @@ def calculate_expected_windows(
         # If the window length is smaller than the block size then we only the tail of each block.
         first = max(min(msg_block_size, data_len) - win_len, 0)
         if tvec[first::msg_block_size].shape[0] < n_msgs:
-            expected = np.concatenate(
-                (expected[:, first::msg_block_size], expected[:, -1:]), axis=1
-            )
+            expected = np.concatenate((expected[:, first::msg_block_size], expected[:, -1:]), axis=1)
             tvec = np.hstack((tvec[first::msg_block_size, 0], tvec[-1:, 0]))
         else:
             expected = expected[:, first::msg_block_size]

@@ -1,13 +1,13 @@
-from typing import Callable
 import warnings
+from typing import Callable
 
 import numpy as np
 
 from .filter import (
-    FilterBaseSettings,
     BACoeffs,
-    FilterByDesignTransformer,
     BaseFilterByDesignTransformerUnit,
+    FilterBaseSettings,
+    FilterByDesignTransformer,
 )
 
 
@@ -68,9 +68,7 @@ def gaussian_smoothing_filter_design(
     return b, a
 
 
-class GaussianSmoothingFilterTransformer(
-    FilterByDesignTransformer[GaussianSmoothingSettings, BACoeffs]
-):
+class GaussianSmoothingFilterTransformer(FilterByDesignTransformer[GaussianSmoothingSettings, BACoeffs]):
     def get_design_function(
         self,
     ) -> Callable[[float], BACoeffs]:
@@ -86,8 +84,6 @@ class GaussianSmoothingFilterTransformer(
 
 
 class GaussianSmoothingFilter(
-    BaseFilterByDesignTransformerUnit[
-        GaussianSmoothingSettings, GaussianSmoothingFilterTransformer
-    ]
+    BaseFilterByDesignTransformerUnit[GaussianSmoothingSettings, GaussianSmoothingFilterTransformer]
 ):
     SETTINGS = GaussianSmoothingSettings

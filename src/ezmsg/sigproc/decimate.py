@@ -4,7 +4,7 @@ import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 
 from .base import BaseTransformerUnit
-from .cheby import ChebyshevFilterTransformer, ChebyshevFilterSettings
+from .cheby import ChebyshevFilterSettings, ChebyshevFilterTransformer
 from .downsample import Downsample, DownsampleSettings
 from .filter import BACoeffs, SOSCoeffs
 
@@ -30,11 +30,7 @@ class ChebyForDecimateTransformer(ChebyshevFilterTransformer[BACoeffs | SOSCoeff
         return cheby_opt_design_fun
 
 
-class ChebyForDecimate(
-    BaseTransformerUnit[
-        ChebyshevFilterSettings, AxisArray, AxisArray, ChebyForDecimateTransformer
-    ]
-):
+class ChebyForDecimate(BaseTransformerUnit[ChebyshevFilterSettings, AxisArray, AxisArray, ChebyForDecimateTransformer]):
     SETTINGS = ChebyshevFilterSettings
 
 

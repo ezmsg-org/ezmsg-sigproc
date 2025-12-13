@@ -1,8 +1,8 @@
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
 import contextlib
 import inspect
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Coroutine, TypeVar
 
 T = TypeVar("T")
@@ -39,18 +39,14 @@ def run_coroutine_sync(coroutine: Coroutine[Any, Any, T], timeout: float = 30) -
         new_loop = asyncio.new_event_loop()
         asyncio.set_event_loop(new_loop)
         try:
-            return new_loop.run_until_complete(
-                asyncio.wait_for(coroutine, timeout=timeout)
-            )
+            return new_loop.run_until_complete(asyncio.wait_for(coroutine, timeout=timeout))
         finally:
             with contextlib.suppress(Exception):
                 # Clean up any pending tasks
                 pending = asyncio.all_tasks(new_loop)
                 for task in pending:
                     task.cancel()
-                new_loop.run_until_complete(
-                    asyncio.gather(*pending, return_exceptions=True)
-                )
+                new_loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
             new_loop.close()
 
     try:
@@ -59,37 +55,27 @@ def run_coroutine_sync(coroutine: Coroutine[Any, Any, T], timeout: float = 30) -
         try:
             return asyncio.run(asyncio.wait_for(coroutine, timeout=timeout))
         except Exception as e:
-            raise CoroutineExecutionError(
-                f"Failed to execute coroutine: {str(e)}"
-            ) from e
+            raise CoroutineExecutionError(f"Failed to execute coroutine: {str(e)}") from e
 
     if threading.current_thread() is threading.main_thread():
         if not loop.is_running():
             try:
-                return loop.run_until_complete(
-                    asyncio.wait_for(coroutine, timeout=timeout)
-                )
+                return loop.run_until_complete(asyncio.wait_for(coroutine, timeout=timeout))
             except Exception as e:
-                raise CoroutineExecutionError(
-                    f"Failed to execute coroutine in main loop: {str(e)}"
-                ) from e
+                raise CoroutineExecutionError(f"Failed to execute coroutine in main loop: {str(e)}") from e
         else:
             with ThreadPoolExecutor() as pool:
                 try:
                     future = pool.submit(run_in_new_loop)
                     return future.result(timeout=timeout)
                 except Exception as e:
-                    raise CoroutineExecutionError(
-                        f"Failed to execute coroutine in thread: {str(e)}"
-                    ) from e
+                    raise CoroutineExecutionError(f"Failed to execute coroutine in thread: {str(e)}") from e
     else:
         try:
             future = asyncio.run_coroutine_threadsafe(coroutine, loop)
             return future.result(timeout=timeout)
         except Exception as e:
-            raise CoroutineExecutionError(
-                f"Failed to execute coroutine threadsafe: {str(e)}"
-            ) from e
+            raise CoroutineExecutionError(f"Failed to execute coroutine threadsafe: {str(e)}") from e
 
 
 class SyncToAsyncGeneratorWrapper:
@@ -104,9 +90,7 @@ class SyncToAsyncGeneratorWrapper:
         try:
             is_not_primed = inspect.getgeneratorstate(self._gen) is inspect.GEN_CREATED
         except AttributeError as e:
-            raise TypeError(
-                "The provided generator is not a valid generator object"
-            ) from e
+            raise TypeError("The provided generator is not a valid generator object") from e
         if is_not_primed:
             try:
                 next(self._gen)
@@ -135,9 +119,7 @@ class SyncToAsyncGeneratorWrapper:
             self._closed = True
             raise StopAsyncIteration("Generator is closed") from e
         except Exception as e:
-            raise RuntimeError(
-                f"Error while getting next value from generator: {e}"
-            ) from e
+            raise RuntimeError(f"Error while getting next value from generator: {e}") from e
 
     async def aclose(self):
         if self._closed:

@@ -2,15 +2,15 @@ import asyncio
 import math
 import time
 
+import ezmsg.core as ez
 import numpy as np
 import scipy.interpolate
-import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray, LinearAxis
 from ezmsg.util.messages.util import replace
 
 from .base import (
-    BaseStatefulProcessor,
     BaseConsumerUnit,
+    BaseStatefulProcessor,
     processor_state,
 )
 from .util.axisarray_buffer import HybridAxisArrayBuffer, HybridAxisBuffer
@@ -29,7 +29,7 @@ class ResampleSettings(ez.Settings):
     fill_value: str = "extrapolate"
     """
     Value to use for out-of-bounds samples.
-    If 'extrapolate', the transformer will extrapolate. 
+    If 'extrapolate', the transformer will extrapolate.
     If 'last', the transformer will use the last sample.
     See scipy.interpolate.interp1d for more options.
     """
@@ -57,9 +57,9 @@ class ResampleState:
     """
     The buffer for the reference axis (usually a time axis). The interpolation function
     will be evaluated at the reference axis values.
-    When resample_rate is None, this buffer will be filled with the axis from incoming 
+    When resample_rate is None, this buffer will be filled with the axis from incoming
     _reference_ messages.
-    When resample_rate is not None (i.e., prescribed float resample_rate), this buffer 
+    When resample_rate is not None (i.e., prescribed float resample_rate), this buffer
     is filled with a synthetic axis that is generated from the incoming signal messages.
     """
 
@@ -67,7 +67,7 @@ class ResampleState:
     """
     The last value of the reference axis that was returned. This helps us to know
     what the _next_ returned value should be, and to avoid returning the same value.
-    TODO: We can eliminate this variable if we maintain "by convention" that the 
+    TODO: We can eliminate this variable if we maintain "by convention" that the
     reference axis always has 1 value at its start that we exclude from the resampling.
     """
 
@@ -79,9 +79,7 @@ class ResampleState:
     """
 
 
-class ResampleProcessor(
-    BaseStatefulProcessor[ResampleSettings, AxisArray, AxisArray, ResampleState]
-):
+class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisArray, ResampleState]):
     def _hash_message(self, message: AxisArray) -> int:
         ax_idx: int = message.get_axis_idx(self.settings.axis)
         sample_shape = message.data.shape[:ax_idx] + message.data.shape[ax_idx + 1 :]
@@ -135,17 +133,11 @@ class ResampleProcessor(
         ax_idx = message.get_axis_idx(self.settings.axis)
         if self.settings.resample_rate is not None and message.data.shape[ax_idx] > 0:
             in_ax = message.axes[self.settings.axis]
-            in_t_end = (
-                in_ax.data[-1]
-                if hasattr(in_ax, "data")
-                else in_ax.value(message.data.shape[ax_idx] - 1)
-            )
+            in_t_end = in_ax.data[-1] if hasattr(in_ax, "data") else in_ax.value(message.data.shape[ax_idx] - 1)
             out_gain = 1 / self.settings.resample_rate
             prev_t_end = self.state.last_ref_ax_val
             n_synth = math.ceil((in_t_end - prev_t_end) * self.settings.resample_rate)
-            synth_ref_axis = LinearAxis(
-                unit="s", gain=out_gain, offset=prev_t_end + out_gain
-            )
+            synth_ref_axis = LinearAxis(unit="s", gain=out_gain, offset=prev_t_end + out_gain)
             self.state.ref_axis_buffer.write(synth_ref_axis, n_samples=n_synth)
 
         self.state.last_write_time = time.time()
@@ -193,11 +185,7 @@ class ResampleProcessor(
         # Get source to train interpolation
         src_axarr = src.peek()
         src_axis = src_axarr.axes[self.settings.axis]
-        x = (
-            src_axis.data
-            if hasattr(src_axis, "data")
-            else src_axis.value(np.arange(src_axarr.data.shape[0]))
-        )
+        x = src_axis.data if hasattr(src_axis, "data") else src_axis.value(np.arange(src_axarr.data.shape[0]))
 
         # Only resample at reference values that have not been interpolated over previously.
         b_ref = ref_xvec > self.state.last_ref_ax_val
@@ -208,11 +196,7 @@ class ResampleProcessor(
 
         if len(ref_idx) == 0:
             # Nothing to interpolate over; return empty data
-            null_ref = (
-                replace(ref_ax, data=ref_ax.data[:0])
-                if hasattr(ref_ax, "data")
-                else ref_ax
-            )
+            null_ref = replace(ref_ax, data=ref_ax.data[:0]) if hasattr(ref_ax, "data") else ref_ax
             return replace(
                 src_axarr,
                 data=src_axarr.data[:0, ...],
@@ -222,17 +206,12 @@ class ResampleProcessor(
         xnew = ref_xvec[ref_idx]
 
         # Identify source data indices around ref tvec with some padding for better interpolation.
-        src_start_ix = max(
-            0, np.where(x > xnew[0])[0][0] - 2 if np.any(x > xnew[0]) else 0
-        )
+        src_start_ix = max(0, np.where(x > xnew[0])[0][0] - 2 if np.any(x > xnew[0]) else 0)
 
         x = x[src_start_ix:]
         y = src_axarr.data[src_start_ix:]
 
-        if (
-            isinstance(self.settings.fill_value, str)
-            and self.settings.fill_value == "last"
-        ):
+        if isinstance(self.settings.fill_value, str) and self.settings.fill_value == "last":
             fill_value = (y[0], y[-1])
         else:
             fill_value = self.settings.fill_value

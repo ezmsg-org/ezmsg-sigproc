@@ -1,14 +1,13 @@
 import numpy as np
 import pytest
 import scipy.signal
-from ezmsg.util.messages.axisarray import AxisArray
-
+from ezmsg.sigproc.filterbank import FilterbankMode, MinPhaseMode
 from ezmsg.sigproc.filterbankdesign import (
     FilterbankDesignSettings,
     FilterbankDesignTransformer,
 )
 from ezmsg.sigproc.kaiser import KaiserFilterSettings, kaiser_design_fun
-from ezmsg.sigproc.filterbank import FilterbankMode, MinPhaseMode
+from ezmsg.util.messages.axisarray import AxisArray
 
 
 @pytest.mark.parametrize("n_filters", [1, 3, 5])
@@ -44,9 +43,7 @@ def test_calculate_kernels_basic(n_filters):
         assert len(kernel) % 2 == 1
 
 
-@pytest.mark.parametrize(
-    "mode", [FilterbankMode.CONV, FilterbankMode.FFT, FilterbankMode.AUTO]
-)
+@pytest.mark.parametrize("mode", [FilterbankMode.CONV, FilterbankMode.FFT, FilterbankMode.AUTO])
 def test_filterbankdesign_transformer_modes(mode):
     """Test FilterbankDesignTransformer with different processing modes."""
     fs = 200.0
@@ -56,11 +53,7 @@ def test_filterbankdesign_transformer_modes(mode):
     # Create test signal
     t = np.arange(n_times) / fs
     # Signal with 10Hz, 40Hz, and 80Hz components
-    signal = (
-        np.sin(2 * np.pi * 10 * t)
-        + np.sin(2 * np.pi * 40 * t)
-        + np.sin(2 * np.pi * 80 * t)
-    )
+    signal = np.sin(2 * np.pi * 10 * t) + np.sin(2 * np.pi * 40 * t) + np.sin(2 * np.pi * 80 * t)
 
     # Create filterbank with 3 bandpass filters
     filters = [
@@ -136,11 +129,7 @@ def test_filterbankdesign_transformer_modes(mode):
     # FFT mode has delay/windowing that reduces output length, so check we have enough data
     if result.data.shape[1] > 200:  # Need at least 200 samples for meaningful FFT
         transient = 100
-        fft_in = np.abs(
-            np.fft.rfft(
-                signal[transient : transient + result.data.shape[1] - transient]
-            )
-        )
+        fft_in = np.abs(np.fft.rfft(signal[transient : transient + result.data.shape[1] - transient]))
         freqs = np.fft.rfftfreq(result.data.shape[1] - transient, 1 / fs)
 
         for filter_idx, target_freq in enumerate([10.0, 40.0, 80.0]):
@@ -174,9 +163,7 @@ def test_filterbankdesign_multidim(n_chans, time_ax):
             dims = ["ch", "time"]
         axes = {
             "time": AxisArray.TimeAxis(fs=fs, offset=0),
-            "ch": AxisArray.CoordinateAxis(
-                data=np.arange(n_chans).astype(str), dims=["ch"]
-            ),
+            "ch": AxisArray.CoordinateAxis(data=np.arange(n_chans).astype(str), dims=["ch"]),
         }
 
     data = np.random.randn(*data_shape)
@@ -192,9 +179,7 @@ def test_filterbankdesign_multidim(n_chans, time_ax):
         )
     ]
 
-    settings = FilterbankDesignSettings(
-        filters=filters, axis="time", mode=FilterbankMode.CONV
-    )
+    settings = FilterbankDesignSettings(filters=filters, axis="time", mode=FilterbankMode.CONV)
     transformer = FilterbankDesignTransformer(settings=settings)
 
     msg = AxisArray(data=data, dims=dims, axes=axes, key="test_multidim")
@@ -226,9 +211,7 @@ def test_filterbankdesign_empty_message():
         )
     ]
 
-    settings = FilterbankDesignSettings(
-        filters=filters, axis="time", mode=FilterbankMode.CONV
-    )
+    settings = FilterbankDesignSettings(filters=filters, axis="time", mode=FilterbankMode.CONV)
     transformer = FilterbankDesignTransformer(settings=settings)
 
     msg = AxisArray(
@@ -265,9 +248,7 @@ def test_filterbankdesign_normalized_frequencies():
         )
     ]
 
-    settings = FilterbankDesignSettings(
-        filters=filters, axis="time", mode=FilterbankMode.CONV
-    )
+    settings = FilterbankDesignSettings(filters=filters, axis="time", mode=FilterbankMode.CONV)
     transformer = FilterbankDesignTransformer(settings=settings)
 
     msg = AxisArray(
@@ -294,9 +275,7 @@ def test_filterbankdesign_normalized_frequencies():
     assert fft_out[idx_60hz] < 0.1 * fft_in[idx_60hz]
 
 
-@pytest.mark.parametrize(
-    "min_phase", [MinPhaseMode.NONE, MinPhaseMode.HILBERT, MinPhaseMode.HOMOMORPHIC]
-)
+@pytest.mark.parametrize("min_phase", [MinPhaseMode.NONE, MinPhaseMode.HILBERT, MinPhaseMode.HOMOMORPHIC])
 def test_filterbankdesign_min_phase(min_phase):
     """Test FilterbankDesignTransformer with different minimum phase modes."""
     fs = 200.0
@@ -317,9 +296,7 @@ def test_filterbankdesign_min_phase(min_phase):
         )
     ]
 
-    settings = FilterbankDesignSettings(
-        filters=filters, axis="time", min_phase=min_phase, mode=FilterbankMode.CONV
-    )
+    settings = FilterbankDesignSettings(filters=filters, axis="time", min_phase=min_phase, mode=FilterbankMode.CONV)
     transformer = FilterbankDesignTransformer(settings=settings)
 
     msg = AxisArray(
@@ -364,9 +341,7 @@ def test_filterbankdesign_update_settings():
         )
     ]
 
-    settings = FilterbankDesignSettings(
-        filters=filters_low, axis="time", mode=FilterbankMode.CONV
-    )
+    settings = FilterbankDesignSettings(filters=filters_low, axis="time", mode=FilterbankMode.CONV)
     transformer = FilterbankDesignTransformer(settings=settings)
 
     # Process first message
@@ -383,9 +358,7 @@ def test_filterbankdesign_update_settings():
         )
     ]
 
-    new_settings = FilterbankDesignSettings(
-        filters=filters_high, axis="time", mode=FilterbankMode.CONV
-    )
+    new_settings = FilterbankDesignSettings(filters=filters_high, axis="time", mode=FilterbankMode.CONV)
     transformer.update_settings(new_settings=new_settings)
 
     # Process second message with updated settings
@@ -422,11 +395,7 @@ def test_filterbankdesign_different_filter_types():
 
     # Create test signal with multiple frequency components
     t = np.arange(n_times) / fs
-    signal = (
-        np.sin(2 * np.pi * 10 * t)
-        + np.sin(2 * np.pi * 40 * t)
-        + np.sin(2 * np.pi * 80 * t)
-    )
+    signal = np.sin(2 * np.pi * 10 * t) + np.sin(2 * np.pi * 40 * t) + np.sin(2 * np.pi * 80 * t)
 
     # Create different types of filters
     filters = [
@@ -464,9 +433,7 @@ def test_filterbankdesign_different_filter_types():
         ),
     ]
 
-    settings = FilterbankDesignSettings(
-        filters=filters, axis="time", mode=FilterbankMode.CONV
-    )
+    settings = FilterbankDesignSettings(filters=filters, axis="time", mode=FilterbankMode.CONV)
     transformer = FilterbankDesignTransformer(settings=settings)
 
     msg = AxisArray(
@@ -509,9 +476,7 @@ def test_filterbankdesign_streaming():
         )
     ]
 
-    settings = FilterbankDesignSettings(
-        filters=filters, axis="time", mode=FilterbankMode.CONV
-    )
+    settings = FilterbankDesignSettings(filters=filters, axis="time", mode=FilterbankMode.CONV)
     transformer = FilterbankDesignTransformer(settings=settings)
 
     # Split into many small messages
@@ -548,13 +513,12 @@ def test_filterbankdesign_streaming():
 
     # Results should match (after initial transient)
     transient = len(b)
-    assert np.allclose(
-        result.data[0, transient:], expected[transient:], rtol=1e-5, atol=1e-8
-    )
+    assert np.allclose(result.data[0, transient:], expected[transient:], rtol=1e-5, atol=1e-8)
 
 
 def test_filterbankdesign_comparison_with_filterbank():
-    """Verify FilterbankDesignTransformer produces same results as FilterbankTransformer with manually designed kernels."""
+    """Verify FilterbankDesignTransformer produces same results as FilterbankTransformer with
+    manually designed kernels."""
     fs = 200.0
     dur = 2.0
     n_times = int(dur * fs)
@@ -594,7 +558,7 @@ def test_filterbankdesign_comparison_with_filterbank():
         kernels.append(coefs[0])
 
     # Use FilterbankTransformer directly
-    from ezmsg.sigproc.filterbank import FilterbankTransformer, FilterbankSettings
+    from ezmsg.sigproc.filterbank import FilterbankSettings, FilterbankTransformer
 
     filterbank_settings = FilterbankSettings(
         kernels=kernels,
@@ -624,9 +588,7 @@ def test_filterbankdesign_comparison_with_filterbank():
     result_design = design_transformer(msg)
 
     # Results should be identical
-    assert np.allclose(
-        result_filterbank.data, result_design.data, rtol=1e-10, atol=1e-12
-    )
+    assert np.allclose(result_filterbank.data, result_design.data, rtol=1e-10, atol=1e-12)
 
 
 def test_filterbankdesign_ripple_width_variations():
@@ -649,9 +611,7 @@ def test_filterbankdesign_ripple_width_variations():
             )
         ]
 
-        settings = FilterbankDesignSettings(
-            filters=filters, axis="time", mode=FilterbankMode.CONV
-        )
+        settings = FilterbankDesignSettings(filters=filters, axis="time", mode=FilterbankMode.CONV)
         transformer = FilterbankDesignTransformer(settings=settings)
 
         msg = AxisArray(
@@ -676,9 +636,7 @@ def test_filterbankdesign_ripple_width_variations():
             )
         ]
 
-        settings = FilterbankDesignSettings(
-            filters=filters, axis="time", mode=FilterbankMode.CONV
-        )
+        settings = FilterbankDesignSettings(filters=filters, axis="time", mode=FilterbankMode.CONV)
         transformer = FilterbankDesignTransformer(settings=settings)
 
         msg = AxisArray(

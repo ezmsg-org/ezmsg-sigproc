@@ -1,7 +1,6 @@
-import pytest
 import numpy as np
-
-from ezmsg.sigproc.diff import DiffTransformer, DiffSettings
+import pytest
+from ezmsg.sigproc.diff import DiffSettings, DiffTransformer
 from ezmsg.util.messages.axisarray import AxisArray
 
 

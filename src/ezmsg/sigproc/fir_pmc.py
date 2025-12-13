@@ -33,14 +33,14 @@ class ParksMcClellanFIRSettings(FilterBaseSettings):
     """
     Cuton frequency (Hz). If `cutoff` is not specified then this is the highpass corner. Otherwise,
     if this is lower than `cutoff` then this is the beginning of the bandpass
-    or if this is greater than `cutoff` then this is the end of the bandstop. 
+    or if this is greater than `cutoff` then this is the end of the bandstop.
     """
 
     cutoff: float | None = None
     """
     Cutoff frequency (Hz). If `cuton` is not specified then this is the lowpass corner. Otherwise,
     if this is greater than `cuton` then this is the end of the bandpass,
-    or if this is less than `cuton` then this is the beginning of the bandstop. 
+    or if this is less than `cuton` then this is the beginning of the bandstop.
     """
 
     transition: float = 10.0
@@ -187,9 +187,7 @@ def parks_mcclellan_design_fun(
     return (b, np.array([1.0]))
 
 
-class ParksMcClellanFIRTransformer(
-    FilterByDesignTransformer[ParksMcClellanFIRSettings, BACoeffs]
-):
+class ParksMcClellanFIRTransformer(FilterByDesignTransformer[ParksMcClellanFIRSettings, BACoeffs]):
     def get_design_function(self) -> typing.Callable[[float], BACoeffs | None]:
         if self.settings.coef_type != "ba":
             ez.logger.error("ParksMcClellanFIR only supports coef_type='ba'.")
@@ -206,9 +204,5 @@ class ParksMcClellanFIRTransformer(
         )
 
 
-class ParksMcClellanFIR(
-    BaseFilterByDesignTransformerUnit[
-        ParksMcClellanFIRSettings, ParksMcClellanFIRTransformer
-    ]
-):
+class ParksMcClellanFIR(BaseFilterByDesignTransformerUnit[ParksMcClellanFIRSettings, ParksMcClellanFIRTransformer]):
     SETTINGS = ParksMcClellanFIRSettings

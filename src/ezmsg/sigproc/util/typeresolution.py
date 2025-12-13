@@ -1,5 +1,6 @@
-from types import UnionType
 import typing
+from types import UnionType
+
 from typing_extensions import get_original_bases
 
 
@@ -67,10 +68,7 @@ def check_message_type_compatibility(type1: TypeLike, type2: TypeLike) -> bool:
 
     # Handle if type1 is Optional/Union type
     if typing.get_origin(type1) in {typing.Union, UnionType}:
-        return all(
-            check_message_type_compatibility(inner_type, type2)
-            for inner_type in typing.get_args(type1)
-        )
+        return all(check_message_type_compatibility(inner_type, type2) for inner_type in typing.get_args(type1))
 
     # Regular issubclass check. Handles cases like:
     # - type1 is a subclass of concrete type2

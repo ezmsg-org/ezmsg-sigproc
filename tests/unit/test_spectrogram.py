@@ -1,14 +1,13 @@
 import copy
 
 import numpy as np
-
-from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.sigproc.spectrum import WindowFunction, SpectralTransform, SpectralOutput
 from ezmsg.sigproc.spectrogram import SpectrogramTransformer
+from ezmsg.sigproc.spectrum import SpectralOutput, SpectralTransform, WindowFunction
+from ezmsg.util.messages.axisarray import AxisArray
 
 from tests.helpers.util import (
-    create_messages_with_periodic_signal,
     assert_messages_equal,
+    create_messages_with_periodic_signal,
 )
 
 
@@ -16,14 +15,10 @@ def _debug_plot(ax_arr: AxisArray, sin_params: list[dict[str, float]] = None):
     import matplotlib.pyplot as plt
 
     t_ix = ax_arr.get_axis_idx("time")
-    t_vec = ax_arr.axes["time"].offset + np.arange(
-        ax_arr.data.shape[t_ix] * ax_arr.axes["time"].gain
-    )
+    t_vec = ax_arr.axes["time"].offset + np.arange(ax_arr.data.shape[t_ix] * ax_arr.axes["time"].gain)
     t_vec -= ax_arr.axes["time"].gain / 2
     f_ix = ax_arr.get_axis_idx("freq")
-    f_vec = ax_arr.axes["freq"].offset + np.arange(
-        ax_arr.data.shape[f_ix] * ax_arr.axes["freq"].gain
-    )
+    f_vec = ax_arr.axes["freq"].offset + np.arange(ax_arr.data.shape[f_ix] * ax_arr.axes["freq"].gain)
     f_vec -= ax_arr.axes["freq"].gain / 2
     plt.imshow(
         ax_arr.data[..., 0].T,
@@ -80,9 +75,7 @@ def test_spectrogram():
 
     # Check that the windows span the expected times.
     expected_t_span = 2 * seg_dur
-    data_t_span = (results[-1].axes["time"].offset + win_step_dur) - results[0].axes[
-        "time"
-    ].offset
+    data_t_span = (results[-1].axes["time"].offset + win_step_dur) - results[0].axes["time"].offset
     assert np.abs(expected_t_span - data_t_span) < 1e-9
     all_deltas = np.diff([_.axes["time"].offset for _ in results])
     assert np.allclose(all_deltas, win_step_dur + np.zeros((len(results) - 1)))

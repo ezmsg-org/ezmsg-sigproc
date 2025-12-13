@@ -1,14 +1,14 @@
-from dataclasses import field
 import functools
+from dataclasses import field
 
+import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
 import scipy.signal as sps
-import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
 from ezmsg.util.messages.util import replace
 
-from .base import BaseStatefulTransformer, processor_state, BaseTransformerUnit
+from .base import BaseStatefulTransformer, BaseTransformerUnit, processor_state
 
 
 def _tau_from_alpha(alpha: float, dt: float) -> float:
@@ -29,9 +29,7 @@ def _alpha_from_tau(tau: float, dt: float) -> float:
     return 1 - np.exp(-dt / tau)
 
 
-def ewma_step(
-    sample: npt.NDArray, zi: npt.NDArray, alpha: float, beta: float | None = None
-):
+def ewma_step(sample: npt.NDArray, zi: npt.NDArray, alpha: float, beta: float | None = None):
     """
     Do an exponentially weighted moving average step.
 
@@ -97,9 +95,7 @@ class EWMA_Deprecated:
         if self.prev is None:
             self.prev = arr[:1]
 
-        out += self.prev * np.expand_dims(
-            self.weights[1 : n + 1], list(range(1, arr.ndim))
-        )
+        out += self.prev * np.expand_dims(self.weights[1 : n + 1], list(range(1, arr.ndim)))
 
         self.prev = out[-1:]
 
@@ -128,9 +124,7 @@ class EWMA_Deprecated:
         if self.prev is None:
             self.prev = arr[:1]
 
-        result += self.prev * np.expand_dims(
-            self.weights[1 : n + 1], list(range(1, arr.ndim))
-        )
+        result += self.prev * np.expand_dims(self.weights[1 : n + 1], list(range(1, arr.ndim)))
 
         # Store the result back into prev
         self.prev = result[-1]
@@ -155,25 +149,17 @@ class EWMAState:
     zi: npt.NDArray | None = None
 
 
-class EWMATransformer(
-    BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray, EWMAState]
-):
+class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray, EWMAState]):
     def _hash_message(self, message: AxisArray) -> int:
         axis = self.settings.axis or message.dims[0]
         axis_idx = message.get_axis_idx(axis)
-        sample_shape = (
-            message.data.shape[:axis_idx] + message.data.shape[axis_idx + 1 :]
-        )
+        sample_shape = message.data.shape[:axis_idx] + message.data.shape[axis_idx + 1 :]
         return hash((sample_shape, message.axes[axis].gain, message.key))
 
     def _reset_state(self, message: AxisArray) -> None:
         axis = self.settings.axis or message.dims[0]
-        self._state.alpha = _alpha_from_tau(
-            self.settings.time_constant, message.axes[axis].gain
-        )
-        sub_dat = slice_along_axis(
-            message.data, slice(None, 1, None), axis=message.get_axis_idx(axis)
-        )
+        self._state.alpha = _alpha_from_tau(self.settings.time_constant, message.axes[axis].gain)
+        sub_dat = slice_along_axis(message.data, slice(None, 1, None), axis=message.get_axis_idx(axis))
         self._state.zi = (1 - self._state.alpha) * sub_dat
 
     def _process(self, message: AxisArray) -> AxisArray:
@@ -191,7 +177,5 @@ class EWMATransformer(
         return replace(message, data=expected)
 
 
-class EWMAUnit(
-    BaseTransformerUnit[EWMASettings, AxisArray, AxisArray, EWMATransformer]
-):
+class EWMAUnit(BaseTransformerUnit[EWMASettings, AxisArray, AxisArray, EWMATransformer]):
     SETTINGS = EWMASettings

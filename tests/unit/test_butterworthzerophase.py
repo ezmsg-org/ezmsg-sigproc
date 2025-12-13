@@ -1,13 +1,12 @@
 import numpy as np
 import pytest
 import scipy.signal
-from ezmsg.util.messages.axisarray import AxisArray
-from frozendict import frozendict
-
 from ezmsg.sigproc.butterworthzerophase import (
     ButterworthZeroPhaseSettings,
     ButterworthZeroPhaseTransformer,
 )
+from ezmsg.util.messages.axisarray import AxisArray
+from frozendict import frozendict
 
 
 @pytest.mark.parametrize(
@@ -22,9 +21,7 @@ from ezmsg.sigproc.butterworthzerophase import (
 @pytest.mark.parametrize("order", [2, 4, 8])
 def test_butterworth_zp_filter_specs(cutoff, cuton, order):
     """Zero-phase settings inherit filter_specs logic from legacy Butterworth settings."""
-    btype, Wn = ButterworthZeroPhaseSettings(
-        order=order, cuton=cuton, cutoff=cutoff
-    ).filter_specs()
+    btype, Wn = ButterworthZeroPhaseSettings(order=order, cuton=cuton, cutoff=cutoff).filter_specs()
     if cuton is None:
         assert btype == "lowpass" and Wn == cutoff
     elif cutoff is None:
@@ -67,9 +64,7 @@ def test_butterworth_zero_phase_matches_scipy(
         dims.insert(time_ax, "time")
         other_axes = {
             "freq": AxisArray.LinearAxis(unit="Hz", offset=0.0, gain=1.0),
-            "ch": AxisArray.CoordinateAxis(
-                data=np.arange(n_chans).astype(str), dims=["ch"]
-            ),
+            "ch": AxisArray.CoordinateAxis(data=np.arange(n_chans).astype(str), dims=["ch"]),
         }
 
     x = np.linspace(0, 1, np.prod(dat_shape), dtype=float).reshape(*dat_shape)
@@ -82,23 +77,17 @@ def test_butterworth_zero_phase_matches_scipy(
     )
 
     # expected via SciPy
-    btype, Wn = ButterworthZeroPhaseSettings(
-        order=order, cuton=cuton, cutoff=cutoff
-    ).filter_specs()
+    btype, Wn = ButterworthZeroPhaseSettings(order=order, cuton=cuton, cutoff=cutoff).filter_specs()
     if order == 0:
         expected = x
     else:
         tmp = np.moveaxis(x, time_ax, -1)
         if coef_type == "ba":
             b, a = scipy.signal.butter(order, Wn, btype=btype, fs=fs, output="ba")
-            y = scipy.signal.filtfilt(
-                b, a, tmp, axis=-1, padtype=padtype, padlen=padlen
-            )
+            y = scipy.signal.filtfilt(b, a, tmp, axis=-1, padtype=padtype, padlen=padlen)
         else:
             sos = scipy.signal.butter(order, Wn, btype=btype, fs=fs, output="sos")
-            y = scipy.signal.sosfiltfilt(
-                sos, tmp, axis=-1, padtype=padtype, padlen=padlen
-            )
+            y = scipy.signal.sosfiltfilt(sos, tmp, axis=-1, padtype=padtype, padlen=padlen)
         expected = np.moveaxis(y, -1, time_ax)
 
     axis_name = "time" if time_ax != 0 else None
@@ -118,9 +107,7 @@ def test_butterworth_zero_phase_matches_scipy(
 
 
 def test_butterworth_zero_phase_empty_msg():
-    zp = ButterworthZeroPhaseTransformer(
-        axis="time", order=4, cuton=0.1, cutoff=10.0, coef_type="sos"
-    )
+    zp = ButterworthZeroPhaseTransformer(axis="time", order=4, cuton=0.1, cutoff=10.0, coef_type="sos")
     msg = AxisArray(
         data=np.zeros((0, 2)),
         dims=["time", "ch"],
@@ -149,9 +136,7 @@ def test_butterworth_zero_phase_update_settings_changes_output():
         key="test_butterworth_zero_phase_update",
     )
 
-    zp = ButterworthZeroPhaseTransformer(
-        axis="time", order=4, cutoff=30.0, coef_type="sos", padtype="odd", padlen=None
-    )
+    zp = ButterworthZeroPhaseTransformer(axis="time", order=4, cutoff=30.0, coef_type="sos", padtype="odd", padlen=None)
     y1 = zp(msg).data
     # LP at 30 should pass 10 Hz and attenuate 40 Hz
     p_in = np.abs(np.fft.rfft(x, axis=0)) ** 2

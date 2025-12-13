@@ -1,29 +1,26 @@
-import typing
 import math
+import typing
 from dataclasses import field
 
-import numpy as np
-
 import ezmsg.core as ez
+import numpy as np
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
-from .sampler import SampleTriggerMessage
-from .window import WindowTransformer, WindowSettings
-
 from .base import (
+    BaseProcessor,
+    BaseStatefulProcessor,
     BaseTransformer,
     BaseTransformerUnit,
     CompositeProcessor,
-    BaseProcessor,
-    BaseStatefulProcessor,
 )
-
-from .kaiser import KaiserFilterSettings
 from .filterbankdesign import (
     FilterbankDesignSettings,
     FilterbankDesignTransformer,
 )
+from .kaiser import KaiserFilterSettings
+from .sampler import SampleTriggerMessage
+from .window import WindowSettings, WindowTransformer
 
 
 class FBCCASettings(ez.Settings):
@@ -33,7 +30,7 @@ class FBCCASettings(ez.Settings):
 
     time_dim: str
     """
-    The time dim in the data array.  
+    The time dim in the data array.
     """
 
     ch_dim: str
@@ -49,40 +46,41 @@ class FBCCASettings(ez.Settings):
 
     harmonics: int = 5
     """
-    The number of additional harmonics beyond the fundamental to use for the 'design' matrix.  
-    5 (default): Evaluate 5 harmonics of the base frequency.  
-    Many periodic signals are not pure sinusoids, and inclusion of higher harmonics can help evaluate the 
+    The number of additional harmonics beyond the fundamental to use for the 'design' matrix.
+    5 (default): Evaluate 5 harmonics of the base frequency.
+    Many periodic signals are not pure sinusoids, and inclusion of higher harmonics can help evaluate the
     presence of signals with higher frequency harmonic content
     """
 
     freqs: typing.List[float] = field(default_factory=list)
     """
-    Frequencies (in hz) to evaluate the presence of within the input signal.  
-    [] (default): an empty list; frequencies will be found within the input SampleMessages.  
+    Frequencies (in hz) to evaluate the presence of within the input signal.
+    [] (default): an empty list; frequencies will be found within the input SampleMessages.
     AxisArrays have no good place to put this metadata, so specify frequencies here if only AxisArrays
     will be passed as input to the generator.  If the input has a `trigger` attr of type :obj:`SampleTriggerMessage`,
-    the processor looks for the `freqs` attribute within that trigger for a list of frequencies to evaluate.  
-    This field is present in the :obj:`SSVEPSampleTriggerMessage` defined in ezmsg.tasks.ssvep from the ezmsg-tasks package.
+    the processor looks for the `freqs` attribute within that trigger for a list of frequencies to evaluate.
+    This field is present in the :obj:`SSVEPSampleTriggerMessage` defined in ezmsg.tasks.ssvep from
+    the ezmsg-tasks package.
     NOTE: Avoid frequencies that have line-noise (60 Hz/50 Hz) as a harmonic.
     """
 
     softmax_beta: float = 1.0
     """
-    Beta parameter for softmax on output --> "probabilities".  
-    1.0 (default): Use the shifted softmax transformation to output 0-1 probabilities.  
+    Beta parameter for softmax on output --> "probabilities".
+    1.0 (default): Use the shifted softmax transformation to output 0-1 probabilities.
     If 0.0, the maximum singular value of the SVD for each design matrix is output
     """
 
     target_freq_dim: str = "target_freq"
     """
-    Name for dim to put target frequency outputs on.  
+    Name for dim to put target frequency outputs on.
     'target_freq' (default)
     """
 
     max_int_time: float = 0.0
     """
-    Maximum integration time (in seconds) to use for calculation.  
-    0 (default): Use all time provided for the calculation.  
+    Maximum integration time (in seconds) to use for calculation.
+    0 (default): Use all time provided for the calculation.
     Useful for artificially limiting the amount of data used for the CCA method to evaluate
     the necessary integration time for good decoding performance
     """
@@ -136,9 +134,7 @@ class FBCCATransformer(BaseTransformer[FBCCASettings, AxisArray, AxisArray]):
         if filterbank_dim_idx is not None:
             new_order.append(filterbank_dim_idx)
         new_order.extend([time_dim_idx, ch_dim_idx])
-        out_dims = [
-            message.dims[i] for i in new_order if message.dims[i] not in rm_dims
-        ]
+        out_dims = [message.dims[i] for i in new_order if message.dims[i] not in rm_dims]
         data_arr = message.data.transpose(new_order)
 
         # Add a singleton dim for filterbank dim if we don't have one
@@ -158,10 +154,7 @@ class FBCCATransformer(BaseTransformer[FBCCASettings, AxisArray, AxisArray]):
             axis_name: axis
             for axis_name, axis in message.axes.items()
             if axis_name not in rm_dims
-            and not (
-                isinstance(axis, AxisArray.CoordinateAxis)
-                and any(d in rm_dims for d in axis.dims)
-            )
+            and not (isinstance(axis, AxisArray.CoordinateAxis) and any(d in rm_dims for d in axis.dims))
         }
         out_axes[self.settings.target_freq_dim] = AxisArray.CoordinateAxis(
             np.array(test_freqs), [self.settings.target_freq_dim]
@@ -193,15 +186,9 @@ class FBCCATransformer(BaseTransformer[FBCCASettings, AxisArray, AxisArray]):
                 ]
             )
 
-            for test_idx, arr in enumerate(
-                data_arr
-            ):  # iterate over first dim; arr is (filterbank x time x ch)
-                for band_idx, band in enumerate(
-                    arr
-                ):  # iterate over second dim: arr is (time x ch)
-                    calc_output[test_idx, band_idx, test_freq_idx] = cca_rho_max(
-                        band[:max_samp, ...], Y
-                    )
+            for test_idx, arr in enumerate(data_arr):  # iterate over first dim; arr is (filterbank x time x ch)
+                for band_idx, band in enumerate(arr):  # iterate over second dim: arr is (time x ch)
+                    calc_output[test_idx, band_idx, test_freq_idx] = cca_rho_max(band[:max_samp, ...], Y)
 
         # Combine per-subband canonical correlations using a weighted sum
         # https://iopscience.iop.org/article/10.1088/1741-2560/12/4/046008
@@ -209,9 +196,7 @@ class FBCCATransformer(BaseTransformer[FBCCASettings, AxisArray, AxisArray]):
         calc_output = ((calc_output**2) * freq_weights[None, :, None]).sum(axis=1)
 
         if self.settings.softmax_beta != 0:
-            calc_output = calc_softmax(
-                calc_output, axis=-1, beta=self.settings.softmax_beta
-            )
+            calc_output = calc_softmax(calc_output, axis=-1, beta=self.settings.softmax_beta)
 
         output = replace(
             message,
@@ -244,9 +229,7 @@ class StreamingFBCCASettings(FBCCASettings):
     subbands: int = 12
 
 
-class StreamingFBCCATransformer(
-    CompositeProcessor[StreamingFBCCASettings, AxisArray, AxisArray]
-):
+class StreamingFBCCATransformer(CompositeProcessor[StreamingFBCCASettings, AxisArray, AxisArray]):
     @staticmethod
     def _initialize_processors(
         settings: StreamingFBCCASettings,
@@ -254,9 +237,7 @@ class StreamingFBCCATransformer(
         pipeline = {}
 
         if settings.filterbank_dim is not None:
-            cut_freqs = (
-                np.arange(settings.subbands + 1) * settings.filter_bw
-            ) + settings.filter_low
+            cut_freqs = (np.arange(settings.subbands + 1) * settings.filter_bw) + settings.filter_low
             filters = [
                 KaiserFilterSettings(
                     axis=settings.time_dim,
@@ -269,9 +250,7 @@ class StreamingFBCCATransformer(
             ]
 
             pipeline["filterbank"] = FilterbankDesignTransformer(
-                FilterbankDesignSettings(
-                    filters=filters, new_axis=settings.filterbank_dim
-                )
+                FilterbankDesignSettings(filters=filters, new_axis=settings.filterbank_dim)
             )
 
         pipeline["window"] = WindowTransformer(
@@ -289,11 +268,7 @@ class StreamingFBCCATransformer(
         return pipeline
 
 
-class StreamingFBCCA(
-    BaseTransformerUnit[
-        StreamingFBCCASettings, AxisArray, AxisArray, StreamingFBCCATransformer
-    ]
-):
+class StreamingFBCCA(BaseTransformerUnit[StreamingFBCCASettings, AxisArray, AxisArray, StreamingFBCCATransformer]):
     SETTINGS = StreamingFBCCASettings
 
 

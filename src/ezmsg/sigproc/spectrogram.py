@@ -1,20 +1,21 @@
 from typing import Generator
+
 import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.modify import modify_axis
 
-from .window import Anchor, WindowTransformer
-from .spectrum import (
-    WindowFunction,
-    SpectralTransform,
-    SpectralOutput,
-    SpectrumTransformer,
-)
 from .base import (
-    CompositeProcessor,
     BaseStatefulProcessor,
     BaseTransformerUnit,
+    CompositeProcessor,
 )
+from .spectrum import (
+    SpectralOutput,
+    SpectralTransform,
+    SpectrumTransformer,
+    WindowFunction,
+)
+from .window import Anchor, WindowTransformer
 
 
 class SpectrogramSettings(ez.Settings):
@@ -41,9 +42,7 @@ class SpectrogramSettings(ez.Settings):
     """The :obj:`SpectralOutput` format."""
 
 
-class SpectrogramTransformer(
-    CompositeProcessor[SpectrogramSettings, AxisArray, AxisArray]
-):
+class SpectrogramTransformer(CompositeProcessor[SpectrogramSettings, AxisArray, AxisArray]):
     @staticmethod
     def _initialize_processors(
         settings: SpectrogramSettings,
@@ -54,9 +53,7 @@ class SpectrogramTransformer(
                 newaxis="win",
                 window_dur=settings.window_dur,
                 window_shift=settings.window_shift,
-                zero_pad_until="shift"
-                if settings.window_shift is not None
-                else "input",
+                zero_pad_until="shift" if settings.window_shift is not None else "input",
                 anchor=settings.window_anchor,
             ),
             "spectrum": SpectrumTransformer(
@@ -69,11 +66,7 @@ class SpectrogramTransformer(
         }
 
 
-class Spectrogram(
-    BaseTransformerUnit[
-        SpectrogramSettings, AxisArray, AxisArray, SpectrogramTransformer
-    ]
-):
+class Spectrogram(BaseTransformerUnit[SpectrogramSettings, AxisArray, AxisArray, SpectrogramTransformer]):
     SETTINGS = SpectrogramSettings
 
 

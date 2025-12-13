@@ -2,9 +2,8 @@ import copy
 from pathlib import Path
 
 import numpy as np
-from ezmsg.util.messages.axisarray import AxisArray
-
 from ezmsg.sigproc.affinetransform import affine_transform, common_rereference
+from ezmsg.util.messages.axisarray import AxisArray
 
 from tests.helpers.util import assert_messages_equal
 
@@ -16,11 +15,7 @@ def test_affine_generator():
     msg_in = AxisArray(
         data=in_dat,
         dims=["time", "ch"],
-        axes={
-            "ch": AxisArray.CoordinateAxis(
-                data=np.array([f"ch_{i}" for i in range(n_chans)]), dims=["ch"]
-            )
-        },
+        axes={"ch": AxisArray.CoordinateAxis(data=np.array([f"ch_{i}" for i in range(n_chans)]), dims=["ch"])},
     )
 
     backup = [copy.deepcopy(msg_in)]
@@ -105,9 +100,7 @@ def test_common_rereference():
     for ch_ix in range(n_chans):
         idx = np.arange(n_chans)
         idx = np.hstack((idx[:ch_ix], idx[ch_ix + 1 :]))
-        expected_out.append(
-            msg_in.data[..., ch_ix] - np.mean(msg_in.data[..., idx], axis=1)
-        )
+        expected_out.append(msg_in.data[..., ch_ix] - np.mean(msg_in.data[..., idx], axis=1))
     expected_out = np.stack(expected_out).T
 
     gen = common_rereference(mode="mean", axis="ch", include_current=False)

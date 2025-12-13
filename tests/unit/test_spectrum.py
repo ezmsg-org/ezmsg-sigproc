@@ -1,19 +1,20 @@
 import copy
-import pytest
 
 import numpy as np
-import scipy.signal as sps
+import pytest
 import scipy.fft as sp_fft
-from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
+import scipy.signal as sps
 from ezmsg.sigproc.spectrum import (
-    spectrum,
-    SpectralTransform,
     SpectralOutput,
+    SpectralTransform,
     WindowFunction,
+    spectrum,
 )
+from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
+
 from tests.helpers.util import (
-    create_messages_with_periodic_signal,
     assert_messages_equal,
+    create_messages_with_periodic_signal,
 )
 
 
@@ -39,9 +40,7 @@ def _debug_plot_welch(raw: AxisArray, result: AxisArray, welch_db: bool = True):
     ax[1].plot(f_vec, ch0_spec, label="calculated", linewidth=2.0)
     ax[1].set_xlabel("Frequency (Hz)")
 
-    f, Pxx = sps.welch(
-        ch0_raw, fs=1 / raw.axes["time"].gain, window="hamming", nperseg=len(ch0_raw)
-    )
+    f, Pxx = sps.welch(ch0_raw, fs=1 / raw.axes["time"].gain, window="hamming", nperseg=len(ch0_raw))
     if welch_db:
         Pxx = 10 * np.log10(Pxx)
     ax[1].plot(f, Pxx, label="welch", color="tab:orange", linestyle="--")
@@ -53,15 +52,9 @@ def _debug_plot_welch(raw: AxisArray, result: AxisArray, welch_db: bool = True):
 
 
 @pytest.mark.parametrize("window", [WindowFunction.HANNING, WindowFunction.HAMMING])
-@pytest.mark.parametrize(
-    "transform", [SpectralTransform.REL_DB, SpectralTransform.REL_POWER]
-)
-@pytest.mark.parametrize(
-    "output", [SpectralOutput.POSITIVE, SpectralOutput.NEGATIVE, SpectralOutput.FULL]
-)
-def test_spectrum_gen_multiwin(
-    window: WindowFunction, transform: SpectralTransform, output: SpectralOutput
-):
+@pytest.mark.parametrize("transform", [SpectralTransform.REL_DB, SpectralTransform.REL_POWER])
+@pytest.mark.parametrize("output", [SpectralOutput.POSITIVE, SpectralOutput.NEGATIVE, SpectralOutput.FULL])
+def test_spectrum_gen_multiwin(window: WindowFunction, transform: SpectralTransform, output: SpectralOutput):
     win_dur = 1.0
     win_step_dur = 0.5
     fs = 1000.0
@@ -91,9 +84,7 @@ def test_spectrum_gen_multiwin(
     assert result.axes["freq"].gain == 1 / win_dur
     assert "freq" in result.dims
     fax_ix = result.get_axis_idx("freq")
-    f_len = (
-        win_len if output == SpectralOutput.FULL else (win_len // 2 + 1 - (win_len % 2))
-    )
+    f_len = win_len if output == SpectralOutput.FULL else (win_len // 2 + 1 - (win_len % 2))
     assert result.data.shape[fax_ix] == f_len
     f_vec = result.axes["freq"].value(np.arange(f_len))
     if output == SpectralOutput.NEGATIVE:
@@ -108,15 +99,9 @@ def test_spectrum_gen_multiwin(
 
 
 @pytest.mark.parametrize("window", [WindowFunction.HANNING, WindowFunction.HAMMING])
-@pytest.mark.parametrize(
-    "transform", [SpectralTransform.REL_DB, SpectralTransform.REL_POWER]
-)
-@pytest.mark.parametrize(
-    "output", [SpectralOutput.POSITIVE, SpectralOutput.NEGATIVE, SpectralOutput.FULL]
-)
-def test_spectrum_gen(
-    window: WindowFunction, transform: SpectralTransform, output: SpectralOutput
-):
+@pytest.mark.parametrize("transform", [SpectralTransform.REL_DB, SpectralTransform.REL_POWER])
+@pytest.mark.parametrize("output", [SpectralOutput.POSITIVE, SpectralOutput.NEGATIVE, SpectralOutput.FULL])
+def test_spectrum_gen(window: WindowFunction, transform: SpectralTransform, output: SpectralOutput):
     win_dur = 1.0
     win_step_dur = 0.5
     fs = 1000.0

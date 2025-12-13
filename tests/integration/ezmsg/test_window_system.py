@@ -1,22 +1,21 @@
-from dataclasses import field
 import os
+from dataclasses import field
 
-import pytest
+import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
-import ezmsg.core as ez
-from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.util.messagegate import MessageGate, MessageGateSettings
-from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
-from ezmsg.util.messagecodec import message_log
-from ezmsg.util.terminate import TerminateOnTimeout as TerminateTest
-from ezmsg.util.terminate import TerminateOnTimeoutSettings as TerminateTestSettings
-from ezmsg.util.debuglog import DebugLog
-
+import pytest
 from ezmsg.sigproc.synth import Counter, CounterSettings
 from ezmsg.sigproc.window import Window, WindowSettings
+from ezmsg.util.debuglog import DebugLog
+from ezmsg.util.messagecodec import message_log
+from ezmsg.util.messagegate import MessageGate, MessageGateSettings
+from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
+from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.terminate import TerminateOnTimeout as TerminateTest
+from ezmsg.util.terminate import TerminateOnTimeoutSettings as TerminateTestSettings
 
-from tests.helpers.util import get_test_fn, calculate_expected_windows
+from tests.helpers.util import calculate_expected_windows, get_test_fn
 
 
 class WindowSystemSettings(ez.Settings):
@@ -131,9 +130,7 @@ def test_window_system(
         # Window should always output the same shape data
         assert msg.shape[msg.get_axis_idx("ch")] == 1
         # Counter yields only one channel.
-        assert msg.shape[msg.get_axis_idx("time")] == (
-            msg_block_size if win_dur is None else win_len
-        )
+        assert msg.shape[msg.get_axis_idx("time")] == (msg_block_size if win_dur is None else win_len)
 
     ez.logger.info("Consistent metadata!")
 
@@ -143,11 +140,7 @@ def test_window_system(
         offsets = np.array([_.axes["time"].offset for _ in messages])
     else:
         offsets = np.hstack(
-            [
-                _.axes[newaxis].offset
-                + _.axes[newaxis].gain * np.arange(_.data.shape[0])
-                for _ in messages
-            ]
+            [_.axes[newaxis].offset + _.axes[newaxis].gain * np.arange(_.data.shape[0]) for _ in messages]
         )
 
     # If this test was performed in "one-to-one" mode, we should

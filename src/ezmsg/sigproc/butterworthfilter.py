@@ -5,11 +5,11 @@ import scipy.signal
 from scipy.signal import normalize
 
 from .filter import (
-    FilterBaseSettings,
     BACoeffs,
-    SOSCoeffs,
-    FilterByDesignTransformer,
     BaseFilterByDesignTransformerUnit,
+    FilterBaseSettings,
+    FilterByDesignTransformer,
+    SOSCoeffs,
 )
 
 
@@ -27,14 +27,14 @@ class ButterworthFilterSettings(FilterBaseSettings):
     """
     Cuton frequency (Hz). If `cutoff` is not specified then this is the highpass corner. Otherwise,
     if this is lower than `cutoff` then this is the beginning of the bandpass
-    or if this is greater than `cutoff` then this is the end of the bandstop. 
+    or if this is greater than `cutoff` then this is the end of the bandstop.
     """
 
     cutoff: float | None = None
     """
     Cutoff frequency (Hz). If `cuton` is not specified then this is the lowpass corner. Otherwise,
     if this is greater than `cuton` then this is the end of the bandpass,
-    or if this is less than `cuton` then this is the beginning of the bandstop. 
+    or if this is less than `cuton` then this is the beginning of the bandstop.
     """
 
     wn_hz: bool = True
@@ -96,9 +96,7 @@ def butter_design_fun(
     """
     coefs = None
     if order > 0:
-        btype, cutoffs = ButterworthFilterSettings(
-            order=order, cuton=cuton, cutoff=cutoff
-        ).filter_specs()
+        btype, cutoffs = ButterworthFilterSettings(order=order, cuton=cuton, cutoff=cutoff).filter_specs()
         coefs = scipy.signal.butter(
             order,
             Wn=cutoffs,
@@ -111,9 +109,7 @@ def butter_design_fun(
     return coefs
 
 
-class ButterworthFilterTransformer(
-    FilterByDesignTransformer[ButterworthFilterSettings, BACoeffs | SOSCoeffs]
-):
+class ButterworthFilterTransformer(FilterByDesignTransformer[ButterworthFilterSettings, BACoeffs | SOSCoeffs]):
     def get_design_function(
         self,
     ) -> typing.Callable[[float], BACoeffs | SOSCoeffs | None]:
@@ -127,11 +123,7 @@ class ButterworthFilterTransformer(
         )
 
 
-class ButterworthFilter(
-    BaseFilterByDesignTransformerUnit[
-        ButterworthFilterSettings, ButterworthFilterTransformer
-    ]
-):
+class ButterworthFilter(BaseFilterByDesignTransformerUnit[ButterworthFilterSettings, ButterworthFilterTransformer]):
     SETTINGS = ButterworthFilterSettings
 
 

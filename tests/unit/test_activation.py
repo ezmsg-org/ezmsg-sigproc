@@ -1,16 +1,12 @@
 import numpy as np
 import pytest
 import scipy.special
+from ezmsg.sigproc.activation import ACTIVATIONS, ActivationFunction, activation
+from ezmsg.util.messages.axisarray import AxisArray
 from frozendict import frozendict
 
-from ezmsg.util.messages.axisarray import AxisArray
 
-from ezmsg.sigproc.activation import activation, ActivationFunction, ACTIVATIONS
-
-
-@pytest.mark.parametrize(
-    "function", [_ for _ in ActivationFunction] + ActivationFunction.options()
-)
+@pytest.mark.parametrize("function", [_ for _ in ActivationFunction] + ActivationFunction.options())
 def test_activation(function: str):
     in_fs = 19.0
     sig = np.arange(24, dtype=float).reshape(4, 3, 2)
@@ -24,9 +20,7 @@ def test_activation(function: str):
             msg = AxisArray(
                 data=msg_sig,
                 dims=["time", "ch", "feat"],
-                axes=frozendict(
-                    {"time": AxisArray.TimeAxis(fs=in_fs, offset=msg_ix / in_fs)}
-                ),
+                axes=frozendict({"time": AxisArray.TimeAxis(fs=in_fs, offset=msg_ix / in_fs)}),
             )
             yield msg
 

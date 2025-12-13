@@ -1,22 +1,21 @@
-from abc import abstractmethod, ABC
-from dataclasses import dataclass, field
 import typing
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 
 import ezmsg.core as ez
-from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.util.messages.util import replace
 import numpy as np
 import numpy.typing as npt
 import scipy.signal
-
 from ezmsg.sigproc.base import (
-    processor_state,
+    BaseConsumerUnit,
     BaseStatefulTransformer,
     BaseTransformerUnit,
     SettingsType,
-    BaseConsumerUnit,
     TransformerType,
+    processor_state,
 )
+from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.util import replace
 
 
 @dataclass
@@ -68,9 +67,7 @@ class FilterState:
     zi: npt.NDArray | None = None
 
 
-class FilterTransformer(
-    BaseStatefulTransformer[FilterSettings, AxisArray, AxisArray, FilterState]
-):
+class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisArray, FilterState]):
     """
     Filter data using the provided coefficients.
     """
@@ -108,9 +105,7 @@ class FilterTransformer(
             zi = scipy.signal.sosfilt_zi(*coefs)
 
         zi_expand = (None,) * axis_idx + (slice(None),) + (None,) * n_tail
-        n_tile = (
-            message.data.shape[:axis_idx] + (1,) + message.data.shape[axis_idx + 1 :]
-        )
+        n_tile = message.data.shape[:axis_idx] + (1,) + message.data.shape[axis_idx + 1 :]
 
         if self.settings.coef_type == "sos":
             zi_expand = (slice(None),) + zi_expand
@@ -144,17 +139,11 @@ class FilterTransformer(
             reset_needed = False
 
             if self.settings.coef_type == "ba":
-                if isinstance(old_coefs, FilterCoefficients) and isinstance(
-                    coefs, FilterCoefficients
-                ):
-                    if len(old_coefs.b) != len(coefs.b) or len(old_coefs.a) != len(
-                        coefs.a
-                    ):
+                if isinstance(old_coefs, FilterCoefficients) and isinstance(coefs, FilterCoefficients):
+                    if len(old_coefs.b) != len(coefs.b) or len(old_coefs.a) != len(coefs.a):
                         reset_needed = True
                 elif isinstance(old_coefs, tuple) and isinstance(coefs, tuple):
-                    if len(old_coefs[0]) != len(coefs[0]) or len(old_coefs[1]) != len(
-                        coefs[1]
-                    ):
+                    if len(old_coefs[0]) != len(coefs[0]) or len(old_coefs[1]) != len(coefs[1]):
                         reset_needed = True
                 else:
                     reset_needed = True
@@ -173,36 +162,26 @@ class FilterTransformer(
             axis = message.dims[0] if self.settings.axis is None else self.settings.axis
             axis_idx = message.get_axis_idx(axis)
             _, coefs = _normalize_coefs(self.settings.coefs)
-            filt_func = {"ba": scipy.signal.lfilter, "sos": scipy.signal.sosfilt}[
-                self.settings.coef_type
-            ]
-            dat_out, self.state.zi = filt_func(
-                *coefs, message.data, axis=axis_idx, zi=self.state.zi
-            )
+            filt_func = {"ba": scipy.signal.lfilter, "sos": scipy.signal.sosfilt}[self.settings.coef_type]
+            dat_out, self.state.zi = filt_func(*coefs, message.data, axis=axis_idx, zi=self.state.zi)
         else:
             dat_out = message.data
 
         return replace(message, data=dat_out)
 
 
-class Filter(
-    BaseTransformerUnit[FilterSettings, AxisArray, AxisArray, FilterTransformer]
-):
+class Filter(BaseTransformerUnit[FilterSettings, AxisArray, AxisArray, FilterTransformer]):
     SETTINGS = FilterSettings
 
 
-def filtergen(
-    axis: str, coefs: npt.NDArray | tuple[npt.NDArray] | None, coef_type: str
-) -> FilterTransformer:
+def filtergen(axis: str, coefs: npt.NDArray | tuple[npt.NDArray] | None, coef_type: str) -> FilterTransformer:
     """
     Filter data using the provided coefficients.
 
     Returns:
         :obj:`FilterTransformer`.
     """
-    return FilterTransformer(
-        FilterSettings(axis=axis, coefs=coefs, coef_type=coef_type)
-    )
+    return FilterTransformer(FilterSettings(axis=axis, coefs=coefs, coef_type=coef_type))
 
 
 @processor_state
@@ -230,9 +209,7 @@ class FilterByDesignTransformer(
         """Return a function that takes sampling frequency and returns filter coefficients."""
         ...
 
-    def update_settings(
-        self, new_settings: typing.Optional[SettingsType] = None, **kwargs
-    ) -> None:
+    def update_settings(self, new_settings: typing.Optional[SettingsType] = None, **kwargs) -> None:
         """
         Update settings and mark that filter coefficients need to be recalculated.
 
@@ -271,9 +248,7 @@ class FilterByDesignTransformer(
                     b, a = coefs
                     coefs = scipy.signal.tf2sos(b, a)
 
-            self.state.filter.update_coefficients(
-                coefs, coef_type=self.settings.coef_type
-            )
+            self.state.filter.update_coefficients(coefs, coef_type=self.settings.coef_type)
             self.state.needs_redesign = False
 
         return super().__call__(message)
@@ -298,9 +273,7 @@ class FilterByDesignTransformer(
                 b, a = coefs
                 coefs = scipy.signal.tf2sos(b, a)
 
-        new_settings = FilterSettings(
-            axis=axis, coef_type=self.settings.coef_type, coefs=coefs
-        )
+        new_settings = FilterSettings(axis=axis, coef_type=self.settings.coef_type, coefs=coefs)
         self.state.filter = FilterTransformer(settings=new_settings)
 
     def _process(self, message: AxisArray) -> AxisArray:

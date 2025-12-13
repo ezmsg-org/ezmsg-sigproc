@@ -14,9 +14,7 @@ class AbsTransformer(BaseTransformer[None, AxisArray, AxisArray]):
         return replace(message, data=np.abs(message.data))
 
 
-class Abs(
-    BaseTransformerUnit[None, AxisArray, AxisArray, AbsTransformer]
-): ...  # SETTINGS = None
+class Abs(BaseTransformerUnit[None, AxisArray, AxisArray, AbsTransformer]): ...  # SETTINGS = None
 
 
 def abs() -> AbsTransformer:

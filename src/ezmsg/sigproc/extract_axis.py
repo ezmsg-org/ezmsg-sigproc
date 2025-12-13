@@ -1,7 +1,7 @@
-import numpy as np
 import ezmsg.core as ez
-from ezmsg.util.messages.axisarray import AxisArray, replace
+import numpy as np
 from ezmsg.sigproc.base import BaseTransformer, BaseTransformerUnit
+from ezmsg.util.messages.axisarray import AxisArray, replace
 
 
 class ExtractAxisSettings(ez.Settings):
@@ -35,7 +35,5 @@ class ExtractAxisData(BaseTransformer[ExtractAxisSettings, AxisArray, AxisArray]
             )
 
 
-class ExtractAxisDataUnit(
-    BaseTransformerUnit[ExtractAxisSettings, AxisArray, AxisArray, ExtractAxisData]
-):
+class ExtractAxisDataUnit(BaseTransformerUnit[ExtractAxisSettings, AxisArray, AxisArray, ExtractAxisData]):
     SETTINGS = ExtractAxisSettings

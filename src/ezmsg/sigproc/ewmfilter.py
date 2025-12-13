@@ -2,9 +2,9 @@ import asyncio
 import typing
 
 import ezmsg.core as ez
+import numpy as np
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
-import numpy as np
 
 from .window import Window, WindowSettings
 

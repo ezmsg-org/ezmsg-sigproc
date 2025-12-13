@@ -1,7 +1,7 @@
 import scipy.signal as sps
-from ezmsg.util.messages.axisarray import AxisArray, replace
-from ezmsg.sigproc.ewma import EWMATransformer, EWMASettings
 from ezmsg.sigproc.base import BaseTransformerUnit
+from ezmsg.sigproc.ewma import EWMASettings, EWMATransformer
+from ezmsg.util.messages.axisarray import AxisArray, replace
 
 
 class DetrendTransformer(EWMATransformer):
@@ -23,7 +23,5 @@ class DetrendTransformer(EWMATransformer):
         return replace(message, data=message.data - means)
 
 
-class DetrendUnit(
-    BaseTransformerUnit[EWMASettings, AxisArray, AxisArray, DetrendTransformer]
-):
+class DetrendUnit(BaseTransformerUnit[EWMASettings, AxisArray, AxisArray, DetrendTransformer]):
     SETTINGS = EWMASettings

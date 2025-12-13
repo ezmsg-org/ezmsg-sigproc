@@ -1,32 +1,28 @@
-from abc import ABC, abstractmethod
 import dataclasses
 import functools
 import inspect
 import math
 import pickle
 import traceback
-from types import GeneratorType
 import typing
+from abc import ABC, abstractmethod
+from types import GeneratorType
 
 import ezmsg.core as ez
-from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.util.generator import GenState
-
 from ezmsg.sigproc.util.typeresolution import (
     check_message_type_compatibility,
     resolve_typevar,
 )
+from ezmsg.util.generator import GenState
+from ezmsg.util.messages.axisarray import AxisArray
 
-from .util.profile import profile_subpub
-from .util.message import SampleMessage, is_sample_message
 from .util.asio import SyncToAsyncGeneratorWrapper, run_coroutine_sync
-
+from .util.message import SampleMessage, is_sample_message
+from .util.profile import profile_subpub
 
 # --- All processor state classes must inherit from this or at least have .hash ---
 # processor_settings = functools.partial(dataclasses.dataclass, frozen=True, init=True)
-processor_state = functools.partial(
-    dataclasses.dataclass, unsafe_hash=True, frozen=False, init=False
-)
+processor_state = functools.partial(dataclasses.dataclass, unsafe_hash=True, frozen=False, init=False)
 
 # --- Type variables for protocols and processors ---
 MessageInType = typing.TypeVar("MessageInType")
@@ -69,18 +65,14 @@ class Consumer(Processor[SettingsType, MessageInType, None], typing.Protocol):
     async def __acall__(self, message: MessageInType) -> None: ...
 
 
-class Transformer(
-    Processor[SettingsType, MessageInType, MessageOutType], typing.Protocol
-):
+class Transformer(Processor[SettingsType, MessageInType, MessageOutType], typing.Protocol):
     """Protocol for transformers that receive messages and return a result of the same class."""
 
     def __call__(self, message: MessageInType) -> MessageOutType: ...
     async def __acall__(self, message: MessageInType) -> MessageOutType: ...
 
 
-class StatefulProcessor(
-    typing.Protocol[SettingsType, MessageInType, MessageOutType, StateType]
-):
+class StatefulProcessor(typing.Protocol[SettingsType, MessageInType, MessageOutType, StateType]):
     """
     Base protocol for _stateful_ message processors.
     You probably will not implement this protocol directly.
@@ -121,9 +113,7 @@ class StatefulProducer(typing.Protocol[SettingsType, MessageOutType, StateType])
     ) -> tuple[typing.Any, typing.Any]: ...
 
 
-class StatefulConsumer(
-    StatefulProcessor[SettingsType, MessageInType, None, StateType], typing.Protocol
-):
+class StatefulConsumer(StatefulProcessor[SettingsType, MessageInType, None, StateType], typing.Protocol):
     """Protocol specifically for processors that consume messages without producing output."""
 
     def __call__(self, message: MessageInType) -> None: ...
@@ -193,9 +183,7 @@ def _get_base_processor_message_out_type(cls: type) -> type:
     return resolve_typevar(cls, MessageOutType)
 
 
-def _unify_settings(
-    obj: typing.Any, settings: object | None, *args, **kwargs
-) -> typing.Any:
+def _unify_settings(obj: typing.Any, settings: object | None, *args, **kwargs) -> typing.Any:
     """Helper function to unify settings for processor initialization."""
     settings_type = _get_base_processor_settings_type(obj.__class__)
 
@@ -206,9 +194,7 @@ def _unify_settings(
             settings = settings_type(*args, **kwargs)
         else:
             settings = settings_type()
-    assert isinstance(settings, settings_type), "Settings must be of type " + str(
-        settings_type
-    )
+    assert isinstance(settings, settings_type), "Settings must be of type " + str(settings_type)
     return settings
 
 
@@ -385,8 +371,7 @@ def _get_base_processor_state_type(cls: type) -> type:
         return resolve_typevar(cls, StateType)
     except TypeError as e:
         raise TypeError(
-            f"Could not resolve state type for {cls}. "
-            f"Ensure that the class is properly annotated with a StateType."
+            f"Could not resolve state type for {cls}. Ensure that the class is properly annotated with a StateType."
         ) from e
 
 
@@ -652,9 +637,7 @@ class BaseAdaptiveTransformer(
             return self.partial_fit(message)
         return super().__call__(message)
 
-    async def __acall__(
-        self, message: MessageInType | SampleMessage
-    ) -> MessageOutType | None:
+    async def __acall__(self, message: MessageInType | SampleMessage) -> MessageOutType | None:
         if is_sample_message(message):
             return await self.apartial_fit(message)
         return await super().__acall__(message)
@@ -712,26 +695,20 @@ def _has_stateful_op(proc: typing.Any) -> typing.TypeGuard[Stateful]:
     return hasattr(proc, "stateful_op")
 
 
-class CompositeStateful(
-    Stateful[dict[str, typing.Any]], ABC, typing.Generic[SettingsType, MessageOutType]
-):
+class CompositeStateful(Stateful[dict[str, typing.Any]], ABC, typing.Generic[SettingsType, MessageOutType]):
     """
     Mixin class for composite processor/producer chains. DO NOT use this class directly.
     Used to enforce statefulness of the composite processor/producer chain and provide
     initialization and validation methods.
     """
 
-    _procs: dict[
-        str, BaseProducer | BaseProcessor | GeneratorType | SyncToAsyncGeneratorWrapper
-    ]
+    _procs: dict[str, BaseProducer | BaseProcessor | GeneratorType | SyncToAsyncGeneratorWrapper]
     _processor_type: typing.Literal["producer", "processor"]
 
     def _validate_processor_chain(self) -> None:
         """Validate the composite chain types at runtime."""
         if not self._procs:
-            raise ValueError(
-                f"Composite {self._processor_type} requires at least one processor"
-            )
+            raise ValueError(f"Composite {self._processor_type} requires at least one processor")
 
         expected_in_type = _get_processor_message_type(self, "in")
         expected_out_type = _get_processor_message_type(self, "out")
@@ -741,14 +718,16 @@ class CompositeStateful(
         if not check_message_type_compatibility(expected_in_type, in_type):
             raise TypeError(
                 f"Input type mismatch: Composite {self._processor_type} expects {expected_in_type}, "
-                f"but its first processor (name: {procs[0][0]}, type: {procs[0][1].__class__.__name__}) accepts {in_type}"
+                f"but its first processor (name: {procs[0][0]}, type: {procs[0][1].__class__.__name__}) "
+                f"accepts {in_type}"
             )
 
         out_type = _get_processor_message_type(procs[-1][1], "out")
         if not check_message_type_compatibility(out_type, expected_out_type):
             raise TypeError(
                 f"Output type mismatch: Composite {self._processor_type} wants to return {expected_out_type}, "
-                f"but its last processor (name: {procs[-1][0]}, type: {procs[-1][1].__class__.__name__})  returns {out_type}"
+                f"but its last processor (name: {procs[-1][0]}, type: {procs[-1][1].__class__.__name__})  "
+                f"returns {out_type}"
             )
 
         # Check intermediate connections
@@ -759,16 +738,19 @@ class CompositeStateful(
             if current_out_type is None or current_out_type is type(None):
                 raise TypeError(
                     f"Processor {i} (name: {procs[i][0]}, type: {procs[i][1].__class__.__name__}) is a consumer "
-                    f"or returns None. Consumers can only be the last processor of a composite {self._processor_type} chain."
+                    "or returns None. Consumers can only be the last processor of a "
+                    f"composite {self._processor_type} chain."
                 )
             if next_in_type is None or next_in_type is type(None):
                 raise TypeError(
-                    f"Processor {i + 1} (name: {procs[i + 1][0]}, type: {procs[i + 1][1].__class__.__name__}) is a producer "
-                    f"or receives only None. Producers can only be the first processor of a composite producer chain."
+                    f"Processor {i + 1} (name: {procs[i + 1][0]}, type: {procs[i + 1][1].__class__.__name__}) "
+                    f"is a producer or receives only None. Producers can only be the first processor of a composite "
+                    f"producer chain."
                 )
             if not check_message_type_compatibility(current_out_type, next_in_type):
                 raise TypeError(
-                    f"Message type mismatch between processors {i} (name: {procs[i][0]}, type: {procs[i][1].__class__.__name__}) "
+                    f"Message type mismatch between processors {i} (name: {procs[i][0]}, "
+                    f"type: {procs[i][1].__class__.__name__}) "
                     f"and {i + 1} (name: {procs[i + 1][0]}, type: {procs[i + 1][1].__class__.__name__}): "
                     f"{procs[i][1].__class__.__name__} outputs {current_out_type}, "
                     f"but {procs[i + 1][1].__class__.__name__} expects {next_in_type}"
@@ -789,11 +771,7 @@ class CompositeStateful(
 
     @property
     def state(self) -> dict[str, typing.Any]:
-        return {
-            k: getattr(proc, "state")
-            for k, proc in self._procs.items()
-            if hasattr(proc, "state")
-        }
+        return {k: getattr(proc, "state") for k, proc in self._procs.items() if hasattr(proc, "state")}
 
     @state.setter
     def state(self, state: dict[str, typing.Any] | bytes | None) -> None:
@@ -885,9 +863,7 @@ class CompositeProcessor(
             result = proc.send(result)
         return result
 
-    async def _aprocess(
-        self, message: MessageInType | None = None
-    ) -> MessageOutType | None:
+    async def _aprocess(self, message: MessageInType | None = None) -> MessageOutType | None:
         """
         Process a message through the pipeline of processors using their async APIs.
         If the message is None, or no message is provided, then it will be assumed that the first processor
@@ -912,9 +888,7 @@ class CompositeProcessor(
         try:
             state_keys = list(state.keys())
         except AttributeError as e:
-            raise AttributeError(
-                "state provided to stateful_op must be a dict or None"
-            ) from e
+            raise AttributeError("state provided to stateful_op must be a dict or None") from e
         for key in state_keys:
             if key not in self._procs:
                 raise KeyError(
@@ -990,9 +964,7 @@ class CompositeProducer(
         try:
             state_keys = list(state.keys())
         except AttributeError as e:
-            raise AttributeError(
-                "state provided to stateful_op must be a dict or None"
-            ) from e
+            raise AttributeError("state provided to stateful_op must be a dict or None") from e
         for key in state_keys:
             if key not in self._procs:
                 raise KeyError(
@@ -1020,9 +992,7 @@ TransformerType = typing.TypeVar(
     "TransformerType",
     bound=BaseTransformer | BaseStatefulTransformer | CompositeProcessor,
 )
-AdaptiveTransformerType = typing.TypeVar(
-    "AdaptiveTransformerType", bound=BaseAdaptiveTransformer
-)
+AdaptiveTransformerType = typing.TypeVar("AdaptiveTransformerType", bound=BaseAdaptiveTransformer)
 
 
 def get_base_producer_type(cls: type) -> type:
@@ -1042,9 +1012,7 @@ def get_base_adaptive_transformer_type(cls: type) -> type:
 
 
 # --- Base classes for ezmsg Unit with specific processing capabilities ---
-class BaseProducerUnit(
-    ez.Unit, ABC, typing.Generic[SettingsType, MessageOutType, ProducerType]
-):
+class BaseProducerUnit(ez.Unit, ABC, typing.Generic[SettingsType, MessageOutType, ProducerType]):
     """
     Base class for producer units -- i.e. units that generate messages without consuming inputs.
     Implement a new Unit as follows:
@@ -1215,9 +1183,7 @@ class BaseTransformerUnit(
 class BaseAdaptiveTransformerUnit(
     BaseProcessorUnit[SettingsType],
     ABC,
-    typing.Generic[
-        SettingsType, MessageInType, MessageOutType, AdaptiveTransformerType
-    ],
+    typing.Generic[SettingsType, MessageInType, MessageOutType, AdaptiveTransformerType],
 ):
     INPUT_SAMPLE = ez.InputStream(SampleMessage)
     INPUT_SIGNAL = ez.InputStream(MessageInType)

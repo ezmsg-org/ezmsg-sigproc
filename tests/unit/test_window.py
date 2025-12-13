@@ -1,12 +1,12 @@
 import copy
 from dataclasses import replace
 
-import pytest
 import numpy as np
-from frozendict import frozendict
+import pytest
 import sparse
-from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.sigproc.window import WindowTransformer
+from ezmsg.util.messages.axisarray import AxisArray
+from frozendict import frozendict
 
 from tests.helpers.util import assert_messages_equal, calculate_expected_windows
 
@@ -24,9 +24,7 @@ def test_window_gen_nodur():
         axes=frozendict(
             {
                 "time": AxisArray.TimeAxis(fs=500.0, offset=0.0),
-                "ch": AxisArray.CoordinateAxis(
-                    data=np.arange(nchans).astype(str), unit="label", dims=["ch"]
-                ),
+                "ch": AxisArray.CoordinateAxis(data=np.arange(nchans).astype(str), unit="label", dims=["ch"]),
             }
         ),
         key="test_window_gen_nodur",
@@ -85,9 +83,7 @@ def test_window_generator(
         axes=frozendict(
             {
                 "time": AxisArray.TimeAxis(fs=fs, offset=0.0),
-                "ch": AxisArray.CoordinateAxis(
-                    data=np.arange(nchans).astype(str), unit="label", dims=["ch"]
-                ),
+                "ch": AxisArray.CoordinateAxis(data=np.arange(nchans).astype(str), unit="label", dims=["ch"]),
             }
         ),
         key="test_window_generator",
@@ -104,9 +100,7 @@ def test_window_generator(
                 data=msg_data,
                 axes={
                     **template_msg.axes,
-                    "time": replace(
-                        template_msg.axes["time"], offset=tvec[msg_ix * msg_block_size]
-                    ),
+                    "time": replace(template_msg.axes["time"], offset=tvec[msg_ix * msg_block_size]),
                 },
             )
         )
@@ -118,27 +112,18 @@ def test_window_generator(
     assert_messages_equal(in_msgs, backup)
 
     # Check each return value's metadata (offsets checked at end)
-    expected_dims = (
-        template_msg.dims[:time_ax] + [newaxis or "win"] + template_msg.dims[time_ax:]
-    )
+    expected_dims = template_msg.dims[:time_ax] + [newaxis or "win"] + template_msg.dims[time_ax:]
     for msg in out_msgs:
         assert msg.axes["time"].gain == 1 / fs
         assert msg.dims == expected_dims
         assert (newaxis or "win") in msg.axes
-        assert msg.axes[(newaxis or "win")].gain == (
-            0.0 if win_shift is None else shift_len / fs
-        )
+        assert msg.axes[(newaxis or "win")].gain == (0.0 if win_shift is None else shift_len / fs)
 
     # Post-process the results to yield a single data array and a single vector of offsets.
     win_ax = time_ax
     # time_ax = win_ax + 1
     result = np.concatenate([_.data for _ in out_msgs], win_ax)
-    offsets = np.hstack(
-        [
-            _.axes[newaxis or "win"].value(np.arange(_.data.shape[win_ax]))
-            for _ in out_msgs
-        ]
-    )
+    offsets = np.hstack([_.axes[newaxis or "win"].value(np.arange(_.data.shape[win_ax])) for _ in out_msgs])
 
     # Calculate the expected results for comparison.
     expected, tvec = calculate_expected_windows(
@@ -201,9 +186,7 @@ def test_sparse_window(
         axes=frozendict(
             {
                 "time": AxisArray.TimeAxis(fs=fs, offset=0.0),
-                "ch": AxisArray.CoordinateAxis(
-                    data=np.arange(nchans).astype(str), unit="label", dims=["ch"]
-                ),
+                "ch": AxisArray.CoordinateAxis(data=np.arange(nchans).astype(str), unit="label", dims=["ch"]),
             }
         ),
         key="test_sparse_window",
@@ -215,9 +198,7 @@ def test_sparse_window(
             data=s[msg_ix * msg_block_size : (msg_ix + 1) * msg_block_size],
             axes={
                 **template_msg.axes,
-                "time": replace(
-                    template_msg.axes["time"], offset=tvec[msg_ix * msg_block_size]
-                ),
+                "time": replace(template_msg.axes["time"], offset=tvec[msg_ix * msg_block_size]),
             },
         )
         for msg_ix in range(n_msgs)

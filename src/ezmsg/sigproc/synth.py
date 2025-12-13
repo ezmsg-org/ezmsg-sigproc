@@ -1,27 +1,27 @@
 import asyncio
-import traceback
-from dataclasses import dataclass, field
 import time
+import traceback
 import typing
+from dataclasses import dataclass, field
 
-import numpy as np
 import ezmsg.core as ez
+import numpy as np
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
-from .butterworthfilter import ButterworthFilterSettings, ButterworthFilterTransformer
 from .base import (
-    BaseStatefulProducer,
     BaseProducerUnit,
+    BaseStatefulProducer,
     BaseTransformer,
     BaseTransformerUnit,
     CompositeProducer,
-    ProducerType,
-    SettingsType,
     MessageInType,
     MessageOutType,
+    ProducerType,
+    SettingsType,
     processor_state,
 )
+from .butterworthfilter import ButterworthFilterSettings, ButterworthFilterTransformer
 from .util.asio import run_coroutine_sync
 from .util.profile import profile_subpub
 
@@ -122,17 +122,15 @@ class ClockProducer(BaseStatefulProducer[ClockSettings, ez.Flag, ClockState]):
         self._state.n_dispatch = 0
 
     def __call__(self) -> ez.Flag:
-        """Synchronous clock production. We override __call__ (which uses run_coroutine_sync) to avoid async overhead."""
+        """Synchronous clock production. We override __call__ (which uses run_coroutine_sync)
+        to avoid async overhead."""
         if self._hash == -1:
             self._reset_state()
             self._hash = 0
 
         if isinstance(self.settings.dispatch_rate, (int, float)):
             # Manual dispatch_rate. (else it is 'as fast as possible')
-            target_time = (
-                self.state.t_0
-                + (self.state.n_dispatch + 1) / self.settings.dispatch_rate
-            )
+            target_time = self.state.t_0 + (self.state.n_dispatch + 1) / self.settings.dispatch_rate
             now = time.time()
             if target_time > now:
                 time.sleep(target_time - now)
@@ -144,10 +142,7 @@ class ClockProducer(BaseStatefulProducer[ClockSettings, ez.Flag, ClockState]):
         """Generate next clock tick."""
         if isinstance(self.settings.dispatch_rate, (int, float)):
             # Manual dispatch_rate. (else it is 'as fast as possible')
-            target_time = (
-                self.state.t_0
-                + (self.state.n_dispatch + 1) / self.settings.dispatch_rate
-            )
+            target_time = self.state.t_0 + (self.state.n_dispatch + 1) / self.settings.dispatch_rate
             now = time.time()
             if target_time > now:
                 await asyncio.sleep(target_time - now)
@@ -260,9 +255,10 @@ class CounterProducer(BaseStatefulProducer[CounterSettings, AxisArray, CounterSt
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        if isinstance(
-            self.settings.dispatch_rate, str
-        ) and self.settings.dispatch_rate not in ["realtime", "ext_clock"]:
+        if isinstance(self.settings.dispatch_rate, str) and self.settings.dispatch_rate not in [
+            "realtime",
+            "ext_clock",
+        ]:
             raise ValueError(f"Unknown dispatch_rate: {self.settings.dispatch_rate}")
         self._reset_state()
         self._hash = 0
@@ -285,9 +281,7 @@ class CounterProducer(BaseStatefulProducer[CounterSettings, AxisArray, CounterSt
     async def _produce(self) -> AxisArray:
         """Generate next counter block."""
         # 1. Prepare counter data
-        block_samp = np.arange(
-            self.state.counter_start, self.state.counter_start + self.settings.n_time
-        )[:, np.newaxis]
+        block_samp = np.arange(self.state.counter_start, self.state.counter_start + self.settings.n_time)[:, np.newaxis]
         if self.settings.mod is not None:
             block_samp %= self.settings.mod
         block_samp = np.tile(block_samp, (1, self.settings.n_ch))
@@ -301,9 +295,7 @@ class CounterProducer(BaseStatefulProducer[CounterSettings, AxisArray, CounterSt
         elif self._state.timer_type == "manual":
             # manual dispatch rate
             n_disp_next = 1 + self.state.n_sent / self.settings.n_time
-            t_disp_next = (
-                self.state.clock_zero + n_disp_next / self.settings.dispatch_rate
-            )
+            t_disp_next = self.state.clock_zero + n_disp_next / self.settings.dispatch_rate
             await asyncio.sleep(t_disp_next - time.time())
             offset = self.state.n_sent / self.settings.fs
         elif self._state.timer_type == "ext_clock":
@@ -354,11 +346,7 @@ def acounter(
     Returns:
         An asynchronous generator.
     """
-    return CounterProducer(
-        CounterSettings(
-            n_time=n_time, fs=fs, n_ch=n_ch, dispatch_rate=dispatch_rate, mod=mod
-        )
-    )
+    return CounterProducer(CounterSettings(n_time=n_time, fs=fs, n_ch=n_ch, dispatch_rate=dispatch_rate, mod=mod))
 
 
 class Counter(
@@ -450,9 +438,7 @@ class SinTransformer(BaseTransformer[SinGeneratorSettings, AxisArray, AxisArray]
         return replace(message, data=out_data)
 
 
-class SinGenerator(
-    BaseTransformerUnit[SinGeneratorSettings, AxisArray, AxisArray, SinTransformer]
-):
+class SinGenerator(BaseTransformerUnit[SinGeneratorSettings, AxisArray, AxisArray, SinTransformer]):
     """Unit for generating sinusoidal waveforms."""
 
     SETTINGS = SinGeneratorSettings
@@ -471,9 +457,7 @@ def sin(
         A primed generator that expects .send(axis_array) of sample counts
         and yields an AxisArray of sinusoids.
     """
-    return SinTransformer(
-        SinGeneratorSettings(axis=axis, freq=freq, amp=amp, phase=phase)
-    )
+    return SinTransformer(SinGeneratorSettings(axis=axis, freq=freq, amp=amp, phase=phase))
 
 
 class RandomGeneratorSettings(ez.Settings):
@@ -489,15 +473,11 @@ class RandomTransformer(BaseTransformer[RandomGeneratorSettings, AxisArray, Axis
     Replaces input data with random data and returns the result.
     """
 
-    def __init__(
-        self, *args, settings: RandomGeneratorSettings | None = None, **kwargs
-    ):
+    def __init__(self, *args, settings: RandomGeneratorSettings | None = None, **kwargs):
         super().__init__(*args, settings=settings, **kwargs)
 
     def _process(self, message: AxisArray) -> AxisArray:
-        random_data = np.random.normal(
-            size=message.shape, loc=self.settings.loc, scale=self.settings.scale
-        )
+        random_data = np.random.normal(size=message.shape, loc=self.settings.loc, scale=self.settings.scale)
         return replace(message, data=random_data)
 
 
@@ -563,9 +543,7 @@ class OscillatorProducer(CompositeProducer[OscillatorSettings, AxisArray]):
                     mod=mod,
                 )
             ),
-            "sin": SinTransformer(
-                SinGeneratorSettings(freq=freq, amp=settings.amp, phase=settings.phase)
-            ),
+            "sin": SinTransformer(SinGeneratorSettings(freq=freq, amp=settings.amp, phase=settings.phase)),
         }
 
 
@@ -619,11 +597,7 @@ class BaseCounterFirstProducerUnit(
             ez.logger.info(traceback.format_exc())
 
 
-class Oscillator(
-    BaseCounterFirstProducerUnit[
-        OscillatorSettings, AxisArray, AxisArray, OscillatorProducer
-    ]
-):
+class Oscillator(BaseCounterFirstProducerUnit[OscillatorSettings, AxisArray, AxisArray, OscillatorProducer]):
     """Generates sinusoidal waveforms using a counter and sine transformer."""
 
     SETTINGS = OscillatorSettings
@@ -670,11 +644,7 @@ class WhiteNoiseProducer(CompositeProducer[NoiseSettings, AxisArray]):
         }
 
 
-class WhiteNoise(
-    BaseCounterFirstProducerUnit[
-        NoiseSettings, AxisArray, AxisArray, WhiteNoiseProducer
-    ]
-):
+class WhiteNoise(BaseCounterFirstProducerUnit[NoiseSettings, AxisArray, AxisArray, WhiteNoiseProducer]):
     """chains a :obj:`Counter` and :obj:`RandomGenerator`."""
 
     SETTINGS = NoiseSettings
@@ -700,9 +670,7 @@ class PinkNoiseProducer(CompositeProducer[PinkNoiseSettings, AxisArray]):
         }
 
 
-class PinkNoise(
-    BaseCounterFirstProducerUnit[NoiseSettings, AxisArray, AxisArray, PinkNoiseProducer]
-):
+class PinkNoise(BaseCounterFirstProducerUnit[NoiseSettings, AxisArray, AxisArray, PinkNoiseProducer]):
     """chains :obj:`WhiteNoise` and :obj:`ButterworthFilter`."""
 
     SETTINGS = NoiseSettings
@@ -740,9 +708,7 @@ class EEGSynth(ez.Collection):
     ADD = Add()
 
     def configure(self) -> None:
-        self.CLOCK.apply_settings(
-            ClockSettings(dispatch_rate=self.SETTINGS.fs / self.SETTINGS.n_time)
-        )
+        self.CLOCK.apply_settings(ClockSettings(dispatch_rate=self.SETTINGS.fs / self.SETTINGS.n_time))
 
         self.OSC.apply_settings(
             OscillatorSettings(

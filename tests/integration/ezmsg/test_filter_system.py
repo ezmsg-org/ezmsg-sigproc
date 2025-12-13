@@ -1,15 +1,14 @@
-import pytest
-import numpy as np
-import scipy.signal
 import ezmsg.core as ez
-from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.util.messagecodec import message_log
-from ezmsg.util.messagelogger import MessageLogger
-from ezmsg.util.terminate import TerminateOnTotal
-
+import numpy as np
+import pytest
+import scipy.signal
 from ezmsg.sigproc.butterworthfilter import ButterworthFilter
 from ezmsg.sigproc.cheby import ChebyshevFilter
 from ezmsg.sigproc.synth import EEGSynth
+from ezmsg.util.messagecodec import message_log
+from ezmsg.util.messagelogger import MessageLogger
+from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.terminate import TerminateOnTotal
 
 from tests.helpers.util import get_test_fn
 
@@ -19,9 +18,7 @@ from tests.helpers.util import get_test_fn
 @pytest.mark.parametrize("order", [4, 0])
 def test_filter_system(filter_type: str, coef_type: str, order: int):
     test_filename = get_test_fn()
-    test_filename_raw = test_filename.parent / (
-        test_filename.stem + "raw" + test_filename.suffix
-    )
+    test_filename_raw = test_filename.parent / (test_filename.stem + "raw" + test_filename.suffix)
 
     cuton = 5.0
     cutoff = 20.0
@@ -33,9 +30,7 @@ def test_filter_system(filter_type: str, coef_type: str, order: int):
     n_total = int(fs / n_time)  # 1 second of messages
 
     if filter_type == "butter":
-        filter_comp = ButterworthFilter(
-            order=order, cuton=cuton, cutoff=cutoff, axis="time", coef_type=coef_type
-        )
+        filter_comp = ButterworthFilter(order=order, cuton=cuton, cutoff=cutoff, axis="time", coef_type=coef_type)
     else:
         filter_comp = ChebyshevFilter(
             order=order,
@@ -64,9 +59,7 @@ def test_filter_system(filter_type: str, coef_type: str, order: int):
 
     messages: list[AxisArray] = [_ for _ in message_log(test_filename)]
     assert len(messages) >= n_total
-    inputs = AxisArray.concatenate(
-        *[_ for _ in message_log(test_filename_raw)], dim="time"
-    )
+    inputs = AxisArray.concatenate(*[_ for _ in message_log(test_filename_raw)], dim="time")
     outputs = AxisArray.concatenate(*messages, dim="time")
 
     if order == 0:
@@ -106,12 +99,8 @@ def test_filter_system(filter_type: str, coef_type: str, order: int):
         system = scipy.signal.dlti(*coefs)
         coefs = (system.num, system.den)
         zi = scipy.signal.lfilter_zi(*coefs)[:, None]
-        expected, _ = scipy.signal.lfilter(
-            coefs[0], coefs[1], inputs.data, axis=inputs.get_axis_idx("time"), zi=zi
-        )
+        expected, _ = scipy.signal.lfilter(coefs[0], coefs[1], inputs.data, axis=inputs.get_axis_idx("time"), zi=zi)
     else:  # coef_type == "sos":
         zi = scipy.signal.sosfilt_zi(coefs)[:, :, None] + np.zeros((1, 1, n_ch))
-        expected, _ = scipy.signal.sosfilt(
-            coefs, inputs.data, axis=inputs.get_axis_idx("time"), zi=zi
-        )
+        expected, _ = scipy.signal.sosfilt(coefs, inputs.data, axis=inputs.get_axis_idx("time"), zi=zi)
     assert np.allclose(outputs.data, expected)

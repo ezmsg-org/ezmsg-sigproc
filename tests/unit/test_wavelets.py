@@ -1,17 +1,14 @@
 import numpy as np
-from ezmsg.util.messages.axisarray import AxisArray
 import pywt
-
-from ezmsg.sigproc.wavelets import cwt, MinPhaseMode
+from ezmsg.sigproc.wavelets import MinPhaseMode, cwt
+from ezmsg.util.messages.axisarray import AxisArray
 
 from tests.helpers.util import gaussian, make_chirp
 
 
 def scratch():
     scales = np.geomspace(4, 256, num=35)
-    wavelets = [
-        f"cmor{x:.1f}-{y:.1f}" for x in [0.5, 1.5, 2.5] for y in [0.5, 1.0, 1.5]
-    ]
+    wavelets = [f"cmor{x:.1f}-{y:.1f}" for x in [0.5, 1.5, 2.5] for y in [0.5, 1.0, 1.5]]
     wavelet = wavelets[1]
 
     # Generate test signal
@@ -81,9 +78,7 @@ def test_cwt():
                 data=chirp[:, idx : idx + step_size],
                 dims=["ch", "time"],
                 axes={
-                    "ch": AxisArray.CoordinateAxis(
-                        data=np.array([f"Ch{_}" for _ in range(2)]), dims=["ch"]
-                    ),
+                    "ch": AxisArray.CoordinateAxis(data=np.array([f"Ch{_}" for _ in range(2)]), dims=["ch"]),
                     "time": AxisArray.TimeAxis(offset=tvec[idx], fs=fs),
                 },
                 key="test_cwt",

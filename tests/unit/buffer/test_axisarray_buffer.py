@@ -1,8 +1,7 @@
-import pytest
 import numpy as np
-from ezmsg.util.messages.axisarray import AxisArray, LinearAxis, CoordinateAxis
-
-from ezmsg.sigproc.util.axisarray_buffer import HybridAxisBuffer, HybridAxisArrayBuffer
+import pytest
+from ezmsg.sigproc.util.axisarray_buffer import HybridAxisArrayBuffer, HybridAxisBuffer
+from ezmsg.util.messages.axisarray import AxisArray, CoordinateAxis, LinearAxis
 
 
 class TestHybridAxisBuffer:
@@ -200,9 +199,7 @@ class TestHybridAxisBuffer:
         buf.seek(50)  # Clear buffer
         sim_values = sim_values[50:]
         assert buf.searchsorted(test_val) == np.searchsorted(sim_values, test_val)
-        np.testing.assert_array_equal(
-            buf.searchsorted(values), np.searchsorted(sim_values, values)
-        )
+        np.testing.assert_array_equal(buf.searchsorted(values), np.searchsorted(sim_values, values))
 
     def test_searchsorted_coordinate(self):
         """Test searchsorted with CoordinateAxis"""
@@ -431,9 +428,7 @@ def test_add_and_get_coordinate(coordinate_axis_message):
     expected_data = np.concatenate([msg1.data, msg2.data[:5]])
     np.testing.assert_array_equal(retrieved_msg.data, expected_data)
 
-    expected_times = np.concatenate(
-        [msg1.axes["time"].data, msg2.axes["time"].data[:5]]
-    )
+    expected_times = np.concatenate([msg1.axes["time"].data, msg2.axes["time"].data[:5]])
     np.testing.assert_allclose(retrieved_msg.axes["time"].data, expected_times)
 
     assert buf.available() == 5
@@ -485,9 +480,7 @@ def test_peek_coordinate(coordinate_axis_message):
     assert peeked_msg.dims == msg1.dims
     expected_data = np.concatenate([msg1.data, msg2.data[:5]])
     np.testing.assert_array_equal(peeked_msg.data, expected_data)
-    expected_times = np.concatenate(
-        [msg1.axes["time"].data, msg2.axes["time"].data[:5]]
-    )
+    expected_times = np.concatenate([msg1.axes["time"].data, msg2.axes["time"].data[:5]])
     np.testing.assert_allclose(peeked_msg.axes["time"].data, expected_times)
 
     # Assert that state has not changed

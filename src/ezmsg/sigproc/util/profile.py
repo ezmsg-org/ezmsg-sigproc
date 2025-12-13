@@ -1,12 +1,11 @@
 import functools
 import logging
 import os
-from pathlib import Path
 import time
 import typing
+from pathlib import Path
 
 import ezmsg.core as ez
-
 
 HEADER = "Time,Source,Topic,SampleTime,PerfCounter,Elapsed"
 
@@ -65,9 +64,7 @@ def _setup_logger(append: bool = False) -> logging.Logger:
         _logger.debug(HEADER)
 
     # Set the log message format
-    formatter = logging.Formatter(
-        "%(asctime)s,%(message)s", datefmt="%Y-%m-%dT%H:%M:%S%z"
-    )
+    formatter = logging.Formatter("%(asctime)s,%(message)s", datefmt="%Y-%m-%dT%H:%M:%S%z")
     fh.setFormatter(formatter)
 
     return _logger

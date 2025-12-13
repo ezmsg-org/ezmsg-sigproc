@@ -1,12 +1,11 @@
 import numpy as np
 import pytest
-from ezmsg.util.messages.axisarray import AxisArray
-
 from ezmsg.sigproc.gaussiansmoothing import (
-    gaussian_smoothing_filter_design,
-    GaussianSmoothingSettings,
     GaussianSmoothingFilterTransformer,
+    GaussianSmoothingSettings,
+    gaussian_smoothing_filter_design,
 )
+from ezmsg.util.messages.axisarray import AxisArray
 
 
 @pytest.mark.parametrize(
@@ -81,9 +80,7 @@ def test_gaussian_smoothing_filter_design_parameters(sigma, width, kernel_size):
     assert b[len(b) // 2] == np.max(b)  # center of kernel is peak
     assert len(a) == 1 and a[0] == 1.0  # default for gaussian window
 
-    expected_kernel_size = (
-        int(2 * width * sigma + 1) if kernel_size is None else kernel_size
-    )
+    expected_kernel_size = int(2 * width * sigma + 1) if kernel_size is None else kernel_size
     assert len(b) == expected_kernel_size
 
 
@@ -125,18 +122,14 @@ def test_gaussian_smoothing_filter_process(data_shape):
         dims = ["time", "ch"]
         axes = {
             "time": AxisArray.TimeAxis(fs=100.0, offset=0),
-            "ch": AxisArray.CoordinateAxis(
-                data=np.arange(data_shape[1]).astype(str), dims=["ch"]
-            ),
+            "ch": AxisArray.CoordinateAxis(data=np.arange(data_shape[1]).astype(str), dims=["ch"]),
         }
     else:
         dims = ["freq", "time", "ch"]
         axes = {
             "freq": AxisArray.LinearAxis(unit="Hz", offset=0.0, gain=1.0),
             "time": AxisArray.TimeAxis(fs=100.0, offset=0),
-            "ch": AxisArray.CoordinateAxis(
-                data=np.arange(data_shape[2]).astype(str), dims=["ch"]
-            ),
+            "ch": AxisArray.CoordinateAxis(data=np.arange(data_shape[2]).astype(str), dims=["ch"]),
         }
 
     msg = AxisArray(data=data, dims=dims, axes=axes, key="test_gaussian_smoothing")
@@ -200,9 +193,7 @@ def test_gaussian_smoothing_update_settings():
         dims=["time", "ch"],
         axes={
             "time": AxisArray.TimeAxis(fs=fs, offset=0),
-            "ch": AxisArray.CoordinateAxis(
-                data=np.arange(n_chans).astype(str), dims=["ch"]
-            ),
+            "ch": AxisArray.CoordinateAxis(data=np.arange(n_chans).astype(str), dims=["ch"]),
         },
         key="test_gaussian_smoothing_update_settings",
     )

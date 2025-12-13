@@ -9,9 +9,7 @@ class InvertTransformer(BaseTransformer[None, AxisArray, AxisArray]):
         return replace(message, data=1 / message.data)
 
 
-class Invert(
-    BaseTransformerUnit[None, AxisArray, AxisArray, InvertTransformer]
-): ...  # SETTINGS = None
+class Invert(BaseTransformerUnit[None, AxisArray, AxisArray, InvertTransformer]): ...  # SETTINGS = None
 
 
 def invert() -> InvertTransformer:

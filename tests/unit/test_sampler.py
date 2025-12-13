@@ -1,11 +1,10 @@
 import copy
 
 import numpy as np
-from frozendict import frozendict
-
-from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.sigproc.sampler import SamplerSettings, SamplerTransformer
 from ezmsg.sigproc.util.message import SampleTriggerMessage
-from ezmsg.sigproc.sampler import SamplerTransformer, SamplerSettings
+from ezmsg.util.messages.axisarray import AxisArray
+from frozendict import frozendict
 
 from tests.helpers.util import assert_messages_equal
 
@@ -30,9 +29,7 @@ def test_sampler():
             axes=frozendict(
                 {
                     "time": AxisArray.TimeAxis(fs=fs, offset=offsets[ix * n_per_chunk]),
-                    "ch": AxisArray.CoordinateAxis(
-                        data=np.arange(n_chans).astype(str), dims=["ch"]
-                    ),
+                    "ch": AxisArray.CoordinateAxis(data=np.arange(n_chans).astype(str), dims=["ch"]),
                 }
             ),
             key="test_sampler_gen",
@@ -46,17 +43,13 @@ def test_sampler():
     trig_ts = np.linspace(0.1, data_dur - 1.0, n_trigs) + np.random.randn(n_trigs) / fs
     period = (-0.01, 0.74)
     trigger_msgs = [
-        SampleTriggerMessage(
-            timestamp=_ts, period=period, value=["Start", "Stop"][_ix % 2]
-        )
+        SampleTriggerMessage(timestamp=_ts, period=period, value=["Start", "Stop"][_ix % 2])
         for _ix, _ts in enumerate(trig_ts)
     ]
     backup_trigger = [copy.deepcopy(_) for _ in trigger_msgs]
 
     # Mix the messages and sort by time
-    msg_ts = [_.axes["time"].offset for _ in signal_msgs] + [
-        _.timestamp for _ in trigger_msgs
-    ]
+    msg_ts = [_.axes["time"].offset for _ in signal_msgs] + [_.timestamp for _ in trigger_msgs]
     mix_msgs = signal_msgs + trigger_msgs
     mix_msgs = [mix_msgs[_] for _ in np.argsort(msg_ts)]
 
@@ -64,9 +57,7 @@ def test_sampler():
     period_dur = period[1] - period[0]
     buffer_dur = 2 * max(period_dur, period[1])
     proc = SamplerTransformer(
-        settings=SamplerSettings(
-            buffer_dur, axis="time", period=None, value=None, estimate_alignment=True
-        )
+        settings=SamplerSettings(buffer_dur, axis="time", period=None, value=None, estimate_alignment=True)
     )
 
     # Run the messages through the generator and collect samples.
@@ -79,16 +70,9 @@ def test_sampler():
 
     assert len(samples) == n_trigs
     # Check sample data size. Note: sampler puts the time axis first.
-    assert all(
-        [_.sample.data.shape == (int(fs * period_dur), n_chans) for _ in samples]
-    )
+    assert all([_.sample.data.shape == (int(fs * period_dur), n_chans) for _ in samples])
     # Compare the sample window slice against the trigger timestamps
-    latencies = [
-        _.sample.axes["time"].offset - (_.trigger.timestamp + _.trigger.period[0])
-        for _ in samples
-    ]
+    latencies = [_.sample.axes["time"].offset - (_.trigger.timestamp + _.trigger.period[0]) for _ in samples]
     assert all([0 <= _ < 1 / fs for _ in latencies])
     # Check the sample trigger value matches the trigger input.
-    assert all(
-        [_.trigger.value == ["Start", "Stop"][ix % 2] for ix, _ in enumerate(samples)]
-    )
+    assert all([_.trigger.value == ["Start", "Stop"][ix % 2] for ix, _ in enumerate(samples)])

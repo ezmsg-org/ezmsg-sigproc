@@ -1,13 +1,12 @@
 import math
 import typing
 
-from array_api_compat import get_namespace
 import numpy as np
-from ezmsg.util.messages.axisarray import AxisArray, LinearAxis, CoordinateAxis
+from array_api_compat import get_namespace
+from ezmsg.util.messages.axisarray import AxisArray, CoordinateAxis, LinearAxis
 from ezmsg.util.messages.util import replace
 
 from .buffer import HybridBuffer
-
 
 Array = typing.TypeVar("Array")
 
@@ -68,9 +67,7 @@ class HybridAxisBuffer:
         if hasattr(first_axis, "data"):
             # Initialize a CoordinateAxis buffer
             if len(first_axis.data) > 1:
-                _axis_gain = (first_axis.data[-1] - first_axis.data[0]) / (
-                    len(first_axis.data) - 1
-                )
+                _axis_gain = (first_axis.data[-1] - first_axis.data[0]) / (len(first_axis.data) - 1)
             else:
                 _axis_gain = 1.0
             self._coords_gain_estimate = _axis_gain
@@ -107,8 +104,7 @@ class HybridAxisBuffer:
                 )
             if axis.gain != self._linear_axis.gain:
                 raise ValueError(
-                    f"Buffer initialized with gain={self._linear_axis.gain}, "
-                    f"but received gain={axis.gain}."
+                    f"Buffer initialized with gain={self._linear_axis.gain}, but received gain={axis.gain}."
                 )
             if self._linear_n_available + n_samples > self.capacity:
                 # Simulate overflow by advancing the offset and decreasing
@@ -117,16 +113,12 @@ class HybridAxisBuffer:
                 self.seek(n_to_discard)
             # Update the offset corresponding to the oldest sample in the buffer
             #  by anchoring on the new offset and accounting for the samples already available.
-            self._linear_axis.offset = (
-                axis.offset - self._linear_n_available * axis.gain
-            )
+            self._linear_axis.offset = axis.offset - self._linear_n_available * axis.gain
             self._linear_n_available += n_samples
 
     def peek(self, n_samples: int | None = None) -> LinearAxis | CoordinateAxis:
         if self._coords_buffer is not None:
-            return replace(
-                self._coords_template, data=self._coords_buffer.peek(n_samples)
-            )
+            return replace(self._coords_template, data=self._coords_buffer.peek(n_samples))
         else:
             # Return a shallow copy.
             return replace(self._linear_axis, offset=self._linear_axis.offset)
@@ -184,13 +176,9 @@ class HybridAxisBuffer:
         else:
             return None
 
-    def searchsorted(
-        self, values: typing.Union[float, Array], side: str = "left"
-    ) -> typing.Union[int, Array]:
+    def searchsorted(self, values: typing.Union[float, Array], side: str = "left") -> typing.Union[int, Array]:
         if self._coords_buffer is not None:
-            return self._coords_buffer.xp.searchsorted(
-                self._coords_buffer.peek(self.available()), values, side=side
-            )
+            return self._coords_buffer.xp.searchsorted(self._coords_buffer.peek(self.available()), values, side=side)
         else:
             if self.available() == 0:
                 if isinstance(values, float):
@@ -312,9 +300,7 @@ class HybridAxisArrayBuffer:
             axes={**self._template_msg.axes, self._axis: out_axis},
         )
 
-    def peek_axis(
-        self, n_samples: int | None = None
-    ) -> LinearAxis | CoordinateAxis | None:
+    def peek_axis(self, n_samples: int | None = None) -> LinearAxis | CoordinateAxis | None:
         """Retrieves the axis data without advancing the read head."""
         if self._data_buffer is None:
             return None
@@ -369,9 +355,7 @@ class HybridAxisArrayBuffer:
         """
         return self._axis_buffer.gain
 
-    def axis_searchsorted(
-        self, values: typing.Union[float, Array], side: str = "left"
-    ) -> typing.Union[int, Array]:
+    def axis_searchsorted(self, values: typing.Union[float, Array], side: str = "left") -> typing.Union[int, Array]:
         """
         Find the indices into which the given values would be inserted
         into the target axis data to maintain order.
