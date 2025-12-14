@@ -2,14 +2,14 @@ import os
 
 import ezmsg.core as ez
 import numpy as np
-from ezmsg.sigproc.scaler import AdaptiveStandardScaler, AdaptiveStandardScalerSettings, scaler_np
-from ezmsg.sigproc.synth import Counter, CounterSettings
 from ezmsg.util.messagecodec import message_log
 from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.terminate import TerminateOnTotal, TerminateOnTotalSettings
 from frozendict import frozendict
 
+from ezmsg.sigproc.scaler import AdaptiveStandardScaler, AdaptiveStandardScalerSettings, scaler_np
+from ezmsg.sigproc.synth import Counter, CounterSettings
 from tests.helpers.util import get_test_fn
 
 

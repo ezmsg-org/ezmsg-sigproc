@@ -1,9 +1,10 @@
 import numpy as np
 import pytest
 import scipy.special
-from ezmsg.sigproc.activation import ACTIVATIONS, ActivationFunction, activation
 from ezmsg.util.messages.axisarray import AxisArray
 from frozendict import frozendict
+
+from ezmsg.sigproc.activation import ACTIVATIONS, ActivationFunction, activation
 
 
 @pytest.mark.parametrize("function", [_ for _ in ActivationFunction] + ActivationFunction.options())

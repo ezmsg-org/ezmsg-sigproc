@@ -3,9 +3,10 @@ import asyncio
 import numpy as np
 import pytest
 import scipy.interpolate
-from ezmsg.sigproc.resample import ResampleProcessor
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.chunker import array_chunker
+
+from ezmsg.sigproc.resample import ResampleProcessor
 
 
 @pytest.fixture

@@ -2,12 +2,13 @@ import tempfile
 from pathlib import Path
 
 import ezmsg.core as ez
-from ezmsg.sigproc.butterworthzerophase import ButterworthZeroPhase
-from ezmsg.sigproc.synth import EEGSynth
 from ezmsg.util.messagecodec import message_log
 from ezmsg.util.messagelogger import MessageLogger
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.terminate import TerminateOnTotal
+
+from ezmsg.sigproc.butterworthzerophase import ButterworthZeroPhase
+from ezmsg.sigproc.synth import EEGSynth
 
 
 def test_butterworth_zero_phase_system():

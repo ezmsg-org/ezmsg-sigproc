@@ -1,6 +1,11 @@
 import os
 
 import ezmsg.core as ez
+from ezmsg.util.debuglog import DebugLog
+from ezmsg.util.messagecodec import message_log
+from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
+from ezmsg.util.terminate import TerminateOnTotal, TerminateOnTotalSettings
+
 from ezmsg.sigproc.sampler import (
     Sampler,
     SamplerSettings,
@@ -9,11 +14,6 @@ from ezmsg.sigproc.sampler import (
     TriggerGeneratorSettings,
 )
 from ezmsg.sigproc.synth import Oscillator, OscillatorSettings
-from ezmsg.util.debuglog import DebugLog
-from ezmsg.util.messagecodec import message_log
-from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
-from ezmsg.util.terminate import TerminateOnTotal, TerminateOnTotalSettings
-
 from tests.helpers.util import get_test_fn
 
 

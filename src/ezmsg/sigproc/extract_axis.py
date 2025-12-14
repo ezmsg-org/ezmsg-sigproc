@@ -1,7 +1,8 @@
 import ezmsg.core as ez
 import numpy as np
-from ezmsg.sigproc.base import BaseTransformer, BaseTransformerUnit
 from ezmsg.util.messages.axisarray import AxisArray, replace
+
+from ezmsg.sigproc.base import BaseTransformer, BaseTransformerUnit
 
 
 class ExtractAxisSettings(ez.Settings):

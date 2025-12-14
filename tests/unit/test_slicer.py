@@ -2,9 +2,9 @@ import copy
 
 import numpy as np
 import pytest
-from ezmsg.sigproc.slicer import parse_slice, slicer
 from ezmsg.util.messages.axisarray import AxisArray
 
+from ezmsg.sigproc.slicer import parse_slice, slicer
 from tests.helpers.util import assert_messages_equal
 
 

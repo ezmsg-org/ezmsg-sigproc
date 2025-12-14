@@ -4,10 +4,10 @@ from dataclasses import replace
 import numpy as np
 import pytest
 import sparse
-from ezmsg.sigproc.window import WindowTransformer
 from ezmsg.util.messages.axisarray import AxisArray
 from frozendict import frozendict
 
+from ezmsg.sigproc.window import WindowTransformer
 from tests.helpers.util import assert_messages_equal, calculate_expected_windows
 
 

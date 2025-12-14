@@ -1,9 +1,9 @@
 import numpy as np
+from ezmsg.util.messages.axisarray import AxisArray, replace
+
 from ezmsg.sigproc.adaptive_lattice_notch import (
     AdaptiveLatticeNotchFilterTransformer,
 )
-from ezmsg.util.messages.axisarray import AxisArray, replace
-
 from tests.helpers.util import (
     create_messages_with_periodic_signal,
 )

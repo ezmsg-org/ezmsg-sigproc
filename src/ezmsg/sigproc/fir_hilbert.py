@@ -4,6 +4,9 @@ import typing
 import ezmsg.core as ez
 import numpy as np
 import scipy.signal as sps
+from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.util import replace
+
 from ezmsg.sigproc.base import BaseStatefulTransformer, processor_state
 from ezmsg.sigproc.filter import (
     BACoeffs,
@@ -12,8 +15,6 @@ from ezmsg.sigproc.filter import (
     FilterBaseSettings,
     FilterByDesignTransformer,
 )
-from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.util.messages.util import replace
 
 
 class FIRHilbertFilterSettings(FilterBaseSettings):

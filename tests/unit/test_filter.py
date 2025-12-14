@@ -1,6 +1,7 @@
 import numpy as np
-from ezmsg.sigproc.filter import FilterCoefficients, FilterSettings, FilterTransformer
 from ezmsg.util.messages.axisarray import AxisArray
+
+from ezmsg.sigproc.filter import FilterCoefficients, FilterSettings, FilterTransformer
 
 
 def test_filter_transformer_accepts_dataclass_coefficients():

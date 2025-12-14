@@ -1,5 +1,7 @@
 import numpy as np
 import pytest
+from ezmsg.util.messages.axisarray import AxisArray
+
 from ezmsg.sigproc.fbcca import (
     FBCCASettings,
     FBCCATransformer,
@@ -9,7 +11,6 @@ from ezmsg.sigproc.fbcca import (
     cca_rho_max,
 )
 from ezmsg.sigproc.sampler import SampleTriggerMessage
-from ezmsg.util.messages.axisarray import AxisArray
 
 
 def test_cca_rho_max_basic():

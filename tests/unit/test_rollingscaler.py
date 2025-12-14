@@ -1,11 +1,12 @@
 import numpy as np
+from ezmsg.util.messages.axisarray import AxisArray
+from frozendict import frozendict
+
 from ezmsg.sigproc.rollingscaler import (
     RollingScalerProcessor,
     RollingScalerSettings,
 )
 from ezmsg.sigproc.sampler import SampleMessage
-from ezmsg.util.messages.axisarray import AxisArray
-from frozendict import frozendict
 
 
 def _axisarray_from_ndarray(x: np.ndarray, fs: float = 100.0, t0: float = 0.0) -> AxisArray:

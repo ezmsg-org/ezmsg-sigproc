@@ -1,11 +1,11 @@
 import copy
 
 import numpy as np
-from ezmsg.sigproc.sampler import SamplerSettings, SamplerTransformer
-from ezmsg.sigproc.util.message import SampleTriggerMessage
 from ezmsg.util.messages.axisarray import AxisArray
 from frozendict import frozendict
 
+from ezmsg.sigproc.sampler import SamplerSettings, SamplerTransformer
+from ezmsg.sigproc.util.message import SampleTriggerMessage
 from tests.helpers.util import assert_messages_equal
 
 

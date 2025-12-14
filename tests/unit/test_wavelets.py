@@ -1,8 +1,8 @@
 import numpy as np
 import pywt
-from ezmsg.sigproc.wavelets import MinPhaseMode, cwt
 from ezmsg.util.messages.axisarray import AxisArray
 
+from ezmsg.sigproc.wavelets import MinPhaseMode, cwt
 from tests.helpers.util import gaussian, make_chirp
 
 

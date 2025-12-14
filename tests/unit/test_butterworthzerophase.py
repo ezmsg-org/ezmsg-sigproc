@@ -1,12 +1,13 @@
 import numpy as np
 import pytest
 import scipy.signal
+from ezmsg.util.messages.axisarray import AxisArray
+from frozendict import frozendict
+
 from ezmsg.sigproc.butterworthzerophase import (
     ButterworthZeroPhaseSettings,
     ButterworthZeroPhaseTransformer,
 )
-from ezmsg.util.messages.axisarray import AxisArray
-from frozendict import frozendict
 
 
 @pytest.mark.parametrize(

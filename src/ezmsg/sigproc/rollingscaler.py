@@ -3,14 +3,15 @@ from collections import deque
 import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
+from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.util import replace
+
 from ezmsg.sigproc.base import (
     BaseAdaptiveTransformer,
     BaseAdaptiveTransformerUnit,
     processor_state,
 )
 from ezmsg.sigproc.sampler import SampleMessage
-from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.util.messages.util import replace
 
 
 class RollingScalerSettings(ez.Settings):

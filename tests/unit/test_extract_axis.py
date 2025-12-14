@@ -1,7 +1,8 @@
 import numpy as np
 import pytest
-from ezmsg.sigproc.extract_axis import ExtractAxisData
 from ezmsg.util.messages.axisarray import AxisArray
+
+from ezmsg.sigproc.extract_axis import ExtractAxisData
 
 
 @pytest.mark.parametrize(

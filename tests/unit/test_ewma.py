@@ -1,11 +1,12 @@
 import numpy as np
+from ezmsg.util.messages.axisarray import AxisArray
+
 from ezmsg.sigproc.ewma import (
     EWMATransformer,
     _alpha_from_tau,
     _tau_from_alpha,
     ewma_step,
 )
-from ezmsg.util.messages.axisarray import AxisArray
 
 
 def test_tc_from_alpha():

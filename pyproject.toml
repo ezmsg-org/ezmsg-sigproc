@@ -80,8 +80,8 @@ exclude = ["*/__version__.py"]
 select = ["E", "F", "I", "W"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["ezmsg.sigproc", "ezmsg.baseproc"]
-known-third-party = ["ezmsg"]
+known-first-party = ["ezmsg.sigproc"]
+known-third-party = ["ezmsg", "ezmsg.baseproc"]
 
 [tool.uv.sources]
 # Uncomment to use development version of ezmsg from git

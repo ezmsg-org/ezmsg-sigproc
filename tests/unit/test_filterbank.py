@@ -1,9 +1,9 @@
 import numpy as np
 import pytest
 import scipy.signal as sps
-from ezmsg.sigproc.filterbank import FilterbankMode, filterbank
 from ezmsg.util.messages.axisarray import AxisArray
 
+from ezmsg.sigproc.filterbank import FilterbankMode, filterbank
 from tests.helpers.util import gaussian, make_chirp
 
 
