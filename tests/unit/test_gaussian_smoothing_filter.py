@@ -1,11 +1,12 @@
 import numpy as np
 import pytest
+from ezmsg.util.messages.axisarray import AxisArray
+
 from ezmsg.sigproc.gaussiansmoothing import (
     GaussianSmoothingFilterTransformer,
     GaussianSmoothingSettings,
     gaussian_smoothing_filter_design,
 )
-from ezmsg.util.messages.axisarray import AxisArray
 
 
 @pytest.mark.parametrize(

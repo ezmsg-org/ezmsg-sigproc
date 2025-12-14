@@ -1,9 +1,10 @@
 import numpy as np
 import pytest
-from ezmsg.sigproc.window import WindowTransformer
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.chunker import array_chunker
 from numpy.lib.stride_tricks import sliding_window_view
+
+from ezmsg.sigproc.window import WindowTransformer
 
 try:
     import bytewax.operators as op

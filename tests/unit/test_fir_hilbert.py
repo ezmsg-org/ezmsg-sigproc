@@ -1,10 +1,11 @@
 import numpy as np
 import scipy.signal as sps
+from ezmsg.util.messages.axisarray import AxisArray
+
 from ezmsg.sigproc.fir_hilbert import (
     FIRHilbertEnvelopeTransformer,
     FIRHilbertFilterTransformer,
 )
-from ezmsg.util.messages.axisarray import AxisArray
 
 
 def axisarray(x: np.ndarray, fs: float, t0: float = 0.0) -> AxisArray:

@@ -1,10 +1,10 @@
 import copy
 
 import numpy as np
-from ezmsg.sigproc.spectrogram import SpectrogramTransformer
-from ezmsg.sigproc.spectrum import SpectralOutput, SpectralTransform, WindowFunction
 from ezmsg.util.messages.axisarray import AxisArray
 
+from ezmsg.sigproc.spectrogram import SpectrogramTransformer
+from ezmsg.sigproc.spectrum import SpectralOutput, SpectralTransform, WindowFunction
 from tests.helpers.util import (
     assert_messages_equal,
     create_messages_with_periodic_signal,

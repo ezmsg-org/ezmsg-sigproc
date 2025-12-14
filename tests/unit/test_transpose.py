@@ -2,9 +2,9 @@ import copy
 
 import numpy as np
 import pytest
-from ezmsg.sigproc.transpose import TransposeTransformer
 from ezmsg.util.messages.chunker import array_chunker
 
+from ezmsg.sigproc.transpose import TransposeTransformer
 from tests.helpers.util import assert_messages_equal
 
 

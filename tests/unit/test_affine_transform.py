@@ -2,9 +2,9 @@ import copy
 from pathlib import Path
 
 import numpy as np
-from ezmsg.sigproc.affinetransform import affine_transform, common_rereference
 from ezmsg.util.messages.axisarray import AxisArray
 
+from ezmsg.sigproc.affinetransform import affine_transform, common_rereference
 from tests.helpers.util import assert_messages_equal
 
 

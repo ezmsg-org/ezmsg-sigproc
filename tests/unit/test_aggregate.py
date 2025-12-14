@@ -3,15 +3,15 @@ from functools import partial
 
 import numpy as np
 import pytest
+from ezmsg.util.messages.axisarray import AxisArray
+from frozendict import frozendict
+
 from ezmsg.sigproc.aggregate import (
     AggregateSettings,
     AggregateTransformer,
     AggregationFunction,
     ranged_aggregate,
 )
-from ezmsg.util.messages.axisarray import AxisArray
-from frozendict import frozendict
-
 from tests.helpers.util import assert_messages_equal
 
 

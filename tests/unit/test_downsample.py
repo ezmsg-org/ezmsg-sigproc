@@ -2,10 +2,10 @@ import copy
 
 import numpy as np
 import pytest
-from ezmsg.sigproc.downsample import DownsampleTransformer
 from ezmsg.util.messages.axisarray import AxisArray
 from frozendict import frozendict
 
+from ezmsg.sigproc.downsample import DownsampleTransformer
 from tests.helpers.util import assert_messages_equal
 
 

@@ -2,13 +2,13 @@ import copy
 
 import numpy as np
 import pytest
+from ezmsg.util.messages.axisarray import AxisArray
+from frozendict import frozendict
+
 from ezmsg.sigproc.denormalize import (
     DenormalizeSettings,
     DenormalizeTransformer,
 )
-from ezmsg.util.messages.axisarray import AxisArray
-from frozendict import frozendict
-
 from tests.helpers.util import assert_messages_equal
 
 

@@ -5,8 +5,6 @@ import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
 import pytest
-from ezmsg.sigproc.synth import Counter, CounterSettings
-from ezmsg.sigproc.window import Window, WindowSettings
 from ezmsg.util.debuglog import DebugLog
 from ezmsg.util.messagecodec import message_log
 from ezmsg.util.messagegate import MessageGate, MessageGateSettings
@@ -15,6 +13,8 @@ from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.terminate import TerminateOnTimeout as TerminateTest
 from ezmsg.util.terminate import TerminateOnTimeoutSettings as TerminateTestSettings
 
+from ezmsg.sigproc.synth import Counter, CounterSettings
+from ezmsg.sigproc.window import Window, WindowSettings
 from tests.helpers.util import calculate_expected_windows, get_test_fn
 
 

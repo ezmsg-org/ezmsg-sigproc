@@ -2,6 +2,11 @@ import os
 from dataclasses import field
 
 import ezmsg.core as ez
+from ezmsg.util.messagecodec import message_log
+from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
+from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.terminate import TerminateOnTotal, TerminateOnTotalSettings
+
 from ezmsg.sigproc.spectrum import (
     SpectralOutput,
     SpectralTransform,
@@ -11,11 +16,6 @@ from ezmsg.sigproc.spectrum import (
 )
 from ezmsg.sigproc.synth import EEGSynth, EEGSynthSettings
 from ezmsg.sigproc.window import Window, WindowSettings
-from ezmsg.util.messagecodec import message_log
-from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
-from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.util.terminate import TerminateOnTotal, TerminateOnTotalSettings
-
 from tests.helpers.util import (
     get_test_fn,
 )

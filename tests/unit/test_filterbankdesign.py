@@ -1,13 +1,14 @@
 import numpy as np
 import pytest
 import scipy.signal
+from ezmsg.util.messages.axisarray import AxisArray
+
 from ezmsg.sigproc.filterbank import FilterbankMode, MinPhaseMode
 from ezmsg.sigproc.filterbankdesign import (
     FilterbankDesignSettings,
     FilterbankDesignTransformer,
 )
 from ezmsg.sigproc.kaiser import KaiserFilterSettings, kaiser_design_fun
-from ezmsg.util.messages.axisarray import AxisArray
 
 
 @pytest.mark.parametrize("n_filters", [1, 3, 5])

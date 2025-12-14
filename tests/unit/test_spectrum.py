@@ -4,14 +4,14 @@ import numpy as np
 import pytest
 import scipy.fft as sp_fft
 import scipy.signal as sps
+from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
+
 from ezmsg.sigproc.spectrum import (
     SpectralOutput,
     SpectralTransform,
     WindowFunction,
     spectrum,
 )
-from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
-
 from tests.helpers.util import (
     assert_messages_equal,
     create_messages_with_periodic_signal,

@@ -4,13 +4,14 @@ import time
 import ezmsg.core as ez
 import numpy as np
 import pytest
+from ezmsg.util.messages.axisarray import AxisArray
+
 from ezmsg.sigproc.synth import (
     aclock,
     acounter,
     clock,
     sin,
 )
-from ezmsg.util.messages.axisarray import AxisArray
 
 
 # TEST CLOCK

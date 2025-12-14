@@ -5,6 +5,11 @@ from dataclasses import field
 import ezmsg.core as ez
 import numpy as np
 import pytest
+from ezmsg.util.messagecodec import message_log
+from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
+from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.terminate import TerminateOnTotal, TerminateOnTotalSettings
+
 from ezmsg.sigproc.synth import (
     Clock,
     ClockSettings,
@@ -13,11 +18,6 @@ from ezmsg.sigproc.synth import (
     EEGSynth,
     EEGSynthSettings,
 )
-from ezmsg.util.messagecodec import message_log
-from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
-from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.util.terminate import TerminateOnTotal, TerminateOnTotalSettings
-
 from tests.helpers.util import get_test_fn
 
 

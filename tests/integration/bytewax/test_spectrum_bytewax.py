@@ -1,14 +1,15 @@
 import numpy as np
 import pytest
 import scipy.fft as sp_fft
+from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.chunker import array_chunker
+
 from ezmsg.sigproc.spectrum import (
     SpectralOutput,
     SpectralTransform,
     SpectrumTransformer,
     WindowFunction,
 )
-from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.util.messages.chunker import array_chunker
 
 try:
     import bytewax.operators as op

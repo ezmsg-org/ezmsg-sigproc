@@ -1,9 +1,9 @@
 import copy
 
 import numpy as np
-from ezmsg.sigproc.bandpower import AggregationFunction, SpectrogramSettings, bandpower
 from ezmsg.util.messages.axisarray import AxisArray
 
+from ezmsg.sigproc.bandpower import AggregationFunction, SpectrogramSettings, bandpower
 from tests.helpers.util import (
     assert_messages_equal,
     create_messages_with_periodic_signal,

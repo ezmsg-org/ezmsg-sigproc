@@ -3,8 +3,6 @@ import os
 import ezmsg.core as ez
 import numpy as np
 import pytest
-from ezmsg.sigproc.butterworthfilter import ButterworthFilter, ButterworthFilterSettings
-from ezmsg.sigproc.synth import WhiteNoise, WhiteNoiseSettings
 from ezmsg.util.messagecodec import message_log
 from ezmsg.util.messagegate import MessageGate, MessageGateSettings
 from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
@@ -12,6 +10,8 @@ from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.terminate import TerminateOnTimeout as TerminateTest
 from ezmsg.util.terminate import TerminateOnTimeoutSettings as TerminateTestSettings
 
+from ezmsg.sigproc.butterworthfilter import ButterworthFilter, ButterworthFilterSettings
+from ezmsg.sigproc.synth import WhiteNoise, WhiteNoiseSettings
 from tests.helpers.util import get_test_fn
 
 

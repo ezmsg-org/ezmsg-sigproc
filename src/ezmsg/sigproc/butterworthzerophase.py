@@ -4,6 +4,9 @@ import typing
 import ezmsg.core as ez
 import numpy as np
 import scipy.signal
+from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.util import replace
+
 from ezmsg.sigproc.base import SettingsType
 from ezmsg.sigproc.butterworthfilter import ButterworthFilterSettings, butter_design_fun
 from ezmsg.sigproc.filter import (
@@ -12,8 +15,6 @@ from ezmsg.sigproc.filter import (
     FilterByDesignTransformer,
     SOSCoeffs,
 )
-from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.util.messages.util import replace
 
 
 class ButterworthZeroPhaseSettings(ButterworthFilterSettings):

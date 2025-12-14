@@ -1,11 +1,12 @@
 import numpy as np
 import pytest
+from ezmsg.util.messages.axisarray import AxisArray
+from scipy import signal
+
 from ezmsg.sigproc.combfilter import (
     CombFilterTransformer,
     comb_design_fun,
 )
-from ezmsg.util.messages.axisarray import AxisArray
-from scipy import signal
 
 
 def test_comb_filter_design():

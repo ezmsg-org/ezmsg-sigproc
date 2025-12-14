@@ -1,7 +1,8 @@
 import numpy as np
 import pytest
-from ezmsg.sigproc.util.axisarray_buffer import HybridAxisArrayBuffer, HybridAxisBuffer
 from ezmsg.util.messages.axisarray import AxisArray, CoordinateAxis, LinearAxis
+
+from ezmsg.sigproc.util.axisarray_buffer import HybridAxisArrayBuffer, HybridAxisBuffer
 
 
 class TestHybridAxisBuffer:

@@ -3,11 +3,11 @@ import importlib.util
 
 import numpy as np
 import pytest
-from ezmsg.sigproc.scaler import AdaptiveStandardScalerTransformer, scaler, scaler_np
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.chunker import array_chunker
 from frozendict import frozendict
 
+from ezmsg.sigproc.scaler import AdaptiveStandardScalerTransformer, scaler, scaler_np
 from tests.helpers.util import assert_messages_equal
 
 
