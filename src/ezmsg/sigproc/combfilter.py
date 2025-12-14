@@ -1,15 +1,16 @@
 import functools
 import typing
+
 import numpy as np
 import scipy.signal
 from scipy.signal import normalize
 
 from .filter import (
+    BACoeffs,
+    BaseFilterByDesignTransformerUnit,
     FilterBaseSettings,
     FilterByDesignTransformer,
-    BACoeffs,
     SOSCoeffs,
-    BaseFilterByDesignTransformerUnit,
 )
 
 
@@ -103,9 +104,7 @@ def comb_design_fun(
     return combined_sos
 
 
-class CombFilterTransformer(
-    FilterByDesignTransformer[CombFilterSettings, BACoeffs | SOSCoeffs]
-):
+class CombFilterTransformer(FilterByDesignTransformer[CombFilterSettings, BACoeffs | SOSCoeffs]):
     def get_design_function(
         self,
     ) -> typing.Callable[[float], BACoeffs | SOSCoeffs | None]:
@@ -120,9 +119,7 @@ class CombFilterTransformer(
         )
 
 
-class CombFilterUnit(
-    BaseFilterByDesignTransformerUnit[CombFilterSettings, CombFilterTransformer]
-):
+class CombFilterUnit(BaseFilterByDesignTransformerUnit[CombFilterSettings, CombFilterTransformer]):
     SETTINGS = CombFilterSettings
 
 

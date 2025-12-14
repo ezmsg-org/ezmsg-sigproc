@@ -2,8 +2,8 @@ import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
 from ezmsg.sigproc.base import (
-    BaseTransformerUnit,
     BaseStatefulTransformer,
+    BaseTransformerUnit,
     processor_state,
 )
 from ezmsg.util.messages.axisarray import AxisArray
@@ -27,9 +27,7 @@ class DenormalizeState:
     offsets: npt.NDArray | None = None
 
 
-class DenormalizeTransformer(
-    BaseStatefulTransformer[DenormalizeSettings, AxisArray, AxisArray, DenormalizeState]
-):
+class DenormalizeTransformer(BaseStatefulTransformer[DenormalizeSettings, AxisArray, AxisArray, DenormalizeState]):
     """
     Scales data from a normalized distribution (mean=0, std=1) to a denormalized
     distribution using random per-channel offsets and gains designed to keep the
@@ -76,9 +74,5 @@ class DenormalizeTransformer(
         )
 
 
-class DenormalizeUnit(
-    BaseTransformerUnit[
-        DenormalizeSettings, AxisArray, AxisArray, DenormalizeTransformer
-    ]
-):
+class DenormalizeUnit(BaseTransformerUnit[DenormalizeSettings, AxisArray, AxisArray, DenormalizeTransformer]):
     SETTINGS = DenormalizeSettings

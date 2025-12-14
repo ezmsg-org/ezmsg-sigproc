@@ -1,30 +1,30 @@
 import dataclasses
 import pickle
-import pytest
 from types import NoneType
 from typing import Any, Generator
 from unittest.mock import MagicMock
 
+import pytest
 from ezmsg.sigproc.base import (
+    BaseAdaptiveTransformer,
+    BaseAsyncTransformer,
+    BaseConsumer,
+    BaseProcessor,
+    BaseProducer,
+    BaseStatefulConsumer,
+    BaseStatefulProcessor,
+    BaseStatefulProducer,
+    BaseStatefulTransformer,
+    BaseTransformer,
+    CompositeProcessor,
     CompositeProducer,
+    SampleMessage,
     _get_base_processor_message_in_type,
     _get_base_processor_message_out_type,
     _get_base_processor_settings_type,
     _get_base_processor_state_type,
     _get_processor_message_type,
     processor_state,
-    BaseProcessor,
-    BaseProducer,
-    BaseConsumer,
-    BaseTransformer,
-    BaseStatefulProcessor,
-    BaseStatefulProducer,
-    BaseStatefulConsumer,
-    BaseStatefulTransformer,
-    BaseAdaptiveTransformer,
-    BaseAsyncTransformer,
-    CompositeProcessor,
-    SampleMessage,
 )
 from ezmsg.sigproc.cheby import ChebyshevFilterTransformer
 from ezmsg.sigproc.filter import FilterByDesignState
@@ -92,9 +92,7 @@ class DeeperMockTransformer(DeepMockTransformer):
     pass
 
 
-class MockStatefulProcessor(
-    BaseStatefulProcessor[MockSettings, MockMessageA, MockMessageB, MockState]
-):
+class MockStatefulProcessor(BaseStatefulProcessor[MockSettings, MockMessageA, MockMessageB, MockState]):
     def _reset_state(self, message: MockMessageA) -> None:
         self._state.iterations = 0
 
@@ -124,9 +122,7 @@ class MockStatefulConsumer(BaseStatefulConsumer[MockSettings, MockMessageA, Mock
         self._state.iterations += 1
 
 
-class MockStatefulTransformer(
-    BaseStatefulTransformer[MockSettings, MockMessageA, MockMessageC, MockState]
-):
+class MockStatefulTransformer(BaseStatefulTransformer[MockSettings, MockMessageA, MockMessageC, MockState]):
     def _reset_state(self, message: MockMessageA) -> None:
         self._state.iterations = 0
 
@@ -135,9 +131,7 @@ class MockStatefulTransformer(
         return MockMessageC()
 
 
-class MockAdaptiveTransformer(
-    BaseAdaptiveTransformer[MockSettings, MockMessageA, MockMessageB, MockState]
-):
+class MockAdaptiveTransformer(BaseAdaptiveTransformer[MockSettings, MockMessageA, MockMessageB, MockState]):
     def _reset_state(self, message: MockMessageA) -> None:
         self._state.iterations = 0
 
@@ -149,9 +143,7 @@ class MockAdaptiveTransformer(
         self._state.iterations += 1
 
 
-class MockAsyncTransformer(
-    BaseAsyncTransformer[MockSettings, MockMessageA, MockMessageB, MockState]
-):
+class MockAsyncTransformer(BaseAsyncTransformer[MockSettings, MockMessageA, MockMessageB, MockState]):
     def _reset_state(self, message: MockMessageA) -> None:
         self._state.iterations = 0
 
@@ -161,17 +153,13 @@ class MockAsyncTransformer(
 
 
 # Mock CompositeProcessor examples
-class ValidSingleCompositeProcessor(
-    CompositeProcessor[MockSettings, MockMessageA, MockMessageB]
-):
+class ValidSingleCompositeProcessor(CompositeProcessor[MockSettings, MockMessageA, MockMessageB]):
     @staticmethod
     def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
         return {"processor": MockProcessor(settings=settings)}
 
 
-class ValidMultipleCompositeProcessor(
-    CompositeProcessor[MockSettings, MockMessageA, MockMessageB]
-):
+class ValidMultipleCompositeProcessor(CompositeProcessor[MockSettings, MockMessageA, MockMessageB]):
     @staticmethod
     def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
         return {
@@ -180,33 +168,25 @@ class ValidMultipleCompositeProcessor(
         }
 
 
-class EmptyCompositeProcessor(
-    CompositeProcessor[MockSettings, MockMessageA, MockMessageB]
-):
+class EmptyCompositeProcessor(CompositeProcessor[MockSettings, MockMessageA, MockMessageB]):
     @staticmethod
     def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
         return {}
 
 
-class InvalidOutputCompositeProcessor(
-    CompositeProcessor[MockSettings, MockMessageA, MockMessageB]
-):
+class InvalidOutputCompositeProcessor(CompositeProcessor[MockSettings, MockMessageA, MockMessageB]):
     @staticmethod
     def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
         return {"transformer": MockTransformer(settings=settings)}
 
 
-class InvalidInputCompositeProcessor(
-    CompositeProcessor[MockSettings, None, MockMessageC]
-):
+class InvalidInputCompositeProcessor(CompositeProcessor[MockSettings, None, MockMessageC]):
     @staticmethod
     def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
         return {"transformer": MockTransformer(settings=settings)}
 
 
-class InvalidProducerNotFirstCompositeProcessor(
-    CompositeProcessor[MockSettings, MockMessageA, MockMessageA]
-):
+class InvalidProducerNotFirstCompositeProcessor(CompositeProcessor[MockSettings, MockMessageA, MockMessageA]):
     @staticmethod
     def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
         return {
@@ -215,9 +195,7 @@ class InvalidProducerNotFirstCompositeProcessor(
         }
 
 
-class InvalidConsumerNotLastCompositeProcessor(
-    CompositeProcessor[MockSettings, MockMessageB, MockMessageC]
-):
+class InvalidConsumerNotLastCompositeProcessor(CompositeProcessor[MockSettings, MockMessageB, MockMessageC]):
     @staticmethod
     def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
         return {
@@ -226,9 +204,7 @@ class InvalidConsumerNotLastCompositeProcessor(
         }
 
 
-class InvalidConsumerProducerCompositeProcessor(
-    CompositeProcessor[MockSettings, MockMessageB, MockMessageA]
-):
+class InvalidConsumerProducerCompositeProcessor(CompositeProcessor[MockSettings, MockMessageB, MockMessageA]):
     @staticmethod
     def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
         return {
@@ -237,9 +213,7 @@ class InvalidConsumerProducerCompositeProcessor(
         }
 
 
-class TypeMismatchCompositeProcessor(
-    CompositeProcessor[MockSettings, MockMessageA, None]
-):
+class TypeMismatchCompositeProcessor(CompositeProcessor[MockSettings, MockMessageA, None]):
     @staticmethod
     def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
         return {
@@ -248,9 +222,7 @@ class TypeMismatchCompositeProcessor(
         }
 
 
-class InvalidProducerFirstCompositeProcessor(
-    CompositeProcessor[MockSettings, NoneType, MockMessageC]
-):
+class InvalidProducerFirstCompositeProcessor(CompositeProcessor[MockSettings, NoneType, MockMessageC]):
     @staticmethod
     def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
         return {
@@ -268,9 +240,7 @@ class ChainedCompositeProcessor(CompositeProcessor[MockSettings, MockMessageA, N
         }
 
 
-class ChainedCompositeProcessorWithDeepProcessors(
-    CompositeProcessor[MockSettings, MockMessageA, MockMessageC]
-):
+class ChainedCompositeProcessorWithDeepProcessors(CompositeProcessor[MockSettings, MockMessageA, MockMessageC]):
     @staticmethod
     def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
         return {
@@ -287,9 +257,7 @@ def mock_generator() -> Generator[MockMessageA, MockMessageA, None]:
         yield MockMessageA()
 
 
-class MockGeneratorCompositeProcessor(
-    CompositeProcessor[MockSettings, MockMessageA, MockMessageB]
-):
+class MockGeneratorCompositeProcessor(CompositeProcessor[MockSettings, MockMessageA, MockMessageB]):
     @staticmethod
     def _initialize_processors(settings):
         return {
@@ -326,9 +294,7 @@ class InvalidOutputCompositeProducer(CompositeProducer[MockSettings, MockMessage
         return {"producer": MockProducer(settings=settings)}
 
 
-class InvalidProducerNotFirstCompositeProducer(
-    CompositeProducer[MockSettings, MockMessageA]
-):
+class InvalidProducerNotFirstCompositeProducer(CompositeProducer[MockSettings, MockMessageA]):
     @staticmethod
     def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
         return {
@@ -337,9 +303,7 @@ class InvalidProducerNotFirstCompositeProducer(
         }
 
 
-class InvalidConsumerNotLastCompositeProducer(
-    CompositeProducer[MockSettings, MockMessageC]
-):
+class InvalidConsumerNotLastCompositeProducer(CompositeProducer[MockSettings, MockMessageC]):
     @staticmethod
     def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
         return {
@@ -358,9 +322,7 @@ class TypeMismatchCompositeProducer(CompositeProducer[MockSettings, None]):
         }
 
 
-class ChainedCompositeProducerWithDeepProcessors(
-    CompositeProducer[MockSettings, MockMessageC]
-):
+class ChainedCompositeProducerWithDeepProcessors(CompositeProducer[MockSettings, MockMessageC]):
     @staticmethod
     def _initialize_processors(settings: MockSettings) -> dict[str, Any]:
         return {
@@ -428,9 +390,7 @@ class TestHelperFunctions:
         assert _get_base_processor_settings_type(MockStatefulProcessor) == MockSettings
         assert _get_base_processor_settings_type(MockStatefulProducer) == MockSettings
         assert _get_base_processor_settings_type(MockStatefulConsumer) == MockSettings
-        assert (
-            _get_base_processor_settings_type(MockStatefulTransformer) == MockSettings
-        )
+        assert _get_base_processor_settings_type(MockStatefulTransformer) == MockSettings
 
         # Test with derived classes
         assert _get_base_processor_settings_type(DeepMockProcessor) == MockSettings
@@ -438,10 +398,7 @@ class TestHelperFunctions:
         assert _get_base_processor_settings_type(DeeperMockTransformer) == MockSettings
 
         # Test with composite processor
-        assert (
-            _get_base_processor_settings_type(ValidSingleCompositeProcessor)
-            == MockSettings
-        )
+        assert _get_base_processor_settings_type(ValidSingleCompositeProcessor) == MockSettings
 
         # Test with no settings type should raise exception
         class NoSettingsTypeClass:
@@ -455,34 +412,20 @@ class TestHelperFunctions:
         assert _get_base_processor_message_in_type(MockProcessor) == MockMessageA
         assert _get_base_processor_message_in_type(MockConsumer) == MockMessageB
         assert _get_base_processor_message_in_type(MockTransformer) == MockMessageA
-        assert (
-            _get_base_processor_message_in_type(MockStatefulProcessor) == MockMessageA
-        )
+        assert _get_base_processor_message_in_type(MockStatefulProcessor) == MockMessageA
         assert _get_base_processor_message_in_type(MockStatefulConsumer) == MockMessageA
-        assert (
-            _get_base_processor_message_in_type(MockStatefulTransformer) == MockMessageA
-        )
-        assert (
-            _get_base_processor_message_in_type(MockAdaptiveTransformer) == MockMessageA
-        )
+        assert _get_base_processor_message_in_type(MockStatefulTransformer) == MockMessageA
+        assert _get_base_processor_message_in_type(MockAdaptiveTransformer) == MockMessageA
         assert _get_base_processor_message_in_type(MockAsyncTransformer) == MockMessageA
 
         # Test with derived classes
         assert _get_base_processor_message_in_type(DeepMockProcessor) == MockMessageA
         assert _get_base_processor_message_in_type(DeepMockTransformer) == MockMessageA
-        assert (
-            _get_base_processor_message_in_type(DeeperMockTransformer) == MockMessageA
-        )
+        assert _get_base_processor_message_in_type(DeeperMockTransformer) == MockMessageA
 
         # Test with composite processor
-        assert (
-            _get_base_processor_message_in_type(ValidSingleCompositeProcessor)
-            == MockMessageA
-        )
-        assert (
-            _get_base_processor_message_in_type(ChainedCompositeProcessor)
-            == MockMessageA
-        )
+        assert _get_base_processor_message_in_type(ValidSingleCompositeProcessor) == MockMessageA
+        assert _get_base_processor_message_in_type(ChainedCompositeProcessor) == MockMessageA
 
         # Test with producers (should throw)
         with pytest.raises(TypeError, match=r"Could not resolve .*MessageInType"):
@@ -502,36 +445,19 @@ class TestHelperFunctions:
         assert _get_base_processor_message_out_type(MockProcessor) == MockMessageB
         assert _get_base_processor_message_out_type(MockProducer) == MockMessageA
         assert _get_base_processor_message_out_type(MockTransformer) == MockMessageC
-        assert (
-            _get_base_processor_message_out_type(MockStatefulProcessor) == MockMessageB
-        )
-        assert (
-            _get_base_processor_message_out_type(MockStatefulProducer) == MockMessageA
-        )
-        assert (
-            _get_base_processor_message_out_type(MockStatefulTransformer)
-            == MockMessageC
-        )
-        assert (
-            _get_base_processor_message_out_type(MockAdaptiveTransformer)
-            == MockMessageB
-        )
-        assert (
-            _get_base_processor_message_out_type(MockAsyncTransformer) == MockMessageB
-        )
+        assert _get_base_processor_message_out_type(MockStatefulProcessor) == MockMessageB
+        assert _get_base_processor_message_out_type(MockStatefulProducer) == MockMessageA
+        assert _get_base_processor_message_out_type(MockStatefulTransformer) == MockMessageC
+        assert _get_base_processor_message_out_type(MockAdaptiveTransformer) == MockMessageB
+        assert _get_base_processor_message_out_type(MockAsyncTransformer) == MockMessageB
 
         # Test with derived classes
         assert _get_base_processor_message_out_type(DeepMockProcessor) == MockMessageB
         assert _get_base_processor_message_out_type(DeepMockTransformer) == MockMessageC
-        assert (
-            _get_base_processor_message_out_type(DeeperMockTransformer) == MockMessageC
-        )
+        assert _get_base_processor_message_out_type(DeeperMockTransformer) == MockMessageC
 
         # Test with composite processor
-        assert (
-            _get_base_processor_message_out_type(ValidSingleCompositeProcessor)
-            == MockMessageB
-        )
+        assert _get_base_processor_message_out_type(ValidSingleCompositeProcessor) == MockMessageB
 
         # Test with consumers (should be None)
         assert _get_base_processor_message_out_type(MockConsumer) is NoneType
@@ -585,14 +511,8 @@ class TestHelperFunctions:
         assert _get_base_processor_state_type(MockStatefulTransformer) == MockState
         assert _get_base_processor_state_type(MockAdaptiveTransformer) == MockState
         assert _get_base_processor_state_type(MockAsyncTransformer) == MockState
-        assert (
-            _get_base_processor_state_type(ChebyshevFilterTransformer)
-            == FilterByDesignState
-        )
-        assert (
-            _get_base_processor_state_type(ValidMultipleCompositeProcessor)
-            == dict[str, Any]
-        )
+        assert _get_base_processor_state_type(ChebyshevFilterTransformer) == FilterByDesignState
+        assert _get_base_processor_state_type(ValidMultipleCompositeProcessor) == dict[str, Any]
 
         # Test with class that doesn't have state type
         with pytest.raises(Exception, match="Could not resolve state type"):
@@ -1076,9 +996,7 @@ class TestCompositeProducer:
             InvalidOutputCompositeProducer()
 
     def test_invalid_producer_not_first(self):
-        with pytest.raises(
-            TypeError, match="Input type mismatch: Composite producer expects None"
-        ):
+        with pytest.raises(TypeError, match="Input type mismatch: Composite producer expects None"):
             InvalidProducerNotFirstCompositeProducer()
 
     def test_invalid_consumer_not_last(self):

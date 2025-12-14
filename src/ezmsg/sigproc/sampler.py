@@ -1,28 +1,28 @@
 import asyncio
-from collections import deque
 import copy
 import traceback
 import typing
+from collections import deque
 
-import numpy as np
 import ezmsg.core as ez
+import numpy as np
 from ezmsg.util.messages.axisarray import (
     AxisArray,
 )
 from ezmsg.util.messages.util import replace
 
-from .util.profile import profile_subpub
+from .base import (
+    BaseConsumerUnit,
+    BaseProducerUnit,
+    BaseStatefulProducer,
+    BaseStatefulTransformer,
+    BaseTransformerUnit,
+    processor_state,
+)
 from .util.axisarray_buffer import HybridAxisArrayBuffer
 from .util.buffer import UpdateStrategy
 from .util.message import SampleMessage, SampleTriggerMessage
-from .base import (
-    BaseStatefulTransformer,
-    BaseConsumerUnit,
-    BaseTransformerUnit,
-    BaseStatefulProducer,
-    BaseProducerUnit,
-    processor_state,
-)
+from .util.profile import profile_subpub
 
 
 class SamplerSettings(ez.Settings):
@@ -74,12 +74,8 @@ class SamplerState:
     triggers: deque[SampleTriggerMessage] | None = None
 
 
-class SamplerTransformer(
-    BaseStatefulTransformer[SamplerSettings, AxisArray, AxisArray, SamplerState]
-):
-    def __call__(
-        self, message: AxisArray | SampleTriggerMessage
-    ) -> list[SampleMessage]:
+class SamplerTransformer(BaseStatefulTransformer[SamplerSettings, AxisArray, AxisArray, SamplerState]):
+    def __call__(self, message: AxisArray | SampleTriggerMessage) -> list[SampleMessage]:
         # TODO: Currently we have a single entry point that accepts both
         #  data and trigger messages and we choose a code path based on
         #  the message type. However, in the future we will likely replace
@@ -99,9 +95,7 @@ class SamplerTransformer(
         # Compute hash based on message properties that require state reset
         axis = self.settings.axis or message.dims[0]
         axis_idx = message.get_axis_idx(axis)
-        sample_shape = (
-            message.data.shape[:axis_idx] + message.data.shape[axis_idx + 1 :]
-        )
+        sample_shape = message.data.shape[:axis_idx] + message.data.shape[axis_idx + 1 :]
         return hash((sample_shape, message.key))
 
     def _reset_state(self, message: AxisArray) -> None:
@@ -193,20 +187,14 @@ class SamplerTransformer(
         trigger_ts: float = message.timestamp
         if not self.settings.estimate_alignment:
             # Override the trigger timestamp with the next sample's likely timestamp.
-            trigger_ts = (
-                self._state.buffer.axis_final_value + self._state.buffer.axis_gain
-            )
+            trigger_ts = self._state.buffer.axis_final_value + self._state.buffer.axis_gain
 
-        new_trig_msg = replace(
-            message, timestamp=trigger_ts, period=_period, value=_value
-        )
+        new_trig_msg = replace(message, timestamp=trigger_ts, period=_period, value=_value)
         self._state.triggers.append(new_trig_msg)
         return []
 
 
-class Sampler(
-    BaseTransformerUnit[SamplerSettings, AxisArray, AxisArray, SamplerTransformer]
-):
+class Sampler(BaseTransformerUnit[SamplerSettings, AxisArray, AxisArray, SamplerTransformer]):
     SETTINGS = SamplerSettings
 
     INPUT_TRIGGER = ez.InputStream(SampleTriggerMessage)
@@ -269,19 +257,13 @@ class TriggerGeneratorState:
     output: int = 0
 
 
-class TriggerProducer(
-    BaseStatefulProducer[
-        TriggerGeneratorSettings, SampleTriggerMessage, TriggerGeneratorState
-    ]
-):
+class TriggerProducer(BaseStatefulProducer[TriggerGeneratorSettings, SampleTriggerMessage, TriggerGeneratorState]):
     def _reset_state(self) -> None:
         self._state.output = 0
 
     async def _produce(self) -> SampleTriggerMessage:
         await asyncio.sleep(self.settings.publish_period)
-        out_msg = SampleTriggerMessage(
-            period=self.settings.period, value=self._state.output
-        )
+        out_msg = SampleTriggerMessage(period=self.settings.period, value=self._state.output)
         self._state.output += 1
         return out_msg
 

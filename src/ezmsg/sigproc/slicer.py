@@ -1,11 +1,11 @@
+import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
-import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import (
     AxisArray,
-    slice_along_axis,
     AxisBase,
     replace,
+    slice_along_axis,
 )
 
 from .base import (
@@ -49,11 +49,7 @@ def parse_slice(
     if "," not in s:
         parts = [part.strip() for part in s.split(":")]
         if len(parts) == 1:
-            if (
-                axinfo is not None
-                and hasattr(axinfo, "data")
-                and parts[0] in axinfo.data
-            ):
+            if axinfo is not None and hasattr(axinfo, "data") and parts[0] in axinfo.data:
                 return tuple(np.where(axinfo.data == parts[0])[0])
             return (int(parts[0]),)
         return (slice(*(int(part.strip()) if part else None for part in parts)),)
@@ -76,9 +72,7 @@ class SlicerState:
     b_change_dims: bool = False
 
 
-class SlicerTransformer(
-    BaseStatefulTransformer[SlicerSettings, AxisArray, AxisArray, SlicerState]
-):
+class SlicerTransformer(BaseStatefulTransformer[SlicerSettings, AxisArray, AxisArray, SlicerState]):
     def _hash_message(self, message: AxisArray) -> int:
         axis = self.settings.axis or message.dims[-1]
         axis_idx = message.get_axis_idx(axis)
@@ -101,11 +95,7 @@ class SlicerTransformer(
             self._state.slice_ = np.s_[indices]
 
         # Create the output axis
-        if (
-            axis in message.axes
-            and hasattr(message.axes[axis], "data")
-            and len(message.axes[axis].data) > 0
-        ):
+        if axis in message.axes and hasattr(message.axes[axis], "data") and len(message.axes[axis].data) > 0:
             in_data = np.array(message.axes[axis].data)
             if self._state.b_change_dims:
                 out_data = in_data[self._state.slice_ : self._state.slice_ + 1]
@@ -119,17 +109,10 @@ class SlicerTransformer(
 
         replace_kwargs = {}
         if self._state.b_change_dims:
-            replace_kwargs["dims"] = [
-                _ for dim_ix, _ in enumerate(message.dims) if dim_ix != axis_idx
-            ]
-            replace_kwargs["axes"] = {
-                k: v for k, v in message.axes.items() if k != axis
-            }
+            replace_kwargs["dims"] = [_ for dim_ix, _ in enumerate(message.dims) if dim_ix != axis_idx]
+            replace_kwargs["axes"] = {k: v for k, v in message.axes.items() if k != axis}
         elif self._state.new_axis is not None:
-            replace_kwargs["axes"] = {
-                k: (v if k != axis else self._state.new_axis)
-                for k, v in message.axes.items()
-            }
+            replace_kwargs["axes"] = {k: (v if k != axis else self._state.new_axis) for k, v in message.axes.items()}
 
         return replace(
             message,
@@ -138,9 +121,7 @@ class SlicerTransformer(
         )
 
 
-class Slicer(
-    BaseTransformerUnit[SlicerSettings, AxisArray, AxisArray, SlicerTransformer]
-):
+class Slicer(BaseTransformerUnit[SlicerSettings, AxisArray, AxisArray, SlicerTransformer]):
     SETTINGS = SlicerSettings
 
 

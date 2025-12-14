@@ -1,16 +1,15 @@
 import numpy as np
 import pytest
-from ezmsg.util.messages.axisarray import AxisArray
-
 from ezmsg.sigproc.fbcca import (
     FBCCASettings,
     FBCCATransformer,
     StreamingFBCCASettings,
     StreamingFBCCATransformer,
-    cca_rho_max,
     calc_softmax,
+    cca_rho_max,
 )
 from ezmsg.sigproc.sampler import SampleTriggerMessage
+from ezmsg.util.messages.axisarray import AxisArray
 
 
 def test_cca_rho_max_basic():
@@ -129,9 +128,7 @@ def test_fbcca_basic():
 
     # Create test signal with 10Hz component
     t = np.arange(n_times) / fs
-    signal = np.column_stack(
-        [np.sin(2 * np.pi * 10 * t + i * np.pi / 4) for i in range(n_channels)]
-    ).T
+    signal = np.column_stack([np.sin(2 * np.pi * 10 * t + i * np.pi / 4) for i in range(n_channels)]).T
 
     # Create message
     msg = AxisArray(
@@ -139,9 +136,7 @@ def test_fbcca_basic():
         dims=["ch", "time"],
         axes={
             "time": AxisArray.TimeAxis(fs=fs, offset=0),
-            "ch": AxisArray.CoordinateAxis(
-                data=np.arange(n_channels).astype(str), dims=["ch"]
-            ),
+            "ch": AxisArray.CoordinateAxis(data=np.arange(n_channels).astype(str), dims=["ch"]),
         },
         key="test_fbcca",
     )
@@ -178,9 +173,7 @@ def test_fbcca_with_filterbank_dim():
 
     # Create test signal
     t = np.arange(n_times) / fs
-    base_signal = np.column_stack(
-        [np.sin(2 * np.pi * 10 * t + i * np.pi / 4) for i in range(n_channels)]
-    )
+    base_signal = np.column_stack([np.sin(2 * np.pi * 10 * t + i * np.pi / 4) for i in range(n_channels)])
 
     # Replicate across subbands
     signal = np.stack([base_signal.T for _ in range(n_subbands)], axis=0)
@@ -190,12 +183,8 @@ def test_fbcca_with_filterbank_dim():
         dims=["subband", "ch", "time"],
         axes={
             "time": AxisArray.TimeAxis(fs=fs, offset=0),
-            "ch": AxisArray.CoordinateAxis(
-                data=np.arange(n_channels).astype(str), dims=["ch"]
-            ),
-            "subband": AxisArray.CoordinateAxis(
-                data=np.arange(n_subbands).astype(str), dims=["subband"]
-            ),
+            "ch": AxisArray.CoordinateAxis(data=np.arange(n_channels).astype(str), dims=["ch"]),
+            "subband": AxisArray.CoordinateAxis(data=np.arange(n_subbands).astype(str), dims=["subband"]),
         },
         key="test_fbcca_filterbank",
     )
@@ -230,9 +219,7 @@ def test_fbcca_with_trigger_freqs():
 
     # Create test signal
     t = np.arange(n_times) / fs
-    signal = np.column_stack(
-        [np.sin(2 * np.pi * 12 * t + i * np.pi / 4) for i in range(n_channels)]
-    ).T
+    signal = np.column_stack([np.sin(2 * np.pi * 12 * t + i * np.pi / 4) for i in range(n_channels)]).T
 
     # Create trigger with freqs attribute
     @dataclass
@@ -250,9 +237,7 @@ def test_fbcca_with_trigger_freqs():
         dims=["ch", "time"],
         axes={
             "time": AxisArray.TimeAxis(fs=fs, offset=0),
-            "ch": AxisArray.CoordinateAxis(
-                data=np.arange(n_channels).astype(str), dims=["ch"]
-            ),
+            "ch": AxisArray.CoordinateAxis(data=np.arange(n_channels).astype(str), dims=["ch"]),
         },
         attrs={"trigger": trigger},
         key="test_fbcca_trigger",
@@ -285,9 +270,7 @@ def test_fbcca_no_freqs_error():
         dims=["ch", "time"],
         axes={
             "time": AxisArray.TimeAxis(fs=fs, offset=0),
-            "ch": AxisArray.CoordinateAxis(
-                data=np.arange(n_channels).astype(str), dims=["ch"]
-            ),
+            "ch": AxisArray.CoordinateAxis(data=np.arange(n_channels).astype(str), dims=["ch"]),
         },
         key="test_no_freqs",
     )
@@ -315,10 +298,7 @@ def test_fbcca_harmonics(harmonics):
     # Create signal with harmonics
     t = np.arange(n_times) / fs
     signal = np.column_stack(
-        [
-            np.sin(2 * np.pi * 10 * t) + 0.3 * np.sin(2 * np.pi * 20 * t)
-            for _ in range(n_channels)
-        ]
+        [np.sin(2 * np.pi * 10 * t) + 0.3 * np.sin(2 * np.pi * 20 * t) for _ in range(n_channels)]
     ).T
 
     msg = AxisArray(
@@ -326,9 +306,7 @@ def test_fbcca_harmonics(harmonics):
         dims=["ch", "time"],
         axes={
             "time": AxisArray.TimeAxis(fs=fs, offset=0),
-            "ch": AxisArray.CoordinateAxis(
-                data=np.arange(n_channels).astype(str), dims=["ch"]
-            ),
+            "ch": AxisArray.CoordinateAxis(data=np.arange(n_channels).astype(str), dims=["ch"]),
         },
         key="test_harmonics",
     )
@@ -365,9 +343,7 @@ def test_fbcca_softmax_beta(softmax_beta):
         dims=["ch", "time"],
         axes={
             "time": AxisArray.TimeAxis(fs=fs, offset=0),
-            "ch": AxisArray.CoordinateAxis(
-                data=np.arange(n_channels).astype(str), dims=["ch"]
-            ),
+            "ch": AxisArray.CoordinateAxis(data=np.arange(n_channels).astype(str), dims=["ch"]),
         },
         key="test_softmax",
     )
@@ -410,9 +386,7 @@ def test_fbcca_max_int_time():
         dims=["ch", "time"],
         axes={
             "time": AxisArray.TimeAxis(fs=fs, offset=0),
-            "ch": AxisArray.CoordinateAxis(
-                data=np.arange(n_channels).astype(str), dims=["ch"]
-            ),
+            "ch": AxisArray.CoordinateAxis(data=np.arange(n_channels).astype(str), dims=["ch"]),
         },
         key="test_max_int_time",
     )
@@ -465,9 +439,7 @@ def test_fbcca_empty_message():
         dims=["ch", "time"],
         axes={
             "time": AxisArray.TimeAxis(fs=fs, offset=0),
-            "ch": AxisArray.CoordinateAxis(
-                data=np.arange(n_channels).astype(str), dims=["ch"]
-            ),
+            "ch": AxisArray.CoordinateAxis(data=np.arange(n_channels).astype(str), dims=["ch"]),
         },
         key="test_empty",
     )
@@ -498,10 +470,7 @@ def test_fbcca_multidim():
     # Create test signal with trials dimension
     t = np.arange(n_times) / fs
     signal = np.stack(
-        [
-            np.column_stack([np.sin(2 * np.pi * 10 * t) for _ in range(n_channels)]).T
-            for _ in range(n_trials)
-        ],
+        [np.column_stack([np.sin(2 * np.pi * 10 * t) for _ in range(n_channels)]).T for _ in range(n_trials)],
         axis=0,
     )
 
@@ -510,12 +479,8 @@ def test_fbcca_multidim():
         dims=["trial", "ch", "time"],
         axes={
             "time": AxisArray.TimeAxis(fs=fs, offset=0),
-            "ch": AxisArray.CoordinateAxis(
-                data=np.arange(n_channels).astype(str), dims=["ch"]
-            ),
-            "trial": AxisArray.CoordinateAxis(
-                data=np.arange(n_trials).astype(str), dims=["trial"]
-            ),
+            "ch": AxisArray.CoordinateAxis(data=np.arange(n_channels).astype(str), dims=["ch"]),
+            "trial": AxisArray.CoordinateAxis(data=np.arange(n_trials).astype(str), dims=["trial"]),
         },
         key="test_multidim",
     )
@@ -552,9 +517,7 @@ def test_fbcca_custom_target_freq_dim():
         dims=["ch", "time"],
         axes={
             "time": AxisArray.TimeAxis(fs=fs, offset=0),
-            "ch": AxisArray.CoordinateAxis(
-                data=np.arange(n_channels).astype(str), dims=["ch"]
-            ),
+            "ch": AxisArray.CoordinateAxis(data=np.arange(n_channels).astype(str), dims=["ch"]),
         },
         key="test_custom_dim",
     )
@@ -584,18 +547,14 @@ def test_streaming_fbcca_basic():
 
     # Create test signal
     t = np.arange(n_times) / fs
-    signal = np.column_stack(
-        [np.sin(2 * np.pi * 10 * t + i * np.pi / 4) for i in range(n_channels)]
-    ).T
+    signal = np.column_stack([np.sin(2 * np.pi * 10 * t + i * np.pi / 4) for i in range(n_channels)]).T
 
     msg = AxisArray(
         data=signal,
         dims=["ch", "time"],
         axes={
             "time": AxisArray.TimeAxis(fs=fs, offset=0),
-            "ch": AxisArray.CoordinateAxis(
-                data=np.arange(n_channels).astype(str), dims=["ch"]
-            ),
+            "ch": AxisArray.CoordinateAxis(data=np.arange(n_channels).astype(str), dims=["ch"]),
         },
         key="test_streaming_fbcca",
     )
@@ -640,9 +599,7 @@ def test_streaming_fbcca_no_filterbank():
         dims=["ch", "time"],
         axes={
             "time": AxisArray.TimeAxis(fs=fs, offset=0),
-            "ch": AxisArray.CoordinateAxis(
-                data=np.arange(n_channels).astype(str), dims=["ch"]
-            ),
+            "ch": AxisArray.CoordinateAxis(data=np.arange(n_channels).astype(str), dims=["ch"]),
         },
         key="test_streaming_no_filterbank",
     )
@@ -677,10 +634,7 @@ def test_fbcca_axes_preserved():
     # Create test signal with epoch dimension
     t = np.arange(n_times) / fs
     signal = np.stack(
-        [
-            np.column_stack([np.sin(2 * np.pi * 10 * t) for _ in range(n_channels)]).T
-            for _ in range(n_epochs)
-        ],
+        [np.column_stack([np.sin(2 * np.pi * 10 * t) for _ in range(n_channels)]).T for _ in range(n_epochs)],
         axis=0,
     )
 
@@ -689,12 +643,8 @@ def test_fbcca_axes_preserved():
         dims=["epoch", "ch", "time"],
         axes={
             "time": AxisArray.TimeAxis(fs=fs, offset=0),
-            "ch": AxisArray.CoordinateAxis(
-                data=np.arange(n_channels).astype(str), dims=["ch"]
-            ),
-            "epoch": AxisArray.CoordinateAxis(
-                data=np.array(["a", "b"]), dims=["epoch"]
-            ),
+            "ch": AxisArray.CoordinateAxis(data=np.arange(n_channels).astype(str), dims=["ch"]),
+            "epoch": AxisArray.CoordinateAxis(data=np.array(["a", "b"]), dims=["epoch"]),
         },
         key="test_axes",
     )
@@ -727,21 +677,14 @@ def test_fbcca_frequency_detection():
     for target_freq in test_freqs:
         # Create signal at target frequency
         t = np.arange(n_times) / fs
-        signal = np.column_stack(
-            [
-                np.sin(2 * np.pi * target_freq * t + i * np.pi / 4)
-                for i in range(n_channels)
-            ]
-        ).T
+        signal = np.column_stack([np.sin(2 * np.pi * target_freq * t + i * np.pi / 4) for i in range(n_channels)]).T
 
         msg = AxisArray(
             data=signal,
             dims=["ch", "time"],
             axes={
                 "time": AxisArray.TimeAxis(fs=fs, offset=0),
-                "ch": AxisArray.CoordinateAxis(
-                    data=np.arange(n_channels).astype(str), dims=["ch"]
-                ),
+                "ch": AxisArray.CoordinateAxis(data=np.arange(n_channels).astype(str), dims=["ch"]),
             },
             key=f"test_freq_{target_freq}",
         )
@@ -761,6 +704,4 @@ def test_fbcca_frequency_detection():
         detected_freq = test_freqs[detected_idx]
 
         # Should detect the target frequency
-        assert (
-            detected_freq == target_freq
-        ), f"Expected {target_freq}Hz, detected {detected_freq}Hz"
+        assert detected_freq == target_freq, f"Expected {target_freq}Hz, detected {detected_freq}Hz"

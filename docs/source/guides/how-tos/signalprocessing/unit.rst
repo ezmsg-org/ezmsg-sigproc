@@ -1,11 +1,41 @@
 How to turn a signal processor into an ``ezmsg`` Unit?
-#######################################################
+######################################################
 
-To convert a signal processor to an ``ezmsg`` Unit, you can follow these steps:
+For general guidance on converting processors to ezmsg Units, see the `ezmsg-baseproc documentation <https://www.ezmsg.org/ezmsg-baseproc/guides/ProcessorsBase.html#implementing-a-custom-ezmsg-unit>`_.
 
-1. **Define the Processor**: Create a class that inherits from the appropriate signal processor template (e.g., `SignalProcessor`, `Filter`, etc.).
-2. **Implement the Processing Logic**: Override the necessary methods to implement the signal processing logic.
-3. **Define Input and Output Ports**: Use the `ezmsg` port system to define input and output ports for the signal processor.
-4. **Register the Unit**: Use the `ezmsg` registration system to register the signal processor as an `ezmsg` Unit.
+Example with Signal Processing
+------------------------------
+
+To convert a signal processor to an ``ezmsg`` Unit:
+
+1. **Define the Processor**: Create a class that inherits from the appropriate base class (e.g., ``BaseTransformer``, ``BaseStatefulTransformer``).
+2. **Implement the Processing Logic**: Override the ``_process`` method to implement the signal processing logic.
+3. **Create the Unit**: Inherit from the appropriate Unit base class (e.g., ``BaseTransformerUnit``).
+
+.. code-block:: python
+
+   import ezmsg.core as ez
+   from ezmsg.util.messages.axisarray import AxisArray
+   from ezmsg.baseproc import BaseTransformer, BaseTransformerUnit
+
+
+   class MyProcessorSettings(ez.Settings):
+       # Your settings here
+       pass
+
+
+   class MyProcessor(BaseTransformer[MyProcessorSettings, AxisArray, AxisArray]):
+       def _process(self, message: AxisArray) -> AxisArray:
+           # Your signal processing logic here
+           return message
+
+
+   class MyUnit(BaseTransformerUnit[
+           MyProcessorSettings,
+           AxisArray,
+           AxisArray,
+           MyProcessor,
+       ]):
+       SETTINGS = MyProcessorSettings
 
 (under construction)

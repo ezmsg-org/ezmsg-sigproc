@@ -1,8 +1,8 @@
-import pytest
 import numpy as np
+import pytest
+from ezmsg.sigproc.util.axisarray_buffer import HybridAxisArrayBuffer, HybridAxisBuffer
 from ezmsg.sigproc.util.buffer import HybridBuffer
-from ezmsg.sigproc.util.axisarray_buffer import HybridAxisBuffer, HybridAxisArrayBuffer
-from ezmsg.util.messages.axisarray import AxisArray, LinearAxis, CoordinateAxis
+from ezmsg.util.messages.axisarray import AxisArray, CoordinateAxis, LinearAxis
 
 
 @pytest.fixture
@@ -148,18 +148,14 @@ class TestHybridBufferOverflow:
 
 class TestHybridAxisBufferOverflow:
     def test_hybrid_axis_buffer_overflow_raise(self):
-        buf = HybridAxisBuffer(
-            duration=0.1, overflow_strategy="raise", update_strategy="immediate"
-        )
+        buf = HybridAxisBuffer(duration=0.1, overflow_strategy="raise", update_strategy="immediate")
         axis = CoordinateAxis(data=np.linspace(0, 0.099, 100), dims=["time"])
         buf.write(axis, n_samples=100)
         with pytest.raises(OverflowError):
             buf.write(axis, n_samples=1)
 
     def test_hybrid_axis_buffer_overflow_drop(self):
-        buf = HybridAxisBuffer(
-            duration=0.1, overflow_strategy="drop", update_strategy="immediate"
-        )
+        buf = HybridAxisBuffer(duration=0.1, overflow_strategy="drop", update_strategy="immediate")
         axis = CoordinateAxis(data=np.linspace(0, 0.099, 100), dims=["time"])
         buf.write(axis, n_samples=100)
         axis2 = CoordinateAxis(data=np.linspace(0.1, 0.109, 10), dims=["time"])
@@ -167,9 +163,7 @@ class TestHybridAxisBufferOverflow:
         assert buf.available() == 100
 
     def test_hybrid_axis_buffer_overflow_grow(self):
-        buf = HybridAxisBuffer(
-            duration=0.1, overflow_strategy="grow", update_strategy="immediate"
-        )
+        buf = HybridAxisBuffer(duration=0.1, overflow_strategy="grow", update_strategy="immediate")
         axis = CoordinateAxis(data=np.linspace(0, 0.099, 100), dims=["time"])
         buf.write(axis, n_samples=100)
         axis2 = CoordinateAxis(data=np.linspace(0.1, 0.109, 10), dims=["time"])
@@ -179,25 +173,19 @@ class TestHybridAxisBufferOverflow:
 
 class TestHybridAxisArrayBufferOverflow:
     def test_hybrid_axis_array_buffer_overflow_raise(self, linear_axis_message):
-        buf = HybridAxisArrayBuffer(
-            duration=0.1, overflow_strategy="raise", update_strategy="immediate"
-        )
+        buf = HybridAxisArrayBuffer(duration=0.1, overflow_strategy="raise", update_strategy="immediate")
         buf.write(linear_axis_message(samples=10, fs=100.0))
         with pytest.raises(OverflowError):
             buf.write(linear_axis_message(samples=1, fs=100.0))
 
     def test_hybrid_axis_array_buffer_overflow_drop(self, linear_axis_message):
-        buf = HybridAxisArrayBuffer(
-            duration=0.1, overflow_strategy="drop", update_strategy="immediate"
-        )
+        buf = HybridAxisArrayBuffer(duration=0.1, overflow_strategy="drop", update_strategy="immediate")
         buf.write(linear_axis_message(samples=8, fs=100.0))
         buf.write(linear_axis_message(samples=4, fs=100.0))
         assert buf.available() == 10
 
     def test_hybrid_axis_array_buffer_overflow_grow(self, linear_axis_message):
-        buf = HybridAxisArrayBuffer(
-            duration=0.1, overflow_strategy="grow", update_strategy="immediate"
-        )
+        buf = HybridAxisArrayBuffer(duration=0.1, overflow_strategy="grow", update_strategy="immediate")
         buf.write(linear_axis_message(samples=8, fs=100.0))
         buf.write(linear_axis_message(samples=4, fs=100.0))
         assert buf.available() == 12

@@ -1,10 +1,9 @@
 import copy
 
 import numpy as np
-from ezmsg.util.messages.axisarray import AxisArray
 import pytest
-
-from ezmsg.sigproc.slicer import slicer, parse_slice
+from ezmsg.sigproc.slicer import parse_slice, slicer
+from ezmsg.util.messages.axisarray import AxisArray
 
 from tests.helpers.util import assert_messages_equal
 
@@ -32,9 +31,7 @@ def test_slicer_generator():
         dims=["time", "ch"],
         axes={
             "time": AxisArray.TimeAxis(fs=100.0, offset=0.1),
-            "ch": AxisArray.CoordinateAxis(
-                data=np.array([f"Ch{_}" for _ in range(n_chans)]), dims=["ch"]
-            ),
+            "ch": AxisArray.CoordinateAxis(data=np.array([f"Ch{_}" for _ in range(n_chans)]), dims=["ch"]),
         },
         key="test_slicer_generator",
     )
@@ -78,9 +75,7 @@ def test_slicer_gen_drop_dim():
         dims=["time", "ch"],
         axes={
             "time": AxisArray.TimeAxis(fs=100.0, offset=0.1),
-            "ch": AxisArray.CoordinateAxis(
-                data=np.array([f"Ch{_}" for _ in range(n_chans)]), dims=["ch"]
-            ),
+            "ch": AxisArray.CoordinateAxis(data=np.array([f"Ch{_}" for _ in range(n_chans)]), dims=["ch"]),
         },
         key="test_slicer_gen_drop_dim",
     )
@@ -107,9 +102,7 @@ def test_slicer_label(selection: str):
         dims=["time", "ch"],
         axes={
             "time": AxisArray.TimeAxis(fs=100.0, offset=0.1),
-            "ch": AxisArray.CoordinateAxis(
-                data=np.array([f"Ch{_}" for _ in range(n_chans)]), dims=["ch"]
-            ),
+            "ch": AxisArray.CoordinateAxis(data=np.array([f"Ch{_}" for _ in range(n_chans)]), dims=["ch"]),
         },
         key="test_slicer_label",
     )

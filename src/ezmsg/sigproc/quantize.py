@@ -1,5 +1,5 @@
-import numpy as np
 import ezmsg.core as ez
+import numpy as np
 from ezmsg.util.messages.axisarray import AxisArray, replace
 
 from .base import BaseTransformer, BaseTransformerUnit
@@ -65,7 +65,5 @@ class QuantizeTransformer(BaseTransformer[QuantizeSettings, AxisArray, AxisArray
         return replace(message, data=data)
 
 
-class QuantizerUnit(
-    BaseTransformerUnit[QuantizeSettings, AxisArray, AxisArray, QuantizeTransformer]
-):
+class QuantizerUnit(BaseTransformerUnit[QuantizeSettings, AxisArray, AxisArray, QuantizeTransformer]):
     SETTINGS = QuantizeSettings

@@ -2,14 +2,14 @@ import functools
 import math
 import typing
 
-import numpy as np
-import scipy.signal as sps
-import scipy.fft as sp_fft
-from scipy.special import lambertw
-import numpy.typing as npt
 import ezmsg.core as ez
+import numpy as np
+import numpy.typing as npt
+import scipy.fft as sp_fft
+import scipy.signal as sps
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
+from scipy.special import lambertw
 
 from .base import (
     BaseStatefulTransformer,
@@ -32,8 +32,14 @@ class MinPhaseMode(OptionsEnum):
     """The mode of operation for the filterbank."""
 
     NONE = "No kernel modification"
-    HILBERT = "Hilbert Method; designed to be used with equiripple filters (e.g., from remez) with unity or zero gain regions"
-    HOMOMORPHIC = "Works best with filters with an odd number of taps, and the resulting minimum phase filter will have a magnitude response that approximates the square root of the original filter’s magnitude response using half the number of taps"
+    HILBERT = (
+        "Hilbert Method; designed to be used with equiripple filters (e.g., from remez) with unity or zero gain regions"
+    )
+    HOMOMORPHIC = (
+        "Works best with filters with an odd number of taps, and the resulting minimum phase filter "
+        "will have a magnitude response that approximates the square root of the original filter’s "
+        "magnitude response using half the number of taps"
+    )
     # HOMOMORPHICFULL = "Like HOMOMORPHIC, but uses the full number of taps and same magnitude"
 
 
@@ -78,23 +84,17 @@ class FilterbankState:
     mode: FilterbankMode | None = None
 
 
-class FilterbankTransformer(
-    BaseStatefulTransformer[FilterbankSettings, AxisArray, AxisArray, FilterbankState]
-):
+class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArray, AxisArray, FilterbankState]):
     def _hash_message(self, message: AxisArray) -> int:
         axis = self.settings.axis or message.dims[0]
         gain = message.axes[axis].gain if axis in message.axes else 1.0
         targ_ax_ix = message.get_axis_idx(axis)
-        in_shape = (
-            message.data.shape[:targ_ax_ix] + message.data.shape[targ_ax_ix + 1 :]
-        )
+        in_shape = message.data.shape[:targ_ax_ix] + message.data.shape[targ_ax_ix + 1 :]
 
         return hash(
             (
                 message.key,
-                gain
-                if self.settings.mode in [FilterbankMode.FFT, FilterbankMode.AUTO]
-                else None,
+                gain if self.settings.mode in [FilterbankMode.FFT, FilterbankMode.AUTO] else None,
                 message.data.dtype.kind,
                 in_shape,
             )
@@ -104,9 +104,7 @@ class FilterbankTransformer(
         axis = self.settings.axis or message.dims[0]
         gain = message.axes[axis].gain if axis in message.axes else 1.0
         targ_ax_ix = message.get_axis_idx(axis)
-        in_shape = (
-            message.data.shape[:targ_ax_ix] + message.data.shape[targ_ax_ix + 1 :]
-        )
+        in_shape = message.data.shape[:targ_ax_ix] + message.data.shape[targ_ax_ix + 1 :]
 
         kernels = self.settings.kernels
         if self.settings.min_phase != MinPhaseMode.NONE:
@@ -118,9 +116,7 @@ class FilterbankTransformer(
             kernels = [sps.minimum_phase(k, method=method) for k in kernels]
 
         # Determine if this will be operating with complex data.
-        b_complex = message.data.dtype.kind == "c" or any(
-            [_.dtype.kind == "c" for _ in kernels]
-        )
+        b_complex = message.data.dtype.kind == "c" or any([_.dtype.kind == "c" for _ in kernels])
 
         # Calculate window_dur, window_shift, nfft
         max_kernel_len = max([_.size for _ in kernels])
@@ -130,17 +126,13 @@ class FilterbankTransformer(
 
         # Prepare previous iteration's overlap tail to add to input -- all zeros.
         tail_shape = in_shape + (len(kernels), self._state.overlap)
-        self._state.tail = np.zeros(
-            tail_shape, dtype="complex" if b_complex else "float"
-        )
+        self._state.tail = np.zeros(tail_shape, dtype="complex" if b_complex else "float")
 
         # Prepare output template -- kernels axis immediately before the target axis
         dummy_shape = in_shape + (len(kernels), 0)
         self._state.template = AxisArray(
             data=np.zeros(dummy_shape, dtype="complex" if b_complex else "float"),
-            dims=message.dims[:targ_ax_ix]
-            + message.dims[targ_ax_ix + 1 :]
-            + [self.settings.new_axis, axis],
+            dims=message.dims[:targ_ax_ix] + message.dims[targ_ax_ix + 1 :] + [self.settings.new_axis, axis],
             axes=message.axes.copy(),
             key=message.key,
         )
@@ -155,8 +147,7 @@ class FilterbankTransformer(
             dummy_arr = np.zeros(n_dummy)
             self._state.mode = (
                 FilterbankMode.CONV
-                if sps.choose_conv_method(dummy_arr, concat_kernel, mode="full")
-                == "direct"
+                if sps.choose_conv_method(dummy_arr, concat_kernel, mode="full") == "direct"
                 else FilterbankMode.FFT
             )
 
@@ -166,16 +157,11 @@ class FilterbankTransformer(
                 len(kernels),
                 self._state.overlap + message.data.shape[targ_ax_ix],
             )
-            self._state.dest_arr = np.zeros(
-                dest_shape, dtype="complex" if b_complex else "float"
-            )
+            self._state.dest_arr = np.zeros(dest_shape, dtype="complex" if b_complex else "float")
             self._state.prep_kerns = kernels
         else:  # FFT mode
             # Calculate optimal nfft and windowing size.
-            opt_size = (
-                -self._state.overlap
-                * lambertw(-1 / (2 * math.e * self._state.overlap), k=-1).real
-            )
+            opt_size = -self._state.overlap * lambertw(-1 / (2 * math.e * self._state.overlap), k=-1).real
             self._state.nfft = sp_fft.next_fast_len(math.ceil(opt_size))
             win_len = self._state.nfft - self._state.overlap
             # infft same as nfft. Keeping as separate variable because I might need it again.
@@ -201,19 +187,11 @@ class FilterbankTransformer(
             #  for a rather simple calculation. We may revisit if `spectrum` gets additional features, such as
             #  more fft backends.
             if b_complex:
-                self._state.fft = functools.partial(
-                    sp_fft.fft, n=self._state.nfft, norm="backward"
-                )
-                self._state.ifft = functools.partial(
-                    sp_fft.ifft, n=self._state.infft, norm="backward"
-                )
+                self._state.fft = functools.partial(sp_fft.fft, n=self._state.nfft, norm="backward")
+                self._state.ifft = functools.partial(sp_fft.ifft, n=self._state.infft, norm="backward")
             else:
-                self._state.fft = functools.partial(
-                    sp_fft.rfft, n=self._state.nfft, norm="backward"
-                )
-                self._state.ifft = functools.partial(
-                    sp_fft.irfft, n=self._state.infft, norm="backward"
-                )
+                self._state.fft = functools.partial(sp_fft.rfft, n=self._state.nfft, norm="backward")
+                self._state.ifft = functools.partial(sp_fft.irfft, n=self._state.infft, norm="backward")
 
             # Calculate fft of kernels
             self._state.prep_kerns = np.array([self._state.fft(_) for _ in kernels])
@@ -229,9 +207,7 @@ class FilterbankTransformer(
             in_dat = np.moveaxis(message.data, targ_ax_ix, -1)
             if self._state.mode == FilterbankMode.FFT:
                 # Fix message.dims because we will pass it to windower
-                move_dims = (
-                    message.dims[:targ_ax_ix] + message.dims[targ_ax_ix + 1 :] + [axis]
-                )
+                move_dims = message.dims[:targ_ax_ix] + message.dims[targ_ax_ix + 1 :] + [axis]
                 message = replace(message, data=in_dat, dims=move_dims)
         else:
             in_dat = message.data
@@ -239,22 +215,15 @@ class FilterbankTransformer(
         if self._state.mode == FilterbankMode.CONV:
             n_dest = in_dat.shape[-1] + self._state.overlap
             if self._state.dest_arr.shape[-1] < n_dest:
-                pad = np.zeros(
-                    self._state.dest_arr.shape[:-1]
-                    + (n_dest - self._state.dest_arr.shape[-1],)
-                )
-                self._state.dest_arr = np.concatenate(
-                    [self._state.dest_arr, pad], axis=-1
-                )
+                pad = np.zeros(self._state.dest_arr.shape[:-1] + (n_dest - self._state.dest_arr.shape[-1],))
+                self._state.dest_arr = np.concatenate([self._state.dest_arr, pad], axis=-1)
             self._state.dest_arr.fill(0)
 
             # Note: I tried several alternatives to this loop; all were slower than this.
             #  numba.jit; stride_tricks + np.einsum; threading. Latter might be better with Python 3.13.
             for k_ix, k in enumerate(self._state.prep_kerns):
                 n_out = in_dat.shape[-1] + k.shape[-1] - 1
-                self._state.dest_arr[..., k_ix, :n_out] = np.apply_along_axis(
-                    np.convolve, -1, in_dat, k, mode="full"
-                )
+                self._state.dest_arr[..., k_ix, :n_out] = np.apply_along_axis(np.convolve, -1, in_dat, k, mode="full")
             self._state.dest_arr[..., : self._state.overlap] += self._state.tail
             new_tail = self._state.dest_arr[..., in_dat.shape[-1] : n_dest]
             if new_tail.size > 0:
@@ -278,18 +247,14 @@ class FilterbankTransformer(
             # Previous iteration's tail:
             overlapped[..., :1, : self._state.overlap] += self._state.tail
             # window-to-window:
-            overlapped[..., 1:, : self._state.overlap] += overlapped[
-                ..., :-1, -self._state.overlap :
-            ]
+            overlapped[..., 1:, : self._state.overlap] += overlapped[..., :-1, -self._state.overlap :]
             # Save tail:
             new_tail = overlapped[..., -1:, -self._state.overlap :]
             if new_tail.size > 0:
                 # All of the above code works if input is size-zero, but we don't want to save a zero-size tail.
                 self._state.tail = new_tail
             # Concat over win axis, without overlap.
-            res = overlapped[..., : -self._state.overlap].reshape(
-                overlapped.shape[:-2] + (-1,)
-            )
+            res = overlapped[..., : -self._state.overlap].reshape(overlapped.shape[:-2] + (-1,))
 
         return replace(
             self._state.template,
@@ -298,9 +263,7 @@ class FilterbankTransformer(
         )
 
 
-class Filterbank(
-    BaseTransformerUnit[FilterbankSettings, AxisArray, AxisArray, FilterbankTransformer]
-):
+class Filterbank(BaseTransformerUnit[FilterbankSettings, AxisArray, AxisArray, FilterbankTransformer]):
     SETTINGS = FilterbankSettings
 
 

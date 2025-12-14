@@ -1,15 +1,16 @@
-from datetime import datetime
-import os
-import pytest
 import logging
+import os
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 from ezmsg.sigproc.util.profile import (
+    HEADER,
     _setup_logger,
+    get_logger_path,
     profile_method,
     profile_subpub,
-    get_logger_path,
-    HEADER,
 )
 
 
@@ -33,9 +34,7 @@ def test_logger_creation():
 @pytest.fixture
 def mock_env():
     """Fixture to mock environment variables."""
-    with patch.dict(
-        os.environ, {"EZMSG_PROFILE": "test_profiler.log", "EZMSG_LOGLEVEL": "DEBUG"}
-    ):
+    with patch.dict(os.environ, {"EZMSG_PROFILE": "test_profiler.log", "EZMSG_LOGLEVEL": "DEBUG"}):
         yield
 
 
@@ -181,9 +180,7 @@ async def test_profile_subpub_decorator(mock_logger_path):
         second_line = f.readline().strip()
     log_text = second_line.split(",")
     assert len(log_text) == 6
-    datetime.strptime(
-        log_text[0], "%Y-%m-%dT%H:%M:%S%z"
-    )  # Will throw if format is incorrect
+    datetime.strptime(log_text[0], "%Y-%m-%dT%H:%M:%S%z")  # Will throw if format is incorrect
     assert log_text[1].endswith("test_profile.DummyUnit")
     assert log_text[2] == "dummy_address"
     assert log_text[3] == "None"

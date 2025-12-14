@@ -1,20 +1,19 @@
-import pytest
 import numpy as np
+import pytest
 import scipy.fft as sp_fft
-from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.util.messages.chunker import array_chunker
-
 from ezmsg.sigproc.spectrum import (
-    SpectrumTransformer,
-    SpectralTransform,
     SpectralOutput,
+    SpectralTransform,
+    SpectrumTransformer,
     WindowFunction,
 )
+from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.chunker import array_chunker
 
 try:
     import bytewax.operators as op
     from bytewax.dataflow import Dataflow
-    from bytewax.testing import TestingSource, TestingSink, run_main
+    from bytewax.testing import TestingSink, TestingSource, run_main
 
     b_bytewax = True
 except ImportError:

@@ -1,14 +1,14 @@
 import enum
-from functools import partial
 import typing
+from functools import partial
 
+import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
-import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import (
     AxisArray,
-    slice_along_axis,
     replace,
+    slice_along_axis,
 )
 
 from .base import (
@@ -127,17 +127,13 @@ class SpectrumState:
     window: npt.NDArray | None = None
 
 
-class SpectrumTransformer(
-    BaseStatefulTransformer[SpectrumSettings, AxisArray, AxisArray, SpectrumState]
-):
+class SpectrumTransformer(BaseStatefulTransformer[SpectrumSettings, AxisArray, AxisArray, SpectrumState]):
     def _hash_message(self, message: AxisArray) -> int:
         axis = self.settings.axis or message.dims[0]
         ax_idx = message.get_axis_idx(axis)
         ax_info = message.axes[axis]
         targ_len = message.data.shape[ax_idx]
-        return hash(
-            (targ_len, message.data.ndim, message.data.dtype.kind, ax_idx, ax_info.gain)
-        )
+        return hash((targ_len, message.data.ndim, message.data.dtype.kind, ax_idx, ax_info.gain))
 
     def _reset_state(self, message: AxisArray) -> None:
         axis = self.settings.axis or message.dims[0]
@@ -156,8 +152,7 @@ class SpectrumTransformer(
             + [1] * (message.data.ndim - 1 - ax_idx)
         )
         if self.settings.transform != SpectralTransform.RAW_COMPLEX and not (
-            self.settings.transform == SpectralTransform.REAL
-            or self.settings.transform == SpectralTransform.IMAG
+            self.settings.transform == SpectralTransform.REAL or self.settings.transform == SpectralTransform.IMAG
         ):
             scale = np.sum(window**2.0) * ax_info.gain
 
@@ -170,30 +165,21 @@ class SpectrumTransformer(
         if (not b_complex) and self.settings.output == SpectralOutput.POSITIVE:
             # If input is not complex and desired output is SpectralOutput.POSITIVE, we can save some computation
             #  by using rfft and rfftfreq.
-            self.state.fftfun = partial(
-                np.fft.rfft, n=nfft, axis=ax_idx, norm=self.settings.norm
-            )
+            self.state.fftfun = partial(np.fft.rfft, n=nfft, axis=ax_idx, norm=self.settings.norm)
             freqs = np.fft.rfftfreq(nfft, d=ax_info.gain * targ_len / nfft)
         else:
-            self.state.fftfun = partial(
-                np.fft.fft, n=nfft, axis=ax_idx, norm=self.settings.norm
-            )
+            self.state.fftfun = partial(np.fft.fft, n=nfft, axis=ax_idx, norm=self.settings.norm)
             freqs = np.fft.fftfreq(nfft, d=ax_info.gain * targ_len / nfft)
             if self.settings.output == SpectralOutput.POSITIVE:
                 self.state.f_sl = slice(None, nfft // 2 + 1 - (nfft % 2))
             elif self.settings.output == SpectralOutput.NEGATIVE:
                 freqs = np.fft.fftshift(freqs, axes=-1)
                 self.state.f_sl = slice(None, nfft // 2 + 1)
-            elif (
-                self.settings.do_fftshift
-                and self.settings.output == SpectralOutput.FULL
-            ):
+            elif self.settings.do_fftshift and self.settings.output == SpectralOutput.FULL:
                 freqs = np.fft.fftshift(freqs, axes=-1)
             freqs = freqs[self.state.f_sl]
         freqs = freqs.tolist()  # To please type checking
-        self.state.freq_axis = AxisArray.LinearAxis(
-            unit="Hz", gain=freqs[1] - freqs[0], offset=freqs[0]
-        )
+        self.state.freq_axis = AxisArray.LinearAxis(unit="Hz", gain=freqs[1] - freqs[0], offset=freqs[0])
         self.state.new_dims = (
             message.dims[:ax_idx]
             + [
@@ -232,11 +218,7 @@ class SpectrumTransformer(
         ax_idx = message.get_axis_idx(axis)
         targ_len = message.data.shape[ax_idx]
 
-        new_axes = {
-            k: v
-            for k, v in message.axes.items()
-            if k not in [self.settings.out_axis, axis]
-        }
+        new_axes = {k: v for k, v in message.axes.items() if k not in [self.settings.out_axis, axis]}
         new_axes[self.settings.out_axis or axis] = self.state.freq_axis
 
         if self.state.window is not None:
@@ -261,9 +243,7 @@ class SpectrumTransformer(
         return msg_out
 
 
-class Spectrum(
-    BaseTransformerUnit[SpectrumSettings, AxisArray, AxisArray, SpectrumTransformer]
-):
+class Spectrum(BaseTransformerUnit[SpectrumSettings, AxisArray, AxisArray, SpectrumTransformer]):
     SETTINGS = SpectrumSettings
 
 

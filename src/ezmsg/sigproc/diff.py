@@ -2,9 +2,9 @@ import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
 from ezmsg.sigproc.base import (
+    BaseStatefulTransformer,
     BaseTransformerUnit,
     processor_state,
-    BaseStatefulTransformer,
 )
 from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
 from ezmsg.util.messages.util import replace
@@ -21,9 +21,7 @@ class DiffState:
     last_time: float | None = None
 
 
-class DiffTransformer(
-    BaseStatefulTransformer[DiffSettings, AxisArray, AxisArray, DiffState]
-):
+class DiffTransformer(BaseStatefulTransformer[DiffSettings, AxisArray, AxisArray, DiffState]):
     def _hash_message(self, message: AxisArray) -> int:
         ax_idx = message.get_axis_idx(self.settings.axis)
         sample_shape = message.data.shape[:ax_idx] + message.data.shape[ax_idx + 1 :]
@@ -49,20 +47,14 @@ class DiffTransformer(
             axis=ax_idx,
         )
         # Prepare last_dat for next iteration
-        self.state.last_dat = slice_along_axis(
-            message.data, slice(-1, None), axis=ax_idx
-        )
+        self.state.last_dat = slice_along_axis(message.data, slice(-1, None), axis=ax_idx)
         # Scale by fs if requested. This convers the diff to a derivative. e.g., diff of position becomes velocity.
         if self.settings.scale_by_fs:
             ax_info = message.get_axis(axis)
             if hasattr(ax_info, "data"):
                 dt = np.diff(np.concatenate(([self.state.last_time], ax_info.data)))
                 # Expand dt dims to match diffs
-                exp_sl = (
-                    (None,) * ax_idx
-                    + (Ellipsis,)
-                    + (None,) * (message.data.ndim - ax_idx - 1)
-                )
+                exp_sl = (None,) * ax_idx + (Ellipsis,) + (None,) * (message.data.ndim - ax_idx - 1)
                 diffs /= dt[exp_sl]
                 self.state.last_time = ax_info.data[-1]  # For next iteration
             else:
@@ -71,9 +63,7 @@ class DiffTransformer(
         return replace(message, data=diffs)
 
 
-class DiffUnit(
-    BaseTransformerUnit[DiffSettings, AxisArray, AxisArray, DiffTransformer]
-):
+class DiffUnit(BaseTransformerUnit[DiffSettings, AxisArray, AxisArray, DiffTransformer]):
     SETTINGS = DiffSettings
 
 

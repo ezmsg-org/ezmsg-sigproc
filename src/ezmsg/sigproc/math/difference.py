@@ -10,12 +10,11 @@ class ConstDifferenceSettings(ez.Settings):
     """number to subtract or be subtracted from the input data"""
 
     subtrahend: bool = True
-    """If True (default) then value is subtracted from the input data. If False, the input data is subtracted from value."""
+    """If True (default) then value is subtracted from the input data. If False, the input data
+    is subtracted from value."""
 
 
-class ConstDifferenceTransformer(
-    BaseTransformer[ConstDifferenceSettings, AxisArray, AxisArray]
-):
+class ConstDifferenceTransformer(BaseTransformer[ConstDifferenceSettings, AxisArray, AxisArray]):
     def _process(self, message: AxisArray) -> AxisArray:
         return replace(
             message,
@@ -25,17 +24,11 @@ class ConstDifferenceTransformer(
         )
 
 
-class ConstDifference(
-    BaseTransformerUnit[
-        ConstDifferenceSettings, AxisArray, AxisArray, ConstDifferenceTransformer
-    ]
-):
+class ConstDifference(BaseTransformerUnit[ConstDifferenceSettings, AxisArray, AxisArray, ConstDifferenceTransformer]):
     SETTINGS = ConstDifferenceSettings
 
 
-def const_difference(
-    value: float = 0.0, subtrahend: bool = True
-) -> ConstDifferenceTransformer:
+def const_difference(value: float = 0.0, subtrahend: bool = True) -> ConstDifferenceTransformer:
     """
     result = (in_data - value) if subtrahend else (value - in_data)
     https://en.wikipedia.org/wiki/Template:Arithmetic_operations
@@ -47,9 +40,7 @@ def const_difference(
 
     Returns: :obj:`ConstDifferenceTransformer`.
     """
-    return ConstDifferenceTransformer(
-        ConstDifferenceSettings(value=value, subtrahend=subtrahend)
-    )
+    return ConstDifferenceTransformer(ConstDifferenceSettings(value=value, subtrahend=subtrahend))
 
 
 # class DifferenceSettings(ez.Settings):

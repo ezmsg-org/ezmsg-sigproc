@@ -1,14 +1,13 @@
-import pytest
-import numpy as np
-import scipy.signal
 import ezmsg.core as ez
-from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.util.messagecodec import message_log
-from ezmsg.util.messagelogger import MessageLogger
-from ezmsg.util.terminate import TerminateOnTotal
-
+import numpy as np
+import pytest
+import scipy.signal
 from ezmsg.sigproc.decimate import Decimate
 from ezmsg.sigproc.synth import EEGSynth
+from ezmsg.util.messagecodec import message_log
+from ezmsg.util.messagelogger import MessageLogger
+from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.terminate import TerminateOnTotal
 
 from tests.helpers.util import get_test_fn
 
@@ -16,9 +15,7 @@ from tests.helpers.util import get_test_fn
 @pytest.mark.parametrize("target_rate", [100.0, 500.0])
 def test_decimate_system(target_rate: float):
     test_filename = get_test_fn()
-    test_filename_raw = test_filename.parent / (
-        test_filename.stem + "raw" + test_filename.suffix
-    )
+    test_filename_raw = test_filename.parent / (test_filename.stem + "raw" + test_filename.suffix)
 
     fs = 500.0
     n_ch = 8

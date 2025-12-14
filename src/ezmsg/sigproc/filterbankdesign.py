@@ -3,22 +3,19 @@ import typing
 import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
-
-from ezmsg.util.messages.util import replace
 from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.util import replace
 
 from .base import (
     BaseStatefulTransformer,
     processor_state,
 )
-
 from .filterbank import (
-    FilterbankTransformer,
-    FilterbankSettings,
     FilterbankMode,
+    FilterbankSettings,
+    FilterbankTransformer,
     MinPhaseMode,
 )
-
 from .kaiser import KaiserFilterSettings, kaiser_design_fun
 
 
@@ -55,9 +52,7 @@ class FilterbankDesignState:
 
 
 class FilterbankDesignTransformer(
-    BaseStatefulTransformer[
-        FilterbankDesignSettings, AxisArray, AxisArray, FilterbankDesignState
-    ],
+    BaseStatefulTransformer[FilterbankDesignSettings, AxisArray, AxisArray, FilterbankDesignState],
 ):
     """
     Transformer that designs and applies a filterbank based on Kaiser windowed FIR filters.
@@ -70,9 +65,7 @@ class FilterbankDesignTransformer(
         else:
             raise ValueError(f"Invalid direction: {dir}. Must be 'in' or 'out'.")
 
-    def update_settings(
-        self, new_settings: typing.Optional[FilterbankDesignSettings] = None, **kwargs
-    ) -> None:
+    def update_settings(self, new_settings: typing.Optional[FilterbankDesignSettings] = None, **kwargs) -> None:
         """
         Update settings and mark that filter coefficients need to be recalculated.
 

@@ -1,65 +1,19 @@
 Base Processors
-========================================
+===============
 
-Here is the API for the base processors included in the `ezmsg-sigproc` extension. For more detailed information on the design decisions behind these base processors, please refer to the :doc:`ezmsg-sigproc explainer <../../explanations/sigproc>`.
+The base processor classes are provided by the ``ezmsg-baseproc`` package and re-exported from ``ezmsg.sigproc.base`` for backwards compatibility.
 
+For detailed documentation on the base processor architecture, see the `ezmsg-baseproc documentation <https://www.ezmsg.org/ezmsg-baseproc/>`_.
 
-.. autoclass:: ezmsg.sigproc.base.BaseProcessor
+.. note::
+   New code should import directly from ``ezmsg.baseproc`` instead of ``ezmsg.sigproc.base``.
+
+API Reference
+-------------
+
+The following classes are re-exported from ``ezmsg.baseproc``:
+
+.. automodule:: ezmsg.sigproc.base
    :members:
    :show-inheritance:
-   :inherited-members:
-
-.. autoclass:: ezmsg.sigproc.base.BaseProducer
-   :members:
-   :show-inheritance:
-   :inherited-members:
-
-.. autoclass:: ezmsg.sigproc.base.BaseConsumer
-   :members:
-   :show-inheritance:
-   :inherited-members:
-
-.. autoclass:: ezmsg.sigproc.base.BaseTransformer
-   :members:
-   :show-inheritance:
-:inherited-members:
-
-.. autoclass:: ezmsg.sigproc.base.BaseStatefulProcessor
-   :members:
-   :show-inheritance:
-   :inherited-members:
-
-.. autoclass:: ezmsg.sigproc.base.BaseStatefulProducer
-   :members:
-   :show-inheritance:
-   :inherited-members:
-
-.. autoclass:: ezmsg.sigproc.base.BaseStatefulConsumer
-   :members:
-   :show-inheritance:
-   :inherited-members:
-
-.. autoclass:: ezmsg.sigproc.base.BaseStatefulTransformer
-   :members:
-   :show-inheritance:
-   :inherited-members:
-
-.. autoclass:: ezmsg.sigproc.base.BaseAdaptiveTransformer
-   :members:
-   :show-inheritance:
-   :inherited-members:
-
-.. autoclass:: ezmsg.sigproc.base.BaseAsyncTransformer
-   :members:
-   :show-inheritance:
-   :inherited-members:
-
-.. autoclass:: ezmsg.sigproc.base.CompositeProcessor
-   :members:
-   :show-inheritance:
-   :inherited-members:
-
-.. autoclass:: ezmsg.sigproc.base.CompositeProducer
-   :members:
-   :show-inheritance:
-   :inherited-members:
+   :imported-members:

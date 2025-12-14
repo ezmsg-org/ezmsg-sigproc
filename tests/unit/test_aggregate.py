@@ -3,15 +3,14 @@ from functools import partial
 
 import numpy as np
 import pytest
-from frozendict import frozendict
-from ezmsg.util.messages.axisarray import AxisArray
-
 from ezmsg.sigproc.aggregate import (
-    ranged_aggregate,
-    AggregationFunction,
-    AggregateTransformer,
     AggregateSettings,
+    AggregateTransformer,
+    AggregationFunction,
+    ranged_aggregate,
 )
+from ezmsg.util.messages.axisarray import AxisArray
+from frozendict import frozendict
 
 from tests.helpers.util import assert_messages_equal
 
@@ -86,21 +85,14 @@ def test_aggregate(agg_func: AggregationFunction):
         AggregationFunction.SUM: partial(np.sum, axis=-1, keepdims=True),
     }[agg_func]
     expected_data = np.concatenate(
-        [
-            agg_func(
-                data[..., np.logical_and(targ_ax_vec >= start, targ_ax_vec <= stop)]
-            )
-            for (start, stop) in bands
-        ],
+        [agg_func(data[..., np.logical_and(targ_ax_vec >= start, targ_ax_vec <= stop)]) for (start, stop) in bands],
         axis=-1,
     )
     received_data = AxisArray.concatenate(*out_msgs, dim="time").data
     assert np.allclose(received_data, expected_data)
 
 
-@pytest.mark.parametrize(
-    "agg_func", [AggregationFunction.ARGMIN, AggregationFunction.ARGMAX]
-)
+@pytest.mark.parametrize("agg_func", [AggregationFunction.ARGMIN, AggregationFunction.ARGMAX])
 def test_arg_aggregate(agg_func: AggregationFunction):
     bands = [(5.0, 20.0), (30.0, 50.0)]
     in_msgs = [_ for _ in get_msg_gen()]
@@ -119,9 +111,7 @@ def test_arg_aggregate(agg_func: AggregationFunction):
 def test_trapezoid():
     bands = [(5.0, 20.0), (30.0, 50.0)]
     in_msgs = [_ for _ in get_msg_gen()]
-    gen = ranged_aggregate(
-        axis="freq", bands=bands, operation=AggregationFunction.TRAPEZOID
-    )
+    gen = ranged_aggregate(axis="freq", bands=bands, operation=AggregationFunction.TRAPEZOID)
     out_msgs = [gen.send(_) for _ in in_msgs]
 
     out_dat = AxisArray.concatenate(*out_msgs, dim="time").data
@@ -172,9 +162,7 @@ def test_aggregate_handle_change(change_ax: str):
 
 def get_simple_msg(n_times=10, n_chans=5, n_freqs=8, fs=100.0):
     """Create a simple AxisArray message for testing AggregateTransformer."""
-    data = np.arange(n_times * n_chans * n_freqs, dtype=float).reshape(
-        n_times, n_chans, n_freqs
-    )
+    data = np.arange(n_times * n_chans * n_freqs, dtype=float).reshape(n_times, n_chans, n_freqs)
     return AxisArray(
         data=data,
         dims=["time", "ch", "freq"],
@@ -207,9 +195,7 @@ def test_aggregate_transformer_basic(operation: AggregationFunction):
     msg_in = get_simple_msg()
     backup = copy.deepcopy(msg_in)
 
-    transformer = AggregateTransformer(
-        AggregateSettings(axis="freq", operation=operation)
-    )
+    transformer = AggregateTransformer(AggregateSettings(axis="freq", operation=operation))
     msg_out = transformer(msg_in)
 
     # Verify input wasn't modified
@@ -237,9 +223,7 @@ def test_aggregate_transformer_different_axes(axis: str):
     """Test AggregateTransformer can aggregate along different axes."""
     msg_in = get_simple_msg(n_times=10, n_chans=5, n_freqs=8)
 
-    transformer = AggregateTransformer(
-        AggregateSettings(axis=axis, operation=AggregationFunction.MEAN)
-    )
+    transformer = AggregateTransformer(AggregateSettings(axis=axis, operation=AggregationFunction.MEAN))
     msg_out = transformer(msg_in)
 
     # Verify the specified axis was removed
@@ -265,9 +249,7 @@ def test_aggregate_transformer_none_raises():
     """Test that AggregationFunction.NONE raises an error."""
     msg_in = get_simple_msg()
 
-    transformer = AggregateTransformer(
-        AggregateSettings(axis="freq", operation=AggregationFunction.NONE)
-    )
+    transformer = AggregateTransformer(AggregateSettings(axis="freq", operation=AggregationFunction.NONE))
 
     with pytest.raises(ValueError, match="NONE is not supported"):
         transformer(msg_in)
@@ -291,9 +273,7 @@ def test_aggregate_transformer_nan_operations(operation: AggregationFunction):
     msg_in.data[0, 0, 0] = np.nan
     msg_in.data[5, 2, 3] = np.nan
 
-    transformer = AggregateTransformer(
-        AggregateSettings(axis="freq", operation=operation)
-    )
+    transformer = AggregateTransformer(AggregateSettings(axis="freq", operation=operation))
     msg_out = transformer(msg_in)
 
     # Verify output doesn't have NaN where nan-operations should have handled it
@@ -302,16 +282,12 @@ def test_aggregate_transformer_nan_operations(operation: AggregationFunction):
     assert np.allclose(msg_out.data, expected, equal_nan=True)
 
 
-@pytest.mark.parametrize(
-    "operation", [AggregationFunction.ARGMIN, AggregationFunction.ARGMAX]
-)
+@pytest.mark.parametrize("operation", [AggregationFunction.ARGMIN, AggregationFunction.ARGMAX])
 def test_aggregate_transformer_argminmax(operation: AggregationFunction):
     """Test AggregateTransformer with argmin/argmax operations."""
     msg_in = get_simple_msg()
 
-    transformer = AggregateTransformer(
-        AggregateSettings(axis="freq", operation=operation)
-    )
+    transformer = AggregateTransformer(AggregateSettings(axis="freq", operation=operation))
     msg_out = transformer(msg_in)
 
     # Verify output shape (axis removed)
@@ -328,9 +304,7 @@ def test_aggregate_transformer_trapezoid():
     """Test AggregateTransformer with trapezoid integration."""
     msg_in = get_simple_msg(n_times=5, n_chans=3, n_freqs=10)
 
-    transformer = AggregateTransformer(
-        AggregateSettings(axis="freq", operation=AggregationFunction.TRAPEZOID)
-    )
+    transformer = AggregateTransformer(AggregateSettings(axis="freq", operation=AggregationFunction.TRAPEZOID))
     msg_out = transformer(msg_in)
 
     # Verify output shape
@@ -348,9 +322,7 @@ def test_aggregate_transformer_trapezoid():
 def test_aggregate_transformer_trapezoid_coordinate_axis():
     """Test trapezoid integration with CoordinateAxis."""
     n_times, n_chans, n_freqs = 5, 3, 10
-    data = np.arange(n_times * n_chans * n_freqs, dtype=float).reshape(
-        n_times, n_chans, n_freqs
-    )
+    data = np.arange(n_times * n_chans * n_freqs, dtype=float).reshape(n_times, n_chans, n_freqs)
     freq_values = np.array([1.0, 2.0, 4.0, 7.0, 11.0, 16.0, 22.0, 29.0, 37.0, 46.0])
     msg_in = AxisArray(
         data=data,
@@ -358,16 +330,12 @@ def test_aggregate_transformer_trapezoid_coordinate_axis():
         axes=frozendict(
             {
                 "time": AxisArray.TimeAxis(fs=100.0, offset=0.0),
-                "freq": AxisArray.CoordinateAxis(
-                    data=freq_values, dims=["freq"], unit="Hz"
-                ),
+                "freq": AxisArray.CoordinateAxis(data=freq_values, dims=["freq"], unit="Hz"),
             }
         ),
     )
 
-    transformer = AggregateTransformer(
-        AggregateSettings(axis="freq", operation=AggregationFunction.TRAPEZOID)
-    )
+    transformer = AggregateTransformer(AggregateSettings(axis="freq", operation=AggregationFunction.TRAPEZOID))
     msg_out = transformer(msg_in)
 
     # Calculate expected using the coordinate values
@@ -379,9 +347,7 @@ def test_aggregate_transformer_preserves_other_axes():
     """Test that non-aggregated axes are preserved correctly."""
     msg_in = get_simple_msg()
 
-    transformer = AggregateTransformer(
-        AggregateSettings(axis="freq", operation=AggregationFunction.MEAN)
-    )
+    transformer = AggregateTransformer(AggregateSettings(axis="freq", operation=AggregationFunction.MEAN))
     msg_out = transformer(msg_in)
 
     # Verify time axis preserved
@@ -397,9 +363,7 @@ def test_aggregate_transformer_preserves_other_axes():
 
 def test_aggregate_transformer_multiple_calls():
     """Test that transformer works correctly with multiple calls."""
-    transformer = AggregateTransformer(
-        AggregateSettings(axis="freq", operation=AggregationFunction.SUM)
-    )
+    transformer = AggregateTransformer(AggregateSettings(axis="freq", operation=AggregationFunction.SUM))
 
     for i in range(3):
         msg_in = get_simple_msg()

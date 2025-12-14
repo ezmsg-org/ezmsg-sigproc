@@ -1,16 +1,10 @@
 import asyncio  # noqa: F401
-from dataclasses import field
 import os
-
-import numpy as np
-import pytest
+from dataclasses import field
 
 import ezmsg.core as ez
-from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
-from ezmsg.util.messagecodec import message_log
-from ezmsg.util.terminate import TerminateOnTotalSettings, TerminateOnTotal
-from tests.helpers.util import get_test_fn
+import numpy as np
+import pytest
 from ezmsg.sigproc.synth import (
     Clock,
     ClockSettings,
@@ -19,14 +13,18 @@ from ezmsg.sigproc.synth import (
     EEGSynth,
     EEGSynthSettings,
 )
+from ezmsg.util.messagecodec import message_log
+from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
+from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.terminate import TerminateOnTotal, TerminateOnTotalSettings
+
+from tests.helpers.util import get_test_fn
 
 
 class ClockTestSystemSettings(ez.Settings):
     clock_settings: ClockSettings
     log_settings: MessageLoggerSettings
-    term_settings: TerminateOnTotalSettings = field(
-        default_factory=TerminateOnTotalSettings
-    )
+    term_settings: TerminateOnTotalSettings = field(default_factory=TerminateOnTotalSettings)
 
 
 class ClockTestSystem(ez.Collection):
@@ -76,9 +74,7 @@ def test_clock_system(
 class CounterTestSystemSettings(ez.Settings):
     counter_settings: CounterSettings
     log_settings: MessageLoggerSettings
-    term_settings: TerminateOnTotalSettings = field(
-        default_factory=TerminateOnTotalSettings
-    )
+    term_settings: TerminateOnTotalSettings = field(default_factory=TerminateOnTotalSettings)
 
 
 class CounterTestSystem(ez.Collection):
@@ -182,9 +178,7 @@ def test_counter_system(
 class EEGSynthSettingsTest(ez.Settings):
     synth_settings: EEGSynthSettings
     log_settings: MessageLoggerSettings
-    term_settings: TerminateOnTotalSettings = field(
-        default_factory=TerminateOnTotalSettings
-    )
+    term_settings: TerminateOnTotalSettings = field(default_factory=TerminateOnTotalSettings)
 
 
 class EEGSynthIntegrationTest(ez.Collection):

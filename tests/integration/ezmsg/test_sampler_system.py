@@ -1,19 +1,18 @@
 import os
 
-
 import ezmsg.core as ez
-from ezmsg.util.messagecodec import message_log
-from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
 from ezmsg.sigproc.sampler import (
     Sampler,
     SamplerSettings,
+    SampleTriggerMessage,
     TriggerGenerator,
     TriggerGeneratorSettings,
-    SampleTriggerMessage,
 )
 from ezmsg.sigproc.synth import Oscillator, OscillatorSettings
-from ezmsg.util.terminate import TerminateOnTotal, TerminateOnTotalSettings
 from ezmsg.util.debuglog import DebugLog
+from ezmsg.util.messagecodec import message_log
+from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
+from ezmsg.util.terminate import TerminateOnTotal, TerminateOnTotalSettings
 
 from tests.helpers.util import get_test_fn
 
@@ -78,9 +77,7 @@ def test_sampler_system(test_name: str | None = None):
             phase=0.0,  # Phase offset (in radians)
             sync=True,  # Adjust `freq` to sync with sampling rate
         ),
-        trigger_settings=TriggerGeneratorSettings(
-            period=period, prewait=0.5, publish_period=publish_period
-        ),
+        trigger_settings=TriggerGeneratorSettings(period=period, prewait=0.5, publish_period=publish_period),
         sampler_settings=SamplerSettings(buffer_dur=publish_period + 1.0),
         log_settings=MessageLoggerSettings(output=test_filename),
         term_settings=TerminateOnTotalSettings(total=n_msgs),
@@ -95,9 +92,6 @@ def test_sampler_system(test_name: str | None = None):
     assert len(messages) == n_msgs
     assert all([_.sample.data.shape == (int(freq * sample_dur), 1) for _ in messages])
     # Test the sample window slice vs the trigger timestamps
-    latencies = [
-        _.sample.axes["time"].offset - (_.trigger.timestamp + _.trigger.period[0])
-        for _ in messages
-    ]
+    latencies = [_.sample.axes["time"].offset - (_.trigger.timestamp + _.trigger.period[0]) for _ in messages]
     assert all([0 <= _ < 1 / freq for _ in latencies])
     # Given that the input is a pure sinusoid, we could test that the signal has expected characteristics.

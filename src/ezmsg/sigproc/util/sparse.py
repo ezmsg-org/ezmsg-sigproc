@@ -2,9 +2,7 @@ import numpy as np
 import sparse
 
 
-def sliding_win_oneaxis_old(
-    s: sparse.SparseArray, nwin: int, axis: int, step: int = 1
-) -> sparse.SparseArray:
+def sliding_win_oneaxis_old(s: sparse.SparseArray, nwin: int, axis: int, step: int = 1) -> sparse.SparseArray:
     """
     Like `ezmsg.util.messages.axisarray.sliding_win_oneaxis` but for sparse arrays.
     This approach is about 4x slower than the version that uses coordinate arithmetic below.
@@ -23,16 +21,12 @@ def sliding_win_oneaxis_old(
     targ_slices = [slice(_, _ + nwin) for _ in range(0, s.shape[axis] - nwin + 1, step)]
     s = s.reshape(s.shape[:axis] + (1,) + s.shape[axis:])
     full_slices = (slice(None),) * s.ndim
-    full_slices = [
-        full_slices[: axis + 1] + (sl,) + full_slices[axis + 2 :] for sl in targ_slices
-    ]
+    full_slices = [full_slices[: axis + 1] + (sl,) + full_slices[axis + 2 :] for sl in targ_slices]
     result = sparse.concatenate([s[_] for _ in full_slices], axis=axis)
     return result
 
 
-def sliding_win_oneaxis(
-    s: sparse.SparseArray, nwin: int, axis: int, step: int = 1
-) -> sparse.SparseArray:
+def sliding_win_oneaxis(s: sparse.SparseArray, nwin: int, axis: int, step: int = 1) -> sparse.SparseArray:
     """
     Generates a view-like sparse array using a sliding window of specified length along a specified axis.
     Sparse analog of an optimized dense as_strided-based implementation with these properties:
@@ -72,9 +66,7 @@ def sliding_win_oneaxis(
     n_win_out = len(win_starts)
     if n_win_out <= 0:
         # Return array with proper shape except empty along windows axis
-        return sparse.zeros(
-            s.shape[:axis] + (0,) + (nwin,) + s.shape[axis + 1 :], dtype=s.dtype
-        )
+        return sparse.zeros(s.shape[:axis] + (0,) + (nwin,) + s.shape[axis + 1 :], dtype=s.dtype)
 
     coo = s.asformat("coo")
     coords = coo.coords  # shape: (ndim, nnz)
@@ -112,9 +104,7 @@ def sliding_win_oneaxis(
         out_data_blocks.append(data[sel])
 
     if not out_coords_blocks:
-        return sparse.zeros(
-            s.shape[:axis] + (n_win_out,) + (nwin,) + s.shape[axis + 1 :], dtype=s.dtype
-        )
+        return sparse.zeros(s.shape[:axis] + (n_win_out,) + (nwin,) + s.shape[axis + 1 :], dtype=s.dtype)
 
     out_coords = np.hstack(out_coords_blocks)
     out_data = np.hstack(out_data_blocks)

@@ -1,17 +1,14 @@
 import numpy as np
-from ezmsg.sigproc.sampler import SampleMessage
-from ezmsg.util.messages.axisarray import AxisArray
-from frozendict import frozendict
-
 from ezmsg.sigproc.rollingscaler import (
     RollingScalerProcessor,
     RollingScalerSettings,
 )
+from ezmsg.sigproc.sampler import SampleMessage
+from ezmsg.util.messages.axisarray import AxisArray
+from frozendict import frozendict
 
 
-def _axisarray_from_ndarray(
-    x: np.ndarray, fs: float = 100.0, t0: float = 0.0
-) -> AxisArray:
+def _axisarray_from_ndarray(x: np.ndarray, fs: float = 100.0, t0: float = 0.0) -> AxisArray:
     """
     x shape: (time, ch)
     """
@@ -70,9 +67,7 @@ def test_rolling_window_drops_oldest():
 
     def add_epoch(vals):
         arr = np.array(vals, dtype=float).reshape(-1, 1)
-        proc.partial_fit(
-            SampleMessage(trigger=None, sample=_axisarray_from_ndarray(arr))
-        )
+        proc.partial_fit(SampleMessage(trigger=None, sample=_axisarray_from_ndarray(arr)))
 
     add_epoch([1, 1, 1, 1])
     add_epoch([3, 3])
@@ -102,9 +97,7 @@ def test_window_size_converts_to_k_samples_and_min_seconds():
 
 def test_under_threshold_passthrough_without_update():
     fs = 100.0
-    settings = RollingScalerSettings(
-        window_size=1.0, min_seconds=1.0, update_with_signal=False
-    )
+    settings = RollingScalerSettings(window_size=1.0, min_seconds=1.0, update_with_signal=False)
     proc = RollingScalerProcessor(settings=settings)
 
     x = np.ones((50, 1))
@@ -115,9 +108,7 @@ def test_under_threshold_passthrough_without_update():
 
 def test_update_with_signal_influences_next_chunk():
     fs = 100.0
-    settings = RollingScalerSettings(
-        window_size=1.0, min_seconds=0.0, update_with_signal=True
-    )
+    settings = RollingScalerSettings(window_size=1.0, min_seconds=0.0, update_with_signal=True)
     proc = RollingScalerProcessor(settings=settings)
 
     x1 = np.ones((60, 1))

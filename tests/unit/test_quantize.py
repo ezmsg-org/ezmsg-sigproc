@@ -1,11 +1,10 @@
 import copy
 
-import pytest
 import numpy as np
-from frozendict import frozendict
-
-from ezmsg.util.messages.axisarray import AxisArray
+import pytest
 from ezmsg.sigproc.quantize import QuantizeTransformer
+from ezmsg.util.messages.axisarray import AxisArray
+from frozendict import frozendict
 
 from tests.helpers.util import assert_messages_equal
 
@@ -36,9 +35,7 @@ def test_quantize(bits: int):
         axes=frozendict(
             {
                 "time": AxisArray.TimeAxis(fs=100.0, offset=0.0),
-                "channel": AxisArray.CoordinateAxis(
-                    data=np.array([f"Ch{i}" for i in range(7)]), dims=["channel"]
-                ),
+                "channel": AxisArray.CoordinateAxis(data=np.array([f"Ch{i}" for i in range(7)]), dims=["channel"]),
             }
         ),
         key="test_quantize",
@@ -48,9 +45,7 @@ def test_quantize(bits: int):
     backup = copy.deepcopy(input_msg)
 
     # Create and apply the quantizer
-    quantizer = QuantizeTransformer(
-        min_val=data_range[0], max_val=data_range[1], bits=bits
-    )
+    quantizer = QuantizeTransformer(min_val=data_range[0], max_val=data_range[1], bits=bits)
     output_msg = quantizer(input_msg)
 
     # Verify original message wasn't modified

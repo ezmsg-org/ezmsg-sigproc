@@ -1,5 +1,5 @@
-import numpy as np
 import ezmsg.core as ez
+import numpy as np
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
@@ -17,11 +17,7 @@ class LogSettings(ez.Settings):
 class LogTransformer(BaseTransformer[LogSettings, AxisArray, AxisArray]):
     def _process(self, message: AxisArray) -> AxisArray:
         data = message.data
-        if (
-            self.settings.clip_zero
-            and np.any(data <= 0)
-            and np.issubdtype(data.dtype, np.floating)
-        ):
+        if self.settings.clip_zero and np.any(data <= 0) and np.issubdtype(data.dtype, np.floating):
             data = np.clip(data, a_min=np.finfo(data.dtype).tiny, a_max=None)
         return replace(message, data=np.log(data) / np.log(self.settings.base))
 

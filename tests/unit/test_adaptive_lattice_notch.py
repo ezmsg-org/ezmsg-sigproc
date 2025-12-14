@@ -1,18 +1,16 @@
 import numpy as np
-from ezmsg.util.messages.axisarray import AxisArray, replace
-
 from ezmsg.sigproc.adaptive_lattice_notch import (
     AdaptiveLatticeNotchFilterTransformer,
 )
+from ezmsg.util.messages.axisarray import AxisArray, replace
+
 from tests.helpers.util import (
     create_messages_with_periodic_signal,
 )
 
 
 class ReferenceALNF:
-    def __init__(
-        self, gamma: float = 0.9, mu: float = 0.95, eta: float = 0.90, n_chans: int = 3
-    ):
+    def __init__(self, gamma: float = 0.9, mu: float = 0.95, eta: float = 0.90, n_chans: int = 3):
         self.gamma = gamma  # Pole-zero contraction factor
         self.mu = mu  # Smoothing factor
         self.eta = eta  # Forgetting factor
@@ -30,11 +28,7 @@ class ReferenceALNF:
         for sample in msg.data:
             sample_res = []
             for ch_ix, x_n in enumerate(sample):
-                s_n = (
-                    x_n
-                    - self.k1[ch_ix] * (1 + self.gamma) * self.s_n_1[ch_ix]
-                    - self.gamma * self.s_n_2[ch_ix]
-                )
+                s_n = x_n - self.k1[ch_ix] * (1 + self.gamma) * self.s_n_1[ch_ix] - self.gamma * self.s_n_2[ch_ix]
                 # y_n = s_n + 2 * self.k1[ch_ix] * self.s_n_1[ch_ix] + self.s_n_2[ch_ix]
 
                 self.p[ch_ix] = self.eta * self.p[ch_ix] + (1 - self.eta) * (
@@ -45,18 +39,12 @@ class ReferenceALNF:
                 )
 
                 k1_n_1 = self.k1[ch_ix]
-                self.k1[ch_ix] = -self.p[ch_ix] / (
-                    self.q[ch_ix] + 1e-8
-                )  # Avoid division by zero
-                self.k1[ch_ix] = max(
-                    -1, min(1, self.k1[ch_ix])
-                )  # Clip to prevent instability
+                self.k1[ch_ix] = -self.p[ch_ix] / (self.q[ch_ix] + 1e-8)  # Avoid division by zero
+                self.k1[ch_ix] = max(-1, min(1, self.k1[ch_ix]))  # Clip to prevent instability
 
                 self.k1[ch_ix] = self.mu * k1_n_1 + (1 - self.mu) * self.k1[ch_ix]
 
-                omega_n = np.arccos(
-                    -self.k1[ch_ix]
-                )  # Compute omega_n using equation 13 from the paper
+                omega_n = np.arccos(-self.k1[ch_ix])  # Compute omega_n using equation 13 from the paper
 
                 self.s_n_2[ch_ix] = self.s_n_1[ch_ix]
                 self.s_n_1[ch_ix] = s_n

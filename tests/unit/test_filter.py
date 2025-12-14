@@ -1,5 +1,5 @@
 import numpy as np
-from ezmsg.sigproc.filter import FilterTransformer, FilterSettings, FilterCoefficients
+from ezmsg.sigproc.filter import FilterCoefficients, FilterSettings, FilterTransformer
 from ezmsg.util.messages.axisarray import AxisArray
 
 

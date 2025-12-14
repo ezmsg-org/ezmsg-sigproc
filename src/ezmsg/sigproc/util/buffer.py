@@ -63,9 +63,7 @@ class HybridBuffer:
         self._buff_unread = 0  # Number of unread samples in the circular buffer
         self._buff_read = 0  # Tracks samples read and still in buffer
         self._deque_len = 0  # Number of unread samples in the deque
-        self._last_overflow = (
-            0  # Tracks the last overflow count, overwritten or skipped
-        )
+        self._last_overflow = 0  # Tracks the last overflow count, overwritten or skipped
         self._warned = False  # Tracks if we've warned already (for warn_once)
 
     @property
@@ -96,9 +94,7 @@ class HybridBuffer:
             block = block[:, self.xp.newaxis]
 
         if block.shape[1:] != other_shape:
-            raise ValueError(
-                f"Block shape {block.shape[1:]} does not match buffer's other_shape {other_shape}"
-            )
+            raise ValueError(f"Block shape {block.shape[1:]} does not match buffer's other_shape {other_shape}")
 
         # Most overflow strategies are handled during flush, but there are a couple
         # scenarios that can be evaluated on write to give immediate feedback.
@@ -117,8 +113,7 @@ class HybridBuffer:
         self._deque_len += block.shape[0]
 
         if self._update_strategy == "immediate" or (
-            self._update_strategy == "threshold"
-            and (0 < self._threshold <= self._deque_len)
+            self._update_strategy == "threshold" and (0 < self._threshold <= self._deque_len)
         ):
             self.flush()
 
@@ -128,9 +123,7 @@ class HybridBuffer:
         from the buffer.
         """
         if n_samples > self.available():
-            raise ValueError(
-                f"Requested {n_samples} samples, but only {self.available()} are available."
-            )
+            raise ValueError(f"Requested {n_samples} samples, but only {self.available()} are available.")
         n_overflow = 0
         if self._deque and (n_samples > self._buff_unread):
             # We would cause a flush, but would that cause an overflow?
@@ -161,14 +154,10 @@ class HybridBuffer:
         n_overflow = self._estimate_overflow(n_samples)
         if n_overflow > 0:
             first_read = self._buff_unread
-            if (n_overflow - first_read) < self.capacity or (
-                self._overflow_strategy == "drop"
-            ):
+            if (n_overflow - first_read) < self.capacity or (self._overflow_strategy == "drop"):
                 # We can prevent the overflow (or at least *some* if using "drop"
                 # strategy) by reading the samples in the buffer first to make room.
-                data = self.xp.empty(
-                    (n_samples, *self._buffer.shape[1:]), dtype=self._buffer.dtype
-                )
+                data = self.xp.empty((n_samples, *self._buffer.shape[1:]), dtype=self._buffer.dtype)
                 self.peek(first_read, out=data[:first_read])
                 offset += first_read
                 self.seek(first_read)
@@ -204,13 +193,9 @@ class HybridBuffer:
         if n_samples is None:
             n_samples = self.available()
         elif n_samples > self.available():
-            raise ValueError(
-                f"Requested to peek {n_samples} samples, but only {self.available()} are available."
-            )
+            raise ValueError(f"Requested to peek {n_samples} samples, but only {self.available()} are available.")
         if out is not None and out.shape[0] < n_samples:
-            raise ValueError(
-                f"Output array shape {out.shape} is smaller than requested {n_samples} samples."
-            )
+            raise ValueError(f"Output array shape {out.shape} is smaller than requested {n_samples} samples.")
 
         if n_samples == 0:
             return self._buffer[:0]
@@ -224,9 +209,7 @@ class HybridBuffer:
             out = (
                 out
                 if out is not None
-                else self.xp.empty(
-                    (n_samples, *self._buffer.shape[1:]), dtype=self._buffer.dtype
-                )
+                else self.xp.empty((n_samples, *self._buffer.shape[1:]), dtype=self._buffer.dtype)
             )
             out[:part1_len] = self._buffer[self._tail :]
             out[part1_len:] = self._buffer[:part2_len]
@@ -258,9 +241,7 @@ class HybridBuffer:
         if not allow_flush and idx >= self._buff_unread:
             # The requested sample is in the deque.
             idx -= self._buff_unread
-            deq_splits = self.xp.cumsum(
-                [0] + [_.shape[0] for _ in self._deque], dtype=int
-            )
+            deq_splits = self.xp.cumsum([0] + [_.shape[0] for _ in self._deque], dtype=int)
             arr_idx = self.xp.searchsorted(deq_splits, idx, side="right") - 1
             idx -= deq_splits[arr_idx]
             return self._deque[arr_idx][idx : idx + 1]
@@ -334,7 +315,8 @@ class HybridBuffer:
             if n_overflow > 0 and (not self._warn_once or not self._warned):
                 self._warned = True
                 warnings.warn(
-                    f"Buffer overflow: {n_new} samples received, but only {self._capacity - self._buff_unread} available. "
+                    f"Buffer overflow: {n_new} samples received, "
+                    f"but only {self._capacity - self._buff_unread} available. "
                     f"Overwriting {n_overflow} previous samples.",
                     RuntimeWarning,
                 )
@@ -347,10 +329,9 @@ class HybridBuffer:
                     break
                 n_to_copy = min(block.shape[0], samples_to_copy - copied_samples)
                 start_idx = block.shape[0] - n_to_copy
-                self._buffer[
-                    samples_to_copy - copied_samples - n_to_copy : samples_to_copy
-                    - copied_samples
-                ] = block[start_idx:]
+                self._buffer[samples_to_copy - copied_samples - n_to_copy : samples_to_copy - copied_samples] = block[
+                    start_idx:
+                ]
                 copied_samples += n_to_copy
 
             self._head = 0
@@ -362,9 +343,7 @@ class HybridBuffer:
         else:
             if n_overflow > 0:
                 if self._overflow_strategy == "raise":
-                    raise OverflowError(
-                        f"Buffer overflow: {n_new} samples received, but only {n_free} available."
-                    )
+                    raise OverflowError(f"Buffer overflow: {n_new} samples received, but only {n_free} available.")
                 elif self._overflow_strategy == "warn-overwrite":
                     if not self._warn_once or not self._warned:
                         self._warned = True
@@ -430,9 +409,7 @@ class HybridBuffer:
             return
 
         other_shape = self._buffer.shape[1:]
-        max_capacity = self._max_size / (
-            self._buffer.dtype.itemsize * math.prod(other_shape)
-        )
+        max_capacity = self._max_size / (self._buffer.dtype.itemsize * math.prod(other_shape))
         if min_capacity > max_capacity:
             raise OverflowError(
                 f"Cannot grow buffer to {min_capacity} samples, "
@@ -440,9 +417,7 @@ class HybridBuffer:
             )
 
         new_capacity = min(max_capacity, max(self._capacity * 2, min_capacity))
-        new_buffer = self.xp.empty(
-            (new_capacity, *other_shape), dtype=self._buffer.dtype
-        )
+        new_buffer = self.xp.empty((new_capacity, *other_shape), dtype=self._buffer.dtype)
 
         # Copy existing data to new buffer
         total_samples = self._buff_read + self._buff_unread

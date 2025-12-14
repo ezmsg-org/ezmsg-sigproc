@@ -1,9 +1,8 @@
-import pytest
 import numpy as np
+import pytest
 import scipy.signal as sps
+from ezmsg.sigproc.filterbank import FilterbankMode, filterbank
 from ezmsg.util.messages.axisarray import AxisArray
-
-from ezmsg.sigproc.filterbank import filterbank, FilterbankMode
 
 from tests.helpers.util import gaussian, make_chirp
 
@@ -35,9 +34,7 @@ def bandpass_kaiser(ntaps, lowcut, highcut, fs, width):
     return taps
 
 
-@pytest.mark.parametrize(
-    "mode", [FilterbankMode.CONV, FilterbankMode.FFT, FilterbankMode.AUTO]
-)
+@pytest.mark.parametrize("mode", [FilterbankMode.CONV, FilterbankMode.FFT, FilterbankMode.AUTO])
 @pytest.mark.parametrize("kernel_type", ["kaiser", "brickwall"])
 def test_filterbank(mode: str, kernel_type: str):
     # Generate test signal
@@ -90,13 +87,9 @@ def test_filterbank(mode: str, kernel_type: str):
     #  - conv has transients at the beginning that we need to skip over
     #  - oaconvolve assumes the data is finished so it returns the trailing windows,
     #    but filterbank keeps the tail assuming more data is coming.
-    expected = np.stack(
-        [sps.oaconvolve(chirp, _[None, :], axes=1) for _ in kernels], axis=1
-    )
+    expected = np.stack([sps.oaconvolve(chirp, _[None, :], axes=1) for _ in kernels], axis=1)
     idx0 = ntaps if mode in [FilterbankMode.CONV, FilterbankMode.AUTO] else 0
-    assert np.allclose(
-        result.data[..., idx0:], expected[..., idx0 : result.data.shape[-1]]
-    )
+    assert np.allclose(result.data[..., idx0:], expected[..., idx0 : result.data.shape[-1]])
 
     if False:
         # Debug visualize result

@@ -1,8 +1,7 @@
-import pytest
 import numpy as np
-
-from ezmsg.util.messages.axisarray import AxisArray
+import pytest
 from ezmsg.sigproc.extract_axis import ExtractAxisData
+from ezmsg.util.messages.axisarray import AxisArray
 
 
 @pytest.mark.parametrize(
@@ -13,9 +12,7 @@ from ezmsg.sigproc.extract_axis import ExtractAxisData
             dims=["time", "ch", "bank"],
             axes={
                 "time": AxisArray.TimeAxis(offset=0.0, fs=100.0),
-                "ch": AxisArray.CoordinateAxis(
-                    data=np.arange(32).astype(str), dims=["ch"]
-                ),
+                "ch": AxisArray.CoordinateAxis(data=np.arange(32).astype(str), dims=["ch"]),
                 "bank": AxisArray.LinearAxis(gain=1.0, offset=0.0),
                 "freq": AxisArray.CoordinateAxis(
                     data=60 + 0.1 * np.random.randn(500, 32),

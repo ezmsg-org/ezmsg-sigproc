@@ -1,20 +1,19 @@
 import os
 
-import pytest
-import numpy as np
-
 import ezmsg.core as ez
-from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.util.messagegate import MessageGate, MessageGateSettings
-from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
-from ezmsg.util.messagecodec import message_log
+import numpy as np
+import pytest
 from ezmsg.sigproc.downsample import Downsample, DownsampleSettings
 from ezmsg.sigproc.synth import Counter, CounterSettings
-
-from tests.helpers.util import get_test_fn
+from ezmsg.util.debuglog import DebugLog
+from ezmsg.util.messagecodec import message_log
+from ezmsg.util.messagegate import MessageGate, MessageGateSettings
+from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
+from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.terminate import TerminateOnTimeout as TerminateTest
 from ezmsg.util.terminate import TerminateOnTimeoutSettings as TerminateTestSettings
-from ezmsg.util.debuglog import DebugLog
+
+from tests.helpers.util import get_test_fn
 
 
 class DownsampleSystemSettings(ez.Settings):
@@ -126,9 +125,7 @@ def test_downsample_system(
     # Check offsets
     first_samps = np.concatenate(first_samps, axis=time_ax_idx)
     expected_offsets = first_samps.squeeze() / out_fs / expected_factor
-    assert np.allclose(
-        np.array([msg.axes["time"].offset for msg in messages]), expected_offsets
-    )
+    assert np.allclose(np.array([msg.axes["time"].offset for msg in messages]), expected_offsets)
 
     ez.logger.info("Test Complete.")
 

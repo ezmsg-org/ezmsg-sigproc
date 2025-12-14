@@ -1,13 +1,12 @@
 import numpy as np
 import pytest
 import scipy.signal
-from frozendict import frozendict
-from ezmsg.util.messages.axisarray import AxisArray
-
-from ezmsg.sigproc.butterworthfilter import butter
 from ezmsg.sigproc.butterworthfilter import (
     ButterworthFilterSettings as LegacyButterSettings,
 )
+from ezmsg.sigproc.butterworthfilter import butter
+from ezmsg.util.messages.axisarray import AxisArray
+from frozendict import frozendict
 
 
 @pytest.mark.parametrize(
@@ -31,9 +30,7 @@ def test_butterworth_legacy_filter_settings(cutoff: float, cuton: float, order: 
             If cuton is larger than cutoff we assume bandstop.
         order (int): The order of the filter.
     """
-    btype, Wn = LegacyButterSettings(
-        order=order, cuton=cuton, cutoff=cutoff
-    ).filter_specs()
+    btype, Wn = LegacyButterSettings(order=order, cuton=cuton, cutoff=cutoff).filter_specs()
     if cuton is None:
         assert btype == "lowpass"
         assert Wn == cutoff
@@ -89,16 +86,12 @@ def test_butterworth(
         dat_dims.insert(time_ax, "time")
         other_axes = {
             "freq": AxisArray.LinearAxis(unit="Hz", offset=0.0, gain=1.0),
-            "ch": AxisArray.CoordinateAxis(
-                data=np.arange(n_chans).astype(str), dims=["ch"]
-            ),
+            "ch": AxisArray.CoordinateAxis(data=np.arange(n_chans).astype(str), dims=["ch"]),
         }
     in_dat = np.arange(np.prod(dat_shape), dtype=float).reshape(*dat_shape)
 
     # Calculate Expected Result
-    btype, Wn = LegacyButterSettings(
-        order=order, cuton=cuton, cutoff=cutoff
-    ).filter_specs()
+    btype, Wn = LegacyButterSettings(order=order, cuton=cuton, cutoff=cutoff).filter_specs()
     coefs = scipy.signal.butter(order, Wn, btype=btype, output=coef_type, fs=fs)
     tmp_dat = np.moveaxis(in_dat, time_ax, -1)
     if coef_type == "ba":
@@ -186,9 +179,7 @@ def test_butterworth_update_settings():
         dims=["time", "ch"],
         axes={
             "time": AxisArray.TimeAxis(fs=fs, offset=0),
-            "ch": AxisArray.CoordinateAxis(
-                data=np.arange(n_chans).astype(str), dims=["ch"]
-            ),
+            "ch": AxisArray.CoordinateAxis(data=np.arange(n_chans).astype(str), dims=["ch"]),
         },
         key="test_butterworth_update_settings",
     )
@@ -197,9 +188,7 @@ def test_butterworth_update_settings():
         """Calculate power at target frequencies for each channel."""
         fft_result = np.abs(np.fft.rfft(msg.data, axis=0)) ** 2
         fft_freqs = np.fft.rfftfreq(len(msg.data), 1 / fs)
-        return np.vstack(
-            [np.max(fft_result[np.abs(fft_freqs - f) < 1], axis=0) for f in targ_freqs]
-        )
+        return np.vstack([np.max(fft_result[np.abs(fft_freqs - f) < 1], axis=0) for f in targ_freqs])
 
     power0 = _calc_power(msg_in, targ_freqs=freqs)
     assert np.argmax(power0[:, 0]) == 0  # 10Hz should be the strongest frequency in ch0
@@ -255,7 +244,5 @@ def test_butterworth_update_settings():
     proc.update_settings(new_settings=new_settings)
     result4 = proc(msg_in)
     power4 = _calc_power(result4, targ_freqs=freqs)
-    assert (
-        0.9 > (power4[0][0] / power0[0][0]) > 0.8
-    )  # 10Hz should be passed, but not as much
+    assert 0.9 > (power4[0][0] / power0[0][0]) > 0.8  # 10Hz should be passed, but not as much
     assert power4[1][1] / power0[1][1] < 0.1  # 40Hz should be attenuated

@@ -1,14 +1,13 @@
 import numpy as np
 import pytest
 import scipy.signal
-from frozendict import frozendict
-from ezmsg.util.messages.axisarray import AxisArray
-
 from ezmsg.sigproc.kaiser import (
     KaiserFilterSettings,
     KaiserFilterTransformer,
     kaiser_design_fun,
 )
+from ezmsg.util.messages.axisarray import AxisArray
+from frozendict import frozendict
 
 
 @pytest.mark.parametrize(
@@ -126,9 +125,7 @@ def test_kaiser_filter_transformer(
         dat_dims.insert(time_ax, "time")
         other_axes = {
             "freq": AxisArray.LinearAxis(unit="Hz", offset=0.0, gain=1.0),
-            "ch": AxisArray.CoordinateAxis(
-                data=np.arange(n_chans).astype(str), dims=["ch"]
-            ),
+            "ch": AxisArray.CoordinateAxis(data=np.arange(n_chans).astype(str), dims=["ch"]),
         }
     in_dat = np.arange(np.prod(dat_shape), dtype=float).reshape(*dat_shape)
 
@@ -238,11 +235,7 @@ def test_kaiser_filter_frequency_response():
     # Create test signal with multiple frequency components
     t = np.arange(n_times) / fs
     # 10Hz (should pass), 40Hz (transition), 60Hz (should stop)
-    in_dat = (
-        np.sin(2 * np.pi * 10 * t)
-        + np.sin(2 * np.pi * 40 * t)
-        + np.sin(2 * np.pi * 60 * t)
-    )
+    in_dat = np.sin(2 * np.pi * 10 * t) + np.sin(2 * np.pi * 40 * t) + np.sin(2 * np.pi * 60 * t)
 
     msg = AxisArray(
         data=in_dat,
@@ -330,7 +323,7 @@ def test_kaiser_filter_normalized_frequencies():
 
 def test_kaiser_filter_vs_fir_with_kaiser_window():
     """Verify Kaiser filter produces similar results to FIR with Kaiser window."""
-    from ezmsg.sigproc.firfilter import FIRFilterTransformer, FIRFilterSettings
+    from ezmsg.sigproc.firfilter import FIRFilterSettings, FIRFilterTransformer
 
     fs = 200.0
     dur = 1.0

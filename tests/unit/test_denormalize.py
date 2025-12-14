@@ -2,13 +2,12 @@ import copy
 
 import numpy as np
 import pytest
-from frozendict import frozendict
-from ezmsg.util.messages.axisarray import AxisArray
-
 from ezmsg.sigproc.denormalize import (
     DenormalizeSettings,
     DenormalizeTransformer,
 )
+from ezmsg.util.messages.axisarray import AxisArray
+from frozendict import frozendict
 
 from tests.helpers.util import assert_messages_equal
 
@@ -47,9 +46,7 @@ class TestDenormalizeTransformer:
         """Test denormalization with uniform distribution."""
         backup = [copy.deepcopy(basic_input_time_ch)]
 
-        xformer = DenormalizeTransformer(
-            low_rate=2.0, high_rate=40.0, distribution="uniform"
-        )
+        xformer = DenormalizeTransformer(low_rate=2.0, high_rate=40.0, distribution="uniform")
         output = xformer(basic_input_time_ch)
 
         # Output shape should match input shape
@@ -74,9 +71,7 @@ class TestDenormalizeTransformer:
         """Test denormalization with normal distribution."""
         backup = [copy.deepcopy(basic_input_time_ch)]
 
-        xformer = DenormalizeTransformer(
-            low_rate=5.0, high_rate=35.0, distribution="normal"
-        )
+        xformer = DenormalizeTransformer(low_rate=5.0, high_rate=35.0, distribution="normal")
         output = xformer(basic_input_time_ch)
 
         assert output.data.shape == basic_input_time_ch.data.shape
@@ -100,9 +95,7 @@ class TestDenormalizeTransformer:
         high_rate = 30.0
         expected_offset = (low_rate + high_rate) / 2.0  # 20.0
 
-        xformer = DenormalizeTransformer(
-            low_rate=low_rate, high_rate=high_rate, distribution="constant"
-        )
+        xformer = DenormalizeTransformer(low_rate=low_rate, high_rate=high_rate, distribution="constant")
         output = xformer(basic_input_time_ch)
 
         assert output.data.shape == basic_input_time_ch.data.shape
@@ -155,9 +148,7 @@ class TestDenormalizeTransformer:
             axes=frozendict({"time": AxisArray.TimeAxis(fs=100.0)}),
         )
 
-        xformer = DenormalizeTransformer(
-            low_rate=2.0, high_rate=5.0, distribution="constant"
-        )
+        xformer = DenormalizeTransformer(low_rate=2.0, high_rate=5.0, distribution="constant")
         output = xformer(msg_in)
 
         # All values should be >= 0 due to clipping
@@ -193,9 +184,7 @@ class TestDenormalizeTransformer:
 
         low_rate = 20.0
         high_rate = 20.0  # Same as low to make offset = 20.0
-        xformer = DenormalizeTransformer(
-            low_rate=low_rate, high_rate=high_rate, distribution="constant"
-        )
+        xformer = DenormalizeTransformer(low_rate=low_rate, high_rate=high_rate, distribution="constant")
         output = xformer(msg_in)
 
         # With constant distribution and equal rates, offset = 20.0
@@ -216,9 +205,7 @@ class TestDenormalizeTransformer:
 
     def test_settings_custom(self):
         """Test custom DenormalizeSettings values."""
-        settings = DenormalizeSettings(
-            low_rate=5.0, high_rate=50.0, distribution="normal"
-        )
+        settings = DenormalizeSettings(low_rate=5.0, high_rate=50.0, distribution="normal")
         assert settings.low_rate == 5.0
         assert settings.high_rate == 50.0
         assert settings.distribution == "normal"

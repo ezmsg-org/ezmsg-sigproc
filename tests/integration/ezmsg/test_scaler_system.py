@@ -1,16 +1,14 @@
 import os
 
-import numpy as np
-from frozendict import frozendict
 import ezmsg.core as ez
-from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.util.terminate import TerminateOnTotalSettings, TerminateOnTotal
-from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
-from ezmsg.util.messagecodec import message_log
-
-from ezmsg.sigproc.scaler import scaler_np
-from ezmsg.sigproc.scaler import AdaptiveStandardScalerSettings, AdaptiveStandardScaler
+import numpy as np
+from ezmsg.sigproc.scaler import AdaptiveStandardScaler, AdaptiveStandardScalerSettings, scaler_np
 from ezmsg.sigproc.synth import Counter, CounterSettings
+from ezmsg.util.messagecodec import message_log
+from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
+from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.terminate import TerminateOnTotal, TerminateOnTotalSettings
+from frozendict import frozendict
 
 from tests.helpers.util import get_test_fn
 
@@ -41,9 +39,7 @@ def test_scaler_system(
                 mod=None,
             )
         ),
-        "SCALER": AdaptiveStandardScaler(
-            AdaptiveStandardScalerSettings(time_constant=tau, axis="time")
-        ),
+        "SCALER": AdaptiveStandardScaler(AdaptiveStandardScalerSettings(time_constant=tau, axis="time")),
         "LOG": MessageLogger(
             MessageLoggerSettings(
                 output=test_filename,

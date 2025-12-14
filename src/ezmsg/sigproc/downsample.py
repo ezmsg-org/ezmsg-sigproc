@@ -1,10 +1,10 @@
+import ezmsg.core as ez
 import numpy as np
 from ezmsg.util.messages.axisarray import (
     AxisArray,
-    slice_along_axis,
     replace,
+    slice_along_axis,
 )
-import ezmsg.core as ez
 
 from .base import (
     BaseStatefulTransformer,
@@ -38,9 +38,7 @@ class DownsampleState:
     """Index of the next msg's first sample into the virtual rotating ds_factor counter."""
 
 
-class DownsampleTransformer(
-    BaseStatefulTransformer[DownsampleSettings, AxisArray, AxisArray, DownsampleState]
-):
+class DownsampleTransformer(BaseStatefulTransformer[DownsampleSettings, AxisArray, AxisArray, DownsampleState]):
     """
     Downsampled data simply comprise every `factor`th sample.
     This should only be used following appropriate lowpass filtering.
@@ -75,9 +73,7 @@ class DownsampleTransformer(
         axis_idx = message.get_axis_idx(axis)
 
         n_samples = message.data.shape[axis_idx]
-        samples = (
-            np.arange(self.state.s_idx, self.state.s_idx + n_samples) % self._state.q
-        )
+        samples = np.arange(self.state.s_idx, self.state.s_idx + n_samples) % self._state.q
         if n_samples > 0:
             # Update state for next iteration.
             self._state.s_idx = samples[-1] + 1
@@ -104,9 +100,7 @@ class DownsampleTransformer(
         return msg_out
 
 
-class Downsample(
-    BaseTransformerUnit[DownsampleSettings, AxisArray, AxisArray, DownsampleTransformer]
-):
+class Downsample(BaseTransformerUnit[DownsampleSettings, AxisArray, AxisArray, DownsampleTransformer]):
     SETTINGS = DownsampleSettings
 
 
@@ -115,6 +109,4 @@ def downsample(
     target_rate: float | None = None,
     factor: int | None = None,
 ) -> DownsampleTransformer:
-    return DownsampleTransformer(
-        DownsampleSettings(axis=axis, target_rate=target_rate, factor=factor)
-    )
+    return DownsampleTransformer(DownsampleSettings(axis=axis, target_rate=target_rate, factor=factor))

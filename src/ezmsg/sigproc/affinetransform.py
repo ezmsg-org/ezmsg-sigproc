@@ -1,16 +1,16 @@
 import os
 from pathlib import Path
 
+import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
-import ezmsg.core as ez
 from ezmsg.util.messages.axisarray import AxisArray, AxisBase
 from ezmsg.util.messages.util import replace
 
 from .base import (
     BaseStatefulTransformer,
-    BaseTransformerUnit,
     BaseTransformer,
+    BaseTransformerUnit,
     processor_state,
 )
 
@@ -38,15 +38,12 @@ class AffineTransformState:
 
 
 class AffineTransformTransformer(
-    BaseStatefulTransformer[
-        AffineTransformSettings, AxisArray, AxisArray, AffineTransformState
-    ]
+    BaseStatefulTransformer[AffineTransformSettings, AxisArray, AxisArray, AffineTransformState]
 ):
     def __call__(self, message: AxisArray) -> AxisArray:
         # Override __call__ so we can shortcut if weights are None.
         if self.settings.weights is None or (
-            isinstance(self.settings.weights, str)
-            and self.settings.weights == "passthrough"
+            isinstance(self.settings.weights, str) and self.settings.weights == "passthrough"
         ):
             return message
         return super().__call__(message)
@@ -68,18 +65,12 @@ class AffineTransformTransformer(
         self._state.weights = weights
 
         axis = self.settings.axis or message.dims[-1]
-        if (
-            axis in message.axes
-            and hasattr(message.axes[axis], "data")
-            and weights.shape[0] != weights.shape[1]
-        ):
+        if axis in message.axes and hasattr(message.axes[axis], "data") and weights.shape[0] != weights.shape[1]:
             in_labels = message.axes[axis].data
             new_labels = []
             n_in, n_out = weights.shape
             if len(in_labels) != n_in:
-                ez.logger.warning(
-                    f"Received {len(in_labels)} for {n_in} inputs. Check upstream labels."
-                )
+                ez.logger.warning(f"Received {len(in_labels)} for {n_in} inputs. Check upstream labels.")
             else:
                 b_filled_outputs = np.any(weights, axis=0)
                 b_used_inputs = np.any(weights, axis=1)
@@ -97,9 +88,7 @@ class AffineTransformTransformer(
                 elif np.all(b_filled_outputs):
                     new_labels = np.array(in_labels)[b_used_inputs]
 
-            self._state.new_axis = replace(
-                message.axes[axis], data=np.array(new_labels)
-            )
+            self._state.new_axis = replace(message.axes[axis], data=np.array(new_labels))
 
     def _process(self, message: AxisArray) -> AxisArray:
         axis = self.settings.axis or message.dims[-1]
@@ -110,9 +99,7 @@ class AffineTransformTransformer(
             # The weights are stacked A|B where A is the transform and B is a single row
             #  in the equation y = Ax + B. This supports NeuroKey's weights matrices.
             sample_shape = data.shape[:axis_idx] + (1,) + data.shape[axis_idx + 1 :]
-            data = np.concatenate(
-                (data, np.ones(sample_shape).astype(data.dtype)), axis=axis_idx
-            )
+            data = np.concatenate((data, np.ones(sample_shape).astype(data.dtype)), axis=axis_idx)
 
         if axis_idx in [-1, len(message.dims) - 1]:
             data = np.matmul(data, self._state.weights)
@@ -128,11 +115,7 @@ class AffineTransformTransformer(
         return replace(message, **replace_kwargs)
 
 
-class AffineTransform(
-    BaseTransformerUnit[
-        AffineTransformSettings, AxisArray, AxisArray, AffineTransformTransformer
-    ]
-):
+class AffineTransform(BaseTransformerUnit[AffineTransformSettings, AxisArray, AxisArray, AffineTransformTransformer]):
     SETTINGS = AffineTransformSettings
 
 
@@ -153,9 +136,7 @@ def affine_transform(
         :obj:`AffineTransformTransformer`.
     """
     return AffineTransformTransformer(
-        AffineTransformSettings(
-            weights=weights, axis=axis, right_multiply=right_multiply
-        )
+        AffineTransformSettings(weights=weights, axis=axis, right_multiply=right_multiply)
     )
 
 
@@ -178,9 +159,7 @@ class CommonRereferenceSettings(ez.Settings):
     """Set False to exclude each channel from participating in the calculation of its reference."""
 
 
-class CommonRereferenceTransformer(
-    BaseTransformer[CommonRereferenceSettings, AxisArray, AxisArray]
-):
+class CommonRereferenceTransformer(BaseTransformer[CommonRereferenceSettings, AxisArray, AxisArray]):
     def _process(self, message: AxisArray) -> AxisArray:
         if self.settings.mode == "passthrough":
             return message
@@ -188,9 +167,7 @@ class CommonRereferenceTransformer(
         axis = self.settings.axis or message.dims[-1]
         axis_idx = message.get_axis_idx(axis)
 
-        func = {"mean": np.mean, "median": np.median, "passthrough": zeros_for_noop}[
-            self.settings.mode
-        ]
+        func = {"mean": np.mean, "median": np.median, "passthrough": zeros_for_noop}[self.settings.mode]
 
         ref_data = func(message.data, axis=axis_idx, keepdims=True)
 
@@ -213,9 +190,7 @@ class CommonRereferenceTransformer(
 
 
 class CommonRereference(
-    BaseTransformerUnit[
-        CommonRereferenceSettings, AxisArray, AxisArray, CommonRereferenceTransformer
-    ]
+    BaseTransformerUnit[CommonRereferenceSettings, AxisArray, AxisArray, CommonRereferenceTransformer]
 ):
     SETTINGS = CommonRereferenceSettings
 

@@ -13,6 +13,7 @@ requires-python = ">=3.10.15"
 dynamic = ["version"]
 dependencies = [
   "array-api-compat>=1.11.1",
+  "ezmsg-baseproc>=1.0",
   "ezmsg>=3.6.0",
   "numba>=0.61.0",
   "numpy>=1.26.0",
@@ -64,5 +65,24 @@ version-file = "src/ezmsg/sigproc/__version__.py"
 packages = ["src/ezmsg"]
 
 [tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 norecursedirs = "tests/helpers"
 addopts = "-p no:warnings"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+# Exclude auto-generated files
+exclude = ["*/__version__.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ezmsg.sigproc", "ezmsg.baseproc"]
+known-third-party = ["ezmsg"]
+
+[tool.uv.sources]
+# Uncomment to use development version of ezmsg from git
+#ezmsg = { git = "https://github.com/ezmsg-org/ezmsg.git", branch = "dev" }

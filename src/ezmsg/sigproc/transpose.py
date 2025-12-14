@@ -1,6 +1,7 @@
 from types import EllipsisType
-import numpy as np
+
 import ezmsg.core as ez
+import numpy as np
 from ezmsg.util.messages.axisarray import (
     AxisArray,
     replace,
@@ -30,9 +31,7 @@ class TransposeState:
     axes_ints: tuple[int, ...] | None = None
 
 
-class TransposeTransformer(
-    BaseStatefulTransformer[TransposeSettings, AxisArray, AxisArray, TransposeState]
-):
+class TransposeTransformer(BaseStatefulTransformer[TransposeSettings, AxisArray, AxisArray, TransposeState]):
     """
     Downsampled data simply comprise every `factor`th sample.
     This should only be used following appropriate lowpass filtering.
@@ -67,11 +66,7 @@ class TransposeTransformer(
                     if ax not in message.dims:
                         raise ValueError(f"Axis {ax} not found in message dims.")
                     suffix.append(message.dims.index(ax))
-            ells = [
-                _
-                for _ in range(message.data.ndim)
-                if _ not in prefix and _ not in suffix
-            ]
+            ells = [_ for _ in range(message.data.ndim) if _ not in prefix and _ not in suffix]
             re_ix = tuple(prefix + ells + suffix)
             if re_ix == tuple(range(message.data.ndim)):
                 self._state.axes_ints = None
@@ -100,17 +95,13 @@ class TransposeTransformer(
                 # If the memory is already contiguous in the correct order, np.require won't do anything.
                 msg_out = replace(
                     message,
-                    data=np.require(
-                        message.data, requirements=self.settings.order.upper()[0]
-                    ),
+                    data=np.require(message.data, requirements=self.settings.order.upper()[0]),
                 )
         else:
             dims_out = [message.dims[ix] for ix in self.state.axes_ints]
             data_out = np.transpose(message.data, axes=self.state.axes_ints)
             if self.settings.order is not None:
-                data_out = np.require(
-                    data_out, requirements=self.settings.order.upper()[0]
-                )
+                data_out = np.require(data_out, requirements=self.settings.order.upper()[0])
             msg_out = replace(
                 message,
                 data=data_out,
@@ -119,9 +110,7 @@ class TransposeTransformer(
         return msg_out
 
 
-class Transpose(
-    BaseTransformerUnit[TransposeSettings, AxisArray, AxisArray, TransposeTransformer]
-):
+class Transpose(BaseTransformerUnit[TransposeSettings, AxisArray, AxisArray, TransposeTransformer]):
     SETTINGS = TransposeSettings
 
 

@@ -1,15 +1,14 @@
-import pytest
 import numpy as np
-from numpy.lib.stride_tricks import sliding_window_view
+import pytest
+from ezmsg.sigproc.window import WindowTransformer
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.chunker import array_chunker
-
-from ezmsg.sigproc.window import WindowTransformer
+from numpy.lib.stride_tricks import sliding_window_view
 
 try:
     import bytewax.operators as op
     from bytewax.dataflow import Dataflow
-    from bytewax.testing import TestingSource, TestingSink, run_main
+    from bytewax.testing import TestingSink, TestingSource, run_main
 
     b_bytewax = True
 except ImportError:

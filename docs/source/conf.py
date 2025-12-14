@@ -72,6 +72,7 @@ intersphinx_mapping = {
     "numpy": ("https://numpy.org/doc/stable/", None),
     "scipy": ("https://scipy.org/doc/scipy/", None),
     "ezmsg": ("https://www.ezmsg.org/ezmsg/", None),
+    "ezmsg.baseproc": ("https://www.ezmsg.org/ezmsg-baseproc/", None),
     "ezmsg.learn": ("https://www.ezmsg.org/ezmsg-learn/", None),
     "ezmsg.event": ("https://www.ezmsg.org/ezmsg-event/", None),
     "ezmsg.lsl": ("https://www.ezmsg.org/ezmsg-lsl/", None),

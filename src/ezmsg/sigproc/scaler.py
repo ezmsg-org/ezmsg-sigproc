@@ -1,27 +1,25 @@
 import typing
 
 import numpy as np
+from ezmsg.util.generator import consumer
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
-from ezmsg.util.generator import consumer
 
 from .base import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
     processor_state,
 )
-from .ewma import EWMATransformer, EWMASettings, _alpha_from_tau
 
 # Imports for backwards compatibility with previous module location
 from .ewma import EWMA_Deprecated as EWMA_Deprecated
-from .ewma import ewma_step as ewma_step
+from .ewma import EWMASettings, EWMATransformer, _alpha_from_tau
 from .ewma import _tau_from_alpha as _tau_from_alpha
+from .ewma import ewma_step as ewma_step
 
 
 @consumer
-def scaler(
-    time_constant: float = 1.0, axis: str | None = None
-) -> typing.Generator[AxisArray, AxisArray, None]:
+def scaler(time_constant: float = 1.0, axis: str | None = None) -> typing.Generator[AxisArray, AxisArray, None]:
     """
     Apply the adaptive standard scaler from https://riverml.xyz/latest/api/preprocessing/AdaptiveStandardScaler/
     This is faster than :obj:`scaler_np` for single-channel data.
@@ -85,19 +83,13 @@ class AdaptiveStandardScalerTransformer(
     ]
 ):
     def _reset_state(self, message: AxisArray) -> None:
-        self._state.samps_ewma = EWMATransformer(
-            time_constant=self.settings.time_constant, axis=self.settings.axis
-        )
-        self._state.vars_sq_ewma = EWMATransformer(
-            time_constant=self.settings.time_constant, axis=self.settings.axis
-        )
+        self._state.samps_ewma = EWMATransformer(time_constant=self.settings.time_constant, axis=self.settings.axis)
+        self._state.vars_sq_ewma = EWMATransformer(time_constant=self.settings.time_constant, axis=self.settings.axis)
 
     def _process(self, message: AxisArray) -> AxisArray:
         # Update step
         mean_message = self._state.samps_ewma(message)
-        var_sq_message = self._state.vars_sq_ewma(
-            replace(message, data=message.data**2)
-        )
+        var_sq_message = self._state.vars_sq_ewma(replace(message, data=message.data**2))
 
         # Get step
         varis = var_sq_message.data - mean_message.data**2
@@ -119,9 +111,7 @@ class AdaptiveStandardScaler(
 
 
 # Backwards compatibility...
-def scaler_np(
-    time_constant: float = 1.0, axis: str | None = None
-) -> AdaptiveStandardScalerTransformer:
+def scaler_np(time_constant: float = 1.0, axis: str | None = None) -> AdaptiveStandardScalerTransformer:
     return AdaptiveStandardScalerTransformer(
         settings=AdaptiveStandardScalerSettings(time_constant=time_constant, axis=axis)
     )

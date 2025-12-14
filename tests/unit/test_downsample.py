@@ -1,11 +1,10 @@
 import copy
 
-import pytest
 import numpy as np
-from frozendict import frozendict
-
-from ezmsg.util.messages.axisarray import AxisArray
+import pytest
 from ezmsg.sigproc.downsample import DownsampleTransformer
+from ezmsg.util.messages.axisarray import AxisArray
+from frozendict import frozendict
 
 from tests.helpers.util import assert_messages_equal
 
@@ -20,9 +19,7 @@ def test_downsample_core(block_size: int, target_rate: float, factor: int | None
     n_features = 3
     num_samps = int(np.ceil(test_dur * in_fs))
     num_msgs = int(np.ceil(num_samps / block_size))
-    sig = np.arange(num_samps * n_channels * n_features).reshape(
-        num_samps, n_channels, n_features
-    )
+    sig = np.arange(num_samps * n_channels * n_features).reshape(num_samps, n_channels, n_features)
     # tvec = np.arange(num_samps) / in_fs
 
     def msg_generator():
@@ -36,9 +33,7 @@ def test_downsample_core(block_size: int, target_rate: float, factor: int | None
                 axes=frozendict(
                     {
                         "time": AxisArray.TimeAxis(fs=in_fs, offset=msg_offs),
-                        "ch": AxisArray.CoordinateAxis(
-                            data=np.arange(n_channels).astype(str), dims=["ch"]
-                        ),
+                        "ch": AxisArray.CoordinateAxis(data=np.arange(n_channels).astype(str), dims=["ch"]),
                         "feat": AxisArray.CoordinateAxis(
                             data=np.array([f"Feat{_ + 1}" for _ in range(n_features)]),
                             dims=["feat"],
@@ -66,9 +61,7 @@ def test_downsample_core(block_size: int, target_rate: float, factor: int | None
     assert all(msg.axes["time"].gain == expected_factor / in_fs for msg in out_msgs)
 
     # Assert messages have the correct timestamps
-    expected_offsets = (
-        np.cumsum([0] + [_.data.shape[0] for _ in out_msgs]) * expected_factor / in_fs
-    )
+    expected_offsets = np.cumsum([0] + [_.data.shape[0] for _ in out_msgs]) * expected_factor / in_fs
     actual_offsets = np.array([_.axes["time"].offset for _ in out_msgs])
     assert np.allclose(actual_offsets, expected_offsets[:-1])
 

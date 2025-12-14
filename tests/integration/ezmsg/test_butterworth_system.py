@@ -1,17 +1,17 @@
 import os
-import pytest
 
-import numpy as np
 import ezmsg.core as ez
-from ezmsg.util.messages.axisarray import AxisArray
+import numpy as np
+import pytest
+from ezmsg.sigproc.butterworthfilter import ButterworthFilter, ButterworthFilterSettings
+from ezmsg.sigproc.synth import WhiteNoise, WhiteNoiseSettings
+from ezmsg.util.messagecodec import message_log
 from ezmsg.util.messagegate import MessageGate, MessageGateSettings
 from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
-from ezmsg.util.messagecodec import message_log
+from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.terminate import TerminateOnTimeout as TerminateTest
 from ezmsg.util.terminate import TerminateOnTimeoutSettings as TerminateTestSettings
 
-from ezmsg.sigproc.synth import WhiteNoise, WhiteNoiseSettings
-from ezmsg.sigproc.butterworthfilter import ButterworthFilter, ButterworthFilterSettings
 from tests.helpers.util import get_test_fn
 
 
@@ -74,9 +74,7 @@ def test_butterworth_system(cutoff: float, cuton: float, test_name: str | None =
             fs=in_fs,
             dispatch_rate=None,
         ),
-        gate_settings=MessageGateSettings(
-            start_open=True, default_open=False, default_after=num_msgs
-        ),
+        gate_settings=MessageGateSettings(start_open=True, default_open=False, default_after=num_msgs),
         butter_settings=ButterworthFilterSettings(order=5, cutoff=cutoff, cuton=cuton),
         log_settings=MessageLoggerSettings(output=test_filename),
         term_settings=TerminateTestSettings(time=1.0),
@@ -113,19 +111,11 @@ def test_butterworth_system(cutoff: float, cuton: float, test_name: str | None =
         zeroed_values = [val[1] for val in all_vals if val[0] < cuton]
         white_values = [val[1] for val in all_vals if not val[0] < cuton]
     if btype == "bandpass":
-        zeroed_values = [
-            val[1] for val in all_vals if val[0] < cuton or val[0] > cutoff
-        ]
-        white_values = [
-            val[1] for val in all_vals if not val[0] < cuton and not val[0] > cutoff
-        ]
+        zeroed_values = [val[1] for val in all_vals if val[0] < cuton or val[0] > cutoff]
+        white_values = [val[1] for val in all_vals if not val[0] < cuton and not val[0] > cutoff]
     if btype == "bandstop":
-        zeroed_values = [
-            val[1] for val in all_vals if val[0] < cuton and val[0] > cutoff
-        ]
-        white_values = [
-            val[1] for val in all_vals if not val[0] < cuton or not val[0] > cutoff
-        ]
+        zeroed_values = [val[1] for val in all_vals if val[0] < cuton and val[0] > cutoff]
+        white_values = [val[1] for val in all_vals if not val[0] < cuton or not val[0] > cutoff]
 
     assert np.mean(zeroed_values) < np.mean(white_values)
 

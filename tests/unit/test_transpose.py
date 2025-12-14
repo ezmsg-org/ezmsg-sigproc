@@ -1,10 +1,9 @@
 import copy
 
-import pytest
 import numpy as np
-from ezmsg.util.messages.chunker import array_chunker
-
+import pytest
 from ezmsg.sigproc.transpose import TransposeTransformer
+from ezmsg.util.messages.chunker import array_chunker
 
 from tests.helpers.util import assert_messages_equal
 
@@ -38,9 +37,7 @@ def test_transpose(axes: tuple[int, ...] | None, order: str | None):
     assert_messages_equal(test_input, backup)
 
     # Assert output is transposed
-    if (axes is None or axes in [["time", "d1", "d2"], ["time", ...]]) and (
-        order is None or order == "C"
-    ):
+    if (axes is None or axes in [["time", "d1", "d2"], ["time", ...]]) and (order is None or order == "C"):
         # No-op path.
         assert_messages_equal(results, test_input)
         if order is None:

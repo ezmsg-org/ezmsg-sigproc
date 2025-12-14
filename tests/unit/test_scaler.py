@@ -2,12 +2,11 @@ import copy
 import importlib.util
 
 import numpy as np
+import pytest
+from ezmsg.sigproc.scaler import AdaptiveStandardScalerTransformer, scaler, scaler_np
+from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.chunker import array_chunker
 from frozendict import frozendict
-import pytest
-from ezmsg.util.messages.axisarray import AxisArray
-
-from ezmsg.sigproc.scaler import scaler, scaler_np, AdaptiveStandardScalerTransformer
 
 from tests.helpers.util import assert_messages_equal
 
@@ -21,9 +20,7 @@ def fixture_arrays():
     return data, expected_result
 
 
-@pytest.mark.skipif(
-    importlib.util.find_spec("river") is None, reason="requires `river` package"
-)
+@pytest.mark.skipif(importlib.util.find_spec("river") is None, reason="requires `river` package")
 def test_adaptive_standard_scaler_river(fixture_arrays):
     data, expected_result = fixture_arrays
 

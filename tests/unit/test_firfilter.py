@@ -1,14 +1,13 @@
 import numpy as np
 import pytest
 import scipy.signal
-from frozendict import frozendict
-from ezmsg.util.messages.axisarray import AxisArray
-
 from ezmsg.sigproc.firfilter import (
     FIRFilterSettings,
     FIRFilterTransformer,
     firwin_design_fun,
 )
+from ezmsg.util.messages.axisarray import AxisArray
+from frozendict import frozendict
 
 
 @pytest.mark.parametrize(
@@ -98,9 +97,7 @@ def test_firfilter_transformer(
         dat_dims.insert(time_ax, "time")
         other_axes = {
             "freq": AxisArray.LinearAxis(unit="Hz", offset=0.0, gain=1.0),
-            "ch": AxisArray.CoordinateAxis(
-                data=np.arange(n_chans).astype(str), dims=["ch"]
-            ),
+            "ch": AxisArray.CoordinateAxis(data=np.arange(n_chans).astype(str), dims=["ch"]),
         }
     in_dat = np.arange(np.prod(dat_shape), dtype=float).reshape(*dat_shape)
 

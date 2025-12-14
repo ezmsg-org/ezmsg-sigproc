@@ -1,23 +1,23 @@
-from array_api_compat import get_namespace
 import typing
 
+import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
-import ezmsg.core as ez
+from array_api_compat import get_namespace
 from ezmsg.util.messages.axisarray import (
     AxisArray,
-    slice_along_axis,
     AxisBase,
     replace,
+    slice_along_axis,
 )
 
-from .spectral import OptionsEnum
 from .base import (
-    BaseTransformer,
     BaseStatefulTransformer,
+    BaseTransformer,
     BaseTransformerUnit,
     processor_state,
 )
+from .spectral import OptionsEnum
 
 
 class AggregationFunction(OptionsEnum):
@@ -89,9 +89,7 @@ class RangedAggregateState:
 
 
 class RangedAggregateTransformer(
-    BaseStatefulTransformer[
-        RangedAggregateSettings, AxisArray, AxisArray, RangedAggregateState
-    ]
+    BaseStatefulTransformer[RangedAggregateSettings, AxisArray, AxisArray, RangedAggregateState]
 ):
     def __call__(self, message: AxisArray) -> AxisArray:
         # Override for shortcut passthrough mode.
@@ -118,16 +116,12 @@ class RangedAggregateTransformer(
         if hasattr(target_axis, "data"):
             self._state.ax_vec = target_axis.data
         else:
-            self._state.ax_vec = target_axis.value(
-                np.arange(message.data.shape[ax_idx])
-            )
+            self._state.ax_vec = target_axis.value(np.arange(message.data.shape[ax_idx]))
 
         ax_dat = []
         slices = []
         for start, stop in self.settings.bands:
-            inds = np.where(
-                np.logical_and(self._state.ax_vec >= start, self._state.ax_vec <= stop)
-            )[0]
+            inds = np.where(np.logical_and(self._state.ax_vec >= start, self._state.ax_vec <= stop))[0]
             slices.append(np.s_[inds[0] : inds[-1] + 1])
             if hasattr(target_axis, "data"):
                 if self._state.ax_vec.dtype.type is np.str_:
@@ -164,8 +158,7 @@ class RangedAggregateTransformer(
             ]
         else:
             out_data = [
-                agg_func(slice_along_axis(message.data, sl, axis=ax_idx), axis=ax_idx)
-                for sl in self._state.slices
+                agg_func(slice_along_axis(message.data, sl, axis=ax_idx), axis=ax_idx) for sl in self._state.slices
             ]
 
         msg_out = replace(
@@ -187,11 +180,7 @@ class RangedAggregateTransformer(
         return msg_out
 
 
-class RangedAggregate(
-    BaseTransformerUnit[
-        RangedAggregateSettings, AxisArray, AxisArray, RangedAggregateTransformer
-    ]
-):
+class RangedAggregate(BaseTransformerUnit[RangedAggregateSettings, AxisArray, AxisArray, RangedAggregateTransformer]):
     SETTINGS = RangedAggregateSettings
 
 
@@ -212,9 +201,7 @@ def ranged_aggregate(
     Returns:
         :obj:`RangedAggregateTransformer`
     """
-    return RangedAggregateTransformer(
-        RangedAggregateSettings(axis=axis, bands=bands, operation=operation)
-    )
+    return RangedAggregateTransformer(RangedAggregateSettings(axis=axis, bands=bands, operation=operation))
 
 
 class AggregateSettings(ez.Settings):
@@ -242,9 +229,7 @@ class AggregateTransformer(BaseTransformer[AggregateSettings, AxisArray, AxisArr
         op = self.settings.operation
 
         if op == AggregationFunction.NONE:
-            raise ValueError(
-                "AggregationFunction.NONE is not supported for full-axis aggregation"
-            )
+            raise ValueError("AggregationFunction.NONE is not supported for full-axis aggregation")
 
         if op == AggregationFunction.TRAPEZOID:
             # Trapezoid integration requires x-coordinates
@@ -276,9 +261,7 @@ class AggregateTransformer(BaseTransformer[AggregateSettings, AxisArray, AxisArr
         )
 
 
-class AggregateUnit(
-    BaseTransformerUnit[AggregateSettings, AxisArray, AxisArray, AggregateTransformer]
-):
+class AggregateUnit(BaseTransformerUnit[AggregateSettings, AxisArray, AxisArray, AggregateTransformer]):
     """Unit that aggregates an entire axis using a specified operation."""
 
     SETTINGS = AggregateSettings
