@@ -13,7 +13,7 @@ from ezmsg.sigproc.sampler import (
     TriggerGenerator,
     TriggerGeneratorSettings,
 )
-from ezmsg.sigproc.synth import Oscillator, OscillatorSettings
+from tests.helpers.synth import Oscillator, OscillatorSettings
 from tests.helpers.util import get_test_fn
 
 

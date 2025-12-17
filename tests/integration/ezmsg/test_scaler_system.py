@@ -9,7 +9,7 @@ from ezmsg.util.terminate import TerminateOnTotal, TerminateOnTotalSettings
 from frozendict import frozendict
 
 from ezmsg.sigproc.scaler import AdaptiveStandardScaler, AdaptiveStandardScalerSettings, scaler_np
-from ezmsg.sigproc.synth import Counter, CounterSettings
+from tests.helpers.synth import Counter, CounterSettings
 from tests.helpers.util import get_test_fn
 
 
@@ -36,7 +36,6 @@ def test_scaler_system(
                 fs=fs,
                 n_ch=1,
                 dispatch_rate=duration,  # Simulation duration in 1.0 seconds
-                mod=None,
             )
         ),
         "SCALER": AdaptiveStandardScaler(AdaptiveStandardScalerSettings(time_constant=tau, axis="time")),

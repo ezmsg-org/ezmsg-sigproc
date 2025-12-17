@@ -8,7 +8,7 @@ from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.terminate import TerminateOnTotal
 
 from ezmsg.sigproc.rollingscaler import RollingScalerUnit
-from ezmsg.sigproc.synth import EEGSynth
+from tests.helpers.synth import EEGSynth
 
 
 def test_rolling_scaler_system():

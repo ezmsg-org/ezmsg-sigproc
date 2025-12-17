@@ -14,8 +14,8 @@ from ezmsg.sigproc.spectrum import (
     SpectrumSettings,
     WindowFunction,
 )
-from ezmsg.sigproc.synth import EEGSynth, EEGSynthSettings
 from ezmsg.sigproc.window import Window, WindowSettings
+from tests.helpers.synth import EEGSynth, EEGSynthSettings
 from tests.helpers.util import (
     get_test_fn,
 )
