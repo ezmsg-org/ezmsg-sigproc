@@ -9,7 +9,7 @@ from ezmsg.util.terminate import TerminateOnTotal
 
 from ezmsg.sigproc.butterworthfilter import ButterworthFilter
 from ezmsg.sigproc.cheby import ChebyshevFilter
-from ezmsg.sigproc.synth import EEGSynth
+from tests.helpers.synth import EEGSynth
 from tests.helpers.util import get_test_fn
 
 

@@ -7,8 +7,16 @@ compatibility for code that imports from ezmsg.sigproc.base.
 New code should import directly from ezmsg.baseproc instead.
 """
 
+import warnings
+
+warnings.warn(
+    "Importing from 'ezmsg.sigproc.base' is deprecated. Please import from 'ezmsg.baseproc' instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 # Re-export everything from ezmsg.baseproc for backwards compatibility
-from ezmsg.baseproc import (
+from ezmsg.baseproc import (  # noqa: E402
     # Protocols
     AdaptiveTransformer,
     # Type variables

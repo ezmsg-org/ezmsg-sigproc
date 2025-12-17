@@ -11,7 +11,7 @@ from ezmsg.util.terminate import TerminateOnTimeout as TerminateTest
 from ezmsg.util.terminate import TerminateOnTimeoutSettings as TerminateTestSettings
 
 from ezmsg.sigproc.butterworthfilter import ButterworthFilter, ButterworthFilterSettings
-from ezmsg.sigproc.synth import WhiteNoise, WhiteNoiseSettings
+from tests.helpers.synth import WhiteNoise, WhiteNoiseSettings
 from tests.helpers.util import get_test_fn
 
 

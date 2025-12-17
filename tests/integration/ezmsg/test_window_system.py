@@ -13,8 +13,8 @@ from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.terminate import TerminateOnTimeout as TerminateTest
 from ezmsg.util.terminate import TerminateOnTimeoutSettings as TerminateTestSettings
 
-from ezmsg.sigproc.synth import Counter, CounterSettings
 from ezmsg.sigproc.window import Window, WindowSettings
+from tests.helpers.synth import Counter, CounterSettings
 from tests.helpers.util import calculate_expected_windows, get_test_fn
 
 
