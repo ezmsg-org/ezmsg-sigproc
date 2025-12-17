@@ -8,7 +8,7 @@ from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.terminate import TerminateOnTotal
 
 from ezmsg.sigproc.decimate import Decimate
-from ezmsg.sigproc.synth import EEGSynth
+from tests.helpers.synth import EEGSynth
 from tests.helpers.util import get_test_fn
 
 
