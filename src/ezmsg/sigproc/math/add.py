@@ -1,4 +1,4 @@
-"""Signal addition utilities."""
+"""Add 2 signals or add a constant to a signal."""
 
 import asyncio
 import typing

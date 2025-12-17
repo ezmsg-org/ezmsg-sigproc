@@ -1,3 +1,6 @@
+"""Clips the data to be within the specified range."""
+# TODO: Array API
+
 import ezmsg.core as ez
 import numpy as np
 from ezmsg.util.messages.axisarray import AxisArray

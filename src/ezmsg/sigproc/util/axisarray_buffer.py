@@ -1,3 +1,5 @@
+"""AxisArray support for .buffer.HybridBuffer."""
+
 import math
 import typing
 

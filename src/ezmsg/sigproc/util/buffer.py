@@ -1,3 +1,7 @@
+"""A stateful, FIFO buffer that combines a deque for fast appends with a
+contiguous circular buffer for efficient, advancing reads.
+"""
+
 import collections
 import math
 import typing
