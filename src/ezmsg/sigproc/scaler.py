@@ -1,15 +1,14 @@
 import typing
 
 import numpy as np
-from ezmsg.util.generator import consumer
-from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.util.messages.util import replace
-
-from .base import (
+from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
     processor_state,
 )
+from ezmsg.util.generator import consumer
+from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.util import replace
 
 # Imports for backwards compatibility with previous module location
 from .ewma import EWMA_Deprecated as EWMA_Deprecated

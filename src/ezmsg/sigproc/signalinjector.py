@@ -1,14 +1,13 @@
 import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
-from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.util.messages.util import replace
-
-from .base import (
+from ezmsg.baseproc import (
     BaseAsyncTransformer,
     BaseTransformerUnit,
     processor_state,
 )
+from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.util import replace
 
 
 class SignalInjectorSettings(ez.Settings):

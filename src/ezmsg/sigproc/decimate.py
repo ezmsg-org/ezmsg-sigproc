@@ -1,9 +1,9 @@
 import typing
 
 import ezmsg.core as ez
+from ezmsg.baseproc import BaseTransformerUnit
 from ezmsg.util.messages.axisarray import AxisArray
 
-from .base import BaseTransformerUnit
 from .cheby import ChebyshevFilterSettings, ChebyshevFilterTransformer
 from .downsample import Downsample, DownsampleSettings
 from .filter import BACoeffs, SOSCoeffs

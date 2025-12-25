@@ -1,14 +1,14 @@
 from typing import Generator
 
 import ezmsg.core as ez
-from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.util.messages.modify import modify_axis
-
-from .base import (
+from ezmsg.baseproc import (
     BaseStatefulProcessor,
     BaseTransformerUnit,
     CompositeProcessor,
 )
+from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.modify import modify_axis
+
 from .spectrum import (
     SpectralOutput,
     SpectralTransform,

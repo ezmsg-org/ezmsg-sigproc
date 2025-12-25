@@ -4,16 +4,16 @@ from dataclasses import field
 
 import ezmsg.core as ez
 import numpy as np
-from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.util.messages.util import replace
-
-from .base import (
+from ezmsg.baseproc import (
     BaseProcessor,
     BaseStatefulProcessor,
     BaseTransformer,
     BaseTransformerUnit,
     CompositeProcessor,
 )
+from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.util import replace
+
 from .filterbankdesign import (
     FilterbankDesignSettings,
     FilterbankDesignTransformer,

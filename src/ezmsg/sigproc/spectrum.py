@@ -5,16 +5,15 @@ from functools import partial
 import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
+from ezmsg.baseproc import (
+    BaseStatefulTransformer,
+    BaseTransformerUnit,
+    processor_state,
+)
 from ezmsg.util.messages.axisarray import (
     AxisArray,
     replace,
     slice_along_axis,
-)
-
-from .base import (
-    BaseStatefulTransformer,
-    BaseTransformerUnit,
-    processor_state,
 )
 
 

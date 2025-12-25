@@ -5,14 +5,14 @@ import time
 import ezmsg.core as ez
 import numpy as np
 import scipy.interpolate
-from ezmsg.util.messages.axisarray import AxisArray, LinearAxis
-from ezmsg.util.messages.util import replace
-
-from .base import (
+from ezmsg.baseproc import (
     BaseConsumerUnit,
     BaseStatefulProcessor,
     processor_state,
 )
+from ezmsg.util.messages.axisarray import AxisArray, LinearAxis
+from ezmsg.util.messages.util import replace
+
 from .util.axisarray_buffer import HybridAxisArrayBuffer, HybridAxisBuffer
 from .util.buffer import UpdateStrategy
 

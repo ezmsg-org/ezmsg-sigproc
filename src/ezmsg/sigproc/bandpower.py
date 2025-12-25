@@ -1,18 +1,18 @@
 from dataclasses import field
 
 import ezmsg.core as ez
+from ezmsg.baseproc import (
+    BaseProcessor,
+    BaseStatefulProcessor,
+    BaseTransformerUnit,
+    CompositeProcessor,
+)
 from ezmsg.util.messages.axisarray import AxisArray
 
 from .aggregate import (
     AggregationFunction,
     RangedAggregateSettings,
     RangedAggregateTransformer,
-)
-from .base import (
-    BaseProcessor,
-    BaseStatefulProcessor,
-    BaseTransformerUnit,
-    CompositeProcessor,
 )
 from .spectrogram import SpectrogramSettings, SpectrogramTransformer
 

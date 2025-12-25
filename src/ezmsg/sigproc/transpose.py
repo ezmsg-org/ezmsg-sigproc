@@ -2,15 +2,14 @@ from types import EllipsisType
 
 import ezmsg.core as ez
 import numpy as np
-from ezmsg.util.messages.axisarray import (
-    AxisArray,
-    replace,
-)
-
-from .base import (
+from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
     processor_state,
+)
+from ezmsg.util.messages.axisarray import (
+    AxisArray,
+    replace,
 )
 
 
