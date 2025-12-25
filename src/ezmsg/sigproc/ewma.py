@@ -5,10 +5,9 @@ import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
 import scipy.signal as sps
+from ezmsg.baseproc import BaseStatefulTransformer, BaseTransformerUnit, processor_state
 from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
 from ezmsg.util.messages.util import replace
-
-from .base import BaseStatefulTransformer, BaseTransformerUnit, processor_state
 
 
 def _tau_from_alpha(alpha: float, dt: float) -> float:

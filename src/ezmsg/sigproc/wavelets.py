@@ -4,14 +4,14 @@ import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
 import pywt
-from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.util.messages.util import replace
-
-from .base import (
+from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
     processor_state,
 )
+from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.util import replace
+
 from .filterbank import FilterbankMode, MinPhaseMode, filterbank
 
 

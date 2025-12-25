@@ -6,6 +6,11 @@ import ezmsg.core as ez
 import numpy.typing as npt
 import sparse
 from array_api_compat import get_namespace, is_pydata_sparse_namespace
+from ezmsg.baseproc import (
+    BaseStatefulTransformer,
+    BaseTransformerUnit,
+    processor_state,
+)
 from ezmsg.util.messages.axisarray import (
     AxisArray,
     replace,
@@ -13,11 +18,6 @@ from ezmsg.util.messages.axisarray import (
     sliding_win_oneaxis,
 )
 
-from .base import (
-    BaseStatefulTransformer,
-    BaseTransformerUnit,
-    processor_state,
-)
 from .util.profile import profile_subpub
 from .util.sparse import sliding_win_oneaxis as sparse_sliding_win_oneaxis
 

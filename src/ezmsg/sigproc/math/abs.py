@@ -1,3 +1,6 @@
+"""Take the absolute value of the data."""
+# TODO: Array API
+
 import numpy as np
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace

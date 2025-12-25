@@ -4,6 +4,12 @@ import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
 from array_api_compat import get_namespace
+from ezmsg.baseproc import (
+    BaseStatefulTransformer,
+    BaseTransformer,
+    BaseTransformerUnit,
+    processor_state,
+)
 from ezmsg.util.messages.axisarray import (
     AxisArray,
     AxisBase,
@@ -11,12 +17,6 @@ from ezmsg.util.messages.axisarray import (
     slice_along_axis,
 )
 
-from .base import (
-    BaseStatefulTransformer,
-    BaseTransformer,
-    BaseTransformerUnit,
-    processor_state,
-)
 from .spectral import OptionsEnum
 
 

@@ -2,10 +2,9 @@ import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
 import scipy.signal
+from ezmsg.baseproc import BaseStatefulTransformer, processor_state
 from ezmsg.util.messages.axisarray import AxisArray, CoordinateAxis
 from ezmsg.util.messages.util import replace
-
-from .base import BaseStatefulTransformer, processor_state
 
 
 class AdaptiveLatticeNotchFilterSettings(ez.Settings):

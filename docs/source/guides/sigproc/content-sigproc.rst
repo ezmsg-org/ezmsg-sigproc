@@ -17,6 +17,7 @@ This may occur when the generator receives inadequate data to produce a valid ou
 .. toctree::
     :maxdepth: 1
 
+    architecture
     base
     units
     processors

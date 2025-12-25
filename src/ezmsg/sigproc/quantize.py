@@ -1,8 +1,7 @@
 import ezmsg.core as ez
 import numpy as np
+from ezmsg.baseproc import BaseTransformer, BaseTransformerUnit
 from ezmsg.util.messages.axisarray import AxisArray, replace
-
-from .base import BaseTransformer, BaseTransformerUnit
 
 
 class QuantizeSettings(ez.Settings):

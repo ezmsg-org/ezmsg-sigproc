@@ -1,3 +1,5 @@
+"""Take the difference between 2 signals or between a signal and a constant value."""
+
 import asyncio
 import typing
 from dataclasses import dataclass, field

@@ -6,12 +6,7 @@ from collections import deque
 
 import ezmsg.core as ez
 import numpy as np
-from ezmsg.util.messages.axisarray import (
-    AxisArray,
-)
-from ezmsg.util.messages.util import replace
-
-from .base import (
+from ezmsg.baseproc import (
     BaseConsumerUnit,
     BaseProducerUnit,
     BaseStatefulProducer,
@@ -19,6 +14,11 @@ from .base import (
     BaseTransformerUnit,
     processor_state,
 )
+from ezmsg.util.messages.axisarray import (
+    AxisArray,
+)
+from ezmsg.util.messages.util import replace
+
 from .util.axisarray_buffer import HybridAxisArrayBuffer
 from .util.buffer import UpdateStrategy
 from .util.message import SampleMessage, SampleTriggerMessage

@@ -7,15 +7,15 @@ import numpy as np
 import numpy.typing as npt
 import scipy.fft as sp_fft
 import scipy.signal as sps
-from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.util.messages.util import replace
-from scipy.special import lambertw
-
-from .base import (
+from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
     processor_state,
 )
+from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.util import replace
+from scipy.special import lambertw
+
 from .spectrum import OptionsEnum
 from .window import WindowTransformer
 

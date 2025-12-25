@@ -1,17 +1,16 @@
 import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
+from ezmsg.baseproc import (
+    BaseStatefulTransformer,
+    BaseTransformerUnit,
+    processor_state,
+)
 from ezmsg.util.messages.axisarray import (
     AxisArray,
     AxisBase,
     replace,
     slice_along_axis,
-)
-
-from .base import (
-    BaseStatefulTransformer,
-    BaseTransformerUnit,
-    processor_state,
 )
 
 """

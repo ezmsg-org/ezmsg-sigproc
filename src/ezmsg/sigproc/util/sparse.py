@@ -1,3 +1,5 @@
+"""Methods for sparse array signal processing operations."""
+
 import numpy as np
 import sparse
 

@@ -1,9 +1,9 @@
 import ezmsg.core as ez
 import scipy.special
+from ezmsg.baseproc import BaseTransformer, BaseTransformerUnit
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
-from .base import BaseTransformer, BaseTransformerUnit
 from .spectral import OptionsEnum
 
 
