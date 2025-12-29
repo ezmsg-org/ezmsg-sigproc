@@ -4,7 +4,12 @@ import scipy.special
 from ezmsg.util.messages.axisarray import AxisArray
 from frozendict import frozendict
 
-from ezmsg.sigproc.activation import ACTIVATIONS, ActivationFunction, activation
+from ezmsg.sigproc.activation import (
+    ACTIVATIONS,
+    ActivationFunction,
+    ActivationSettings,
+    ActivationTransformer,
+)
 
 
 @pytest.mark.parametrize("function", [_ for _ in ActivationFunction] + ActivationFunction.options())
@@ -25,8 +30,8 @@ def test_activation(function: str):
             )
             yield msg
 
-    proc = activation(function=function)
-    out_msgs = [proc.send(_) for _ in msg_generator()]
+    proc = ActivationTransformer(ActivationSettings(function=function))
+    out_msgs = [proc(_) for _ in msg_generator()]
     out_dat = AxisArray.concatenate(*out_msgs, dim="time").data
 
     if function in ACTIVATIONS:

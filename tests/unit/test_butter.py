@@ -4,10 +4,7 @@ import scipy.signal
 from ezmsg.util.messages.axisarray import AxisArray
 from frozendict import frozendict
 
-from ezmsg.sigproc.butterworthfilter import (
-    ButterworthFilterSettings as LegacyButterSettings,
-)
-from ezmsg.sigproc.butterworthfilter import butter
+from ezmsg.sigproc.butterworthfilter import ButterworthFilterSettings, ButterworthFilterTransformer
 
 
 @pytest.mark.parametrize(
@@ -31,7 +28,7 @@ def test_butterworth_legacy_filter_settings(cutoff: float, cuton: float, order: 
             If cuton is larger than cutoff we assume bandstop.
         order (int): The order of the filter.
     """
-    btype, Wn = LegacyButterSettings(order=order, cuton=cuton, cutoff=cutoff).filter_specs()
+    btype, Wn = ButterworthFilterSettings(order=order, cuton=cuton, cutoff=cutoff).filter_specs()
     if cuton is None:
         assert btype == "lowpass"
         assert Wn == cutoff
@@ -92,7 +89,7 @@ def test_butterworth(
     in_dat = np.arange(np.prod(dat_shape), dtype=float).reshape(*dat_shape)
 
     # Calculate Expected Result
-    btype, Wn = LegacyButterSettings(order=order, cuton=cuton, cutoff=cutoff).filter_specs()
+    btype, Wn = ButterworthFilterSettings(order=order, cuton=cuton, cutoff=cutoff).filter_specs()
     coefs = scipy.signal.butter(order, Wn, btype=btype, output=coef_type, fs=fs)
     tmp_dat = np.moveaxis(in_dat, time_ax, -1)
     if coef_type == "ba":
@@ -127,25 +124,29 @@ def test_butterworth(
 
     # Test axis_name `None` when target axis idx is 0.
     axis_name = "time" if time_ax != 0 else None
-    gen = butter(
-        axis=axis_name,
-        order=order,
-        cuton=cuton,
-        cutoff=cutoff,
-        coef_type=coef_type,
+    xformer = ButterworthFilterTransformer(
+        ButterworthFilterSettings(
+            axis=axis_name,
+            order=order,
+            cuton=cuton,
+            cutoff=cutoff,
+            coef_type=coef_type,
+        )
     )
 
-    result = np.concatenate([gen.send(_).data for _ in messages], axis=time_ax)
+    result = np.concatenate([xformer(_).data for _ in messages], axis=time_ax)
     assert np.allclose(result, expected)
 
 
 def test_butterworth_empty_msg():
-    proc = butter(
-        axis="time",
-        order=2,
-        cuton=0.1,
-        cutoff=1.0,
-        coef_type="sos",
+    proc = ButterworthFilterTransformer(
+        ButterworthFilterSettings(
+            axis="time",
+            order=2,
+            cuton=0.1,
+            cutoff=1.0,
+            coef_type="sos",
+        )
     )
     msg_in = AxisArray(
         data=np.zeros((0, 2)),
@@ -156,7 +157,7 @@ def test_butterworth_empty_msg():
         },
         key="test_butterworth_empty_msg",
     )
-    res = proc.send(msg_in)
+    res = proc(msg_in)
     assert res.data.size == 0
 
 
@@ -196,12 +197,14 @@ def test_butterworth_update_settings():
     assert np.argmax(power0[:, 1]) == 1  # 40Hz should be the strongest frequency in ch1
 
     # Initialize filter - lowpass at 30Hz should pass 10Hz but attenuate 40Hz
-    proc = butter(
-        axis="time",
-        order=4,
-        cutoff=30.0,  # Lowpass at 30Hz
-        cuton=None,
-        coef_type="sos",
+    proc = ButterworthFilterTransformer(
+        ButterworthFilterSettings(
+            axis="time",
+            order=4,
+            cutoff=30.0,  # Lowpass at 30Hz
+            cuton=None,
+            coef_type="sos",
+        )
     )
 
     # Process first message
@@ -232,8 +235,6 @@ def test_butterworth_update_settings():
     assert power3[0][0] / power2[0][0] < 0.1  # 10Hz should be _further_ attenuated
 
     # Test update_settings with complete new settings object, includes coef_type change.
-    from ezmsg.sigproc.butterworthfilter import ButterworthFilterSettings
-
     new_settings = ButterworthFilterSettings(
         axis="time",
         order=2,

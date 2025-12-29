@@ -103,7 +103,7 @@ def test_butterworth_zero_phase_matches_scipy(
         padlen=padlen,
     )
 
-    out = zp.send(msg).data
+    out = zp(msg).data
     assert np.allclose(out, expected, atol=1e-10, rtol=1e-7)
 
 
@@ -118,7 +118,7 @@ def test_butterworth_zero_phase_empty_msg():
         },
         key="test_butterworth_zero_phase_empty",
     )
-    res = zp.send(msg)
+    res = zp(msg)
     assert res.data.size == 0
 
 

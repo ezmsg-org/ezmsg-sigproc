@@ -10,7 +10,8 @@ from ezmsg.sigproc.aggregate import (
     AggregateSettings,
     AggregateTransformer,
     AggregationFunction,
-    ranged_aggregate,
+    RangedAggregateSettings,
+    RangedAggregateTransformer,
 )
 from tests.helpers.util import assert_messages_equal
 
@@ -61,8 +62,8 @@ def test_aggregate(agg_func: AggregationFunction):
 
     backup = [copy.deepcopy(_) for _ in in_msgs]
 
-    gen = ranged_aggregate(axis=targ_ax, bands=bands, operation=agg_func)
-    out_msgs = [gen.send(_) for _ in in_msgs]
+    xformer = RangedAggregateTransformer(RangedAggregateSettings(axis=targ_ax, bands=bands, operation=agg_func))
+    out_msgs = [xformer(_) for _ in in_msgs]
 
     assert_messages_equal(in_msgs, backup)
 
@@ -96,8 +97,8 @@ def test_aggregate(agg_func: AggregationFunction):
 def test_arg_aggregate(agg_func: AggregationFunction):
     bands = [(5.0, 20.0), (30.0, 50.0)]
     in_msgs = [_ for _ in get_msg_gen()]
-    gen = ranged_aggregate(axis="freq", bands=bands, operation=agg_func)
-    out_msgs = [gen.send(_) for _ in in_msgs]
+    xformer = RangedAggregateTransformer(RangedAggregateSettings(axis="freq", bands=bands, operation=agg_func))
+    out_msgs = [xformer(_) for _ in in_msgs]
 
     if agg_func == AggregationFunction.ARGMIN:
         expected_vals = np.array([np.min(_) for _ in bands])
@@ -111,8 +112,10 @@ def test_arg_aggregate(agg_func: AggregationFunction):
 def test_trapezoid():
     bands = [(5.0, 20.0), (30.0, 50.0)]
     in_msgs = [_ for _ in get_msg_gen()]
-    gen = ranged_aggregate(axis="freq", bands=bands, operation=AggregationFunction.TRAPEZOID)
-    out_msgs = [gen.send(_) for _ in in_msgs]
+    xformer = RangedAggregateTransformer(
+        RangedAggregateSettings(axis="freq", bands=bands, operation=AggregationFunction.TRAPEZOID)
+    )
+    out_msgs = [xformer(_) for _ in in_msgs]
 
     out_dat = AxisArray.concatenate(*out_msgs, dim="time").data
 
@@ -145,15 +148,17 @@ def test_aggregate_handle_change(change_ax: str):
         )
     ]
 
-    gen = ranged_aggregate(
-        axis="freq",
-        bands=[(5.0, 20.0), (30.0, 50.0)],
-        operation=AggregationFunction.MEAN,
+    xformer = RangedAggregateTransformer(
+        RangedAggregateSettings(
+            axis="freq",
+            bands=[(5.0, 20.0), (30.0, 50.0)],
+            operation=AggregationFunction.MEAN,
+        )
     )
 
-    out_msgs1 = [gen.send(_) for _ in in_msgs1]
+    out_msgs1 = [xformer(_) for _ in in_msgs1]
     print(len(out_msgs1))
-    out_msgs2 = [gen.send(_) for _ in in_msgs2]
+    out_msgs2 = [xformer(_) for _ in in_msgs2]
     print(len(out_msgs2))
 
 
