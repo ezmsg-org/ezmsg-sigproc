@@ -1,4 +1,10 @@
-"""Scale the data by a constant factor."""
+"""
+Scale the data by a constant factor.
+
+.. note::
+    This module supports the :doc:`Array API standard </guides/explanations/array_api>`,
+    enabling use with NumPy, CuPy, PyTorch, and other compatible array libraries.
+"""
 
 import ezmsg.core as ez
 from ezmsg.baseproc import BaseTransformer, BaseTransformerUnit

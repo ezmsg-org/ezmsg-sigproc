@@ -1,4 +1,10 @@
-"""Take the absolute value of the data."""
+"""
+Take the absolute value of the data.
+
+.. note::
+    This module supports the :doc:`Array API standard </guides/explanations/array_api>`,
+    enabling use with NumPy, CuPy, PyTorch, and other compatible array libraries.
+"""
 
 from array_api_compat import get_namespace
 from ezmsg.baseproc import BaseTransformer, BaseTransformerUnit

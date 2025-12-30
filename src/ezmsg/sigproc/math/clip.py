@@ -1,4 +1,10 @@
-"""Clips the data to be within the specified range."""
+"""
+Clips the data to be within the specified range.
+
+.. note::
+    This module supports the :doc:`Array API standard </guides/explanations/array_api>`,
+    enabling use with NumPy, CuPy, PyTorch, and other compatible array libraries.
+"""
 
 import ezmsg.core as ez
 from array_api_compat import get_namespace

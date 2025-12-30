@@ -1,3 +1,11 @@
+"""
+Compute differences along an axis.
+
+.. note::
+    This module supports the :doc:`Array API standard </guides/explanations/array_api>`,
+    enabling use with NumPy, CuPy, PyTorch, and other compatible array libraries.
+"""
+
 import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt

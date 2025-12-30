@@ -1,4 +1,10 @@
-"""1/data transformer."""
+"""
+Compute the multiplicative inverse (1/x) of the data.
+
+.. note::
+    This module supports the :doc:`Array API standard </guides/explanations/array_api>`,
+    enabling use with NumPy, CuPy, PyTorch, and other compatible array libraries.
+"""
 
 from ezmsg.baseproc import BaseTransformer, BaseTransformerUnit
 from ezmsg.util.messages.axisarray import AxisArray

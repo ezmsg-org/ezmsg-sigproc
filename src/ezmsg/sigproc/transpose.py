@@ -1,3 +1,12 @@
+"""
+Transpose or permute array dimensions.
+
+.. note::
+    This module supports the :doc:`Array API standard </guides/explanations/array_api>`,
+    enabling use with NumPy, CuPy, PyTorch, and other compatible array libraries.
+    Memory layout optimization (C/F order) only applies to NumPy arrays.
+"""
+
 from types import EllipsisType
 
 import ezmsg.core as ez

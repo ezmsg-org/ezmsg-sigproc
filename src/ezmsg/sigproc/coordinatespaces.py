@@ -3,6 +3,10 @@ Coordinate space transformations for streaming data.
 
 This module provides utilities and ezmsg nodes for transforming between
 Cartesian (x, y) and polar (r, theta) coordinate systems.
+
+.. note::
+    This module supports the :doc:`Array API standard </guides/explanations/array_api>`,
+    enabling use with NumPy, CuPy, PyTorch, and other compatible array libraries.
 """
 
 from enum import Enum

@@ -1,9 +1,12 @@
-"""Apply a linear transformation: output = scale * input + offset.
+"""
+Apply a linear transformation: output = scale * input + offset.
 
 Supports per-element scale and offset along a specified axis.
-Uses Array API for compatibility with numpy, cupy, torch, etc.
-
 For full matrix transformations, use :obj:`AffineTransformTransformer` instead.
+
+.. note::
+    This module supports the :doc:`Array API standard </guides/explanations/array_api>`,
+    enabling use with NumPy, CuPy, PyTorch, and other compatible array libraries.
 """
 
 import ezmsg.core as ez

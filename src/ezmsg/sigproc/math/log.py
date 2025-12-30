@@ -1,4 +1,10 @@
-"""Take the logarithm of the data."""
+"""
+Take the logarithm of the data.
+
+.. note::
+    This module supports the :doc:`Array API standard </guides/explanations/array_api>`,
+    enabling use with NumPy, CuPy, PyTorch, and other compatible array libraries.
+"""
 
 import ezmsg.core as ez
 from array_api_compat import get_namespace
