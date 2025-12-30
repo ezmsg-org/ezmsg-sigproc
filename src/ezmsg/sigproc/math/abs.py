@@ -2,10 +2,9 @@
 # TODO: Array API
 
 import numpy as np
+from ezmsg.baseproc import BaseTransformer, BaseTransformerUnit
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
-
-from ..base import BaseTransformer, BaseTransformerUnit
 
 
 class AbsSettings:

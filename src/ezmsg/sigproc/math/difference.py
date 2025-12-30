@@ -5,11 +5,10 @@ import typing
 from dataclasses import dataclass, field
 
 import ezmsg.core as ez
+from ezmsg.baseproc import BaseTransformer, BaseTransformerUnit
 from ezmsg.baseproc.util.asio import run_coroutine_sync
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
-
-from ..base import BaseTransformer, BaseTransformerUnit
 
 
 class ConstDifferenceSettings(ez.Settings):
