@@ -1,5 +1,6 @@
 import typing
 
+import ezmsg.core as ez
 import numpy as np
 from ezmsg.baseproc import (
     BaseStatefulTransformer,
@@ -82,11 +83,38 @@ class AdaptiveStandardScalerTransformer(
     ]
 ):
     def _reset_state(self, message: AxisArray) -> None:
-        self._state.samps_ewma = EWMATransformer(time_constant=self.settings.time_constant, axis=self.settings.axis)
-        self._state.vars_sq_ewma = EWMATransformer(time_constant=self.settings.time_constant, axis=self.settings.axis)
+        self._state.samps_ewma = EWMATransformer(
+            time_constant=self.settings.time_constant,
+            axis=self.settings.axis,
+            accumulate=self.settings.accumulate,
+        )
+        self._state.vars_sq_ewma = EWMATransformer(
+            time_constant=self.settings.time_constant,
+            axis=self.settings.axis,
+            accumulate=self.settings.accumulate,
+        )
+
+    @property
+    def accumulate(self) -> bool:
+        """Whether to accumulate statistics from incoming samples."""
+        return self.settings.accumulate
+
+    @accumulate.setter
+    def accumulate(self, value: bool) -> None:
+        """
+        Set the accumulate mode and propagate to child EWMA transformers.
+
+        Args:
+            value: If True, update statistics with each sample.
+                   If False, only apply current statistics without updating.
+        """
+        if self._state.samps_ewma is not None:
+            self._state.samps_ewma.settings = replace(self._state.samps_ewma.settings, accumulate=value)
+        if self._state.vars_sq_ewma is not None:
+            self._state.vars_sq_ewma.settings = replace(self._state.vars_sq_ewma.settings, accumulate=value)
 
     def _process(self, message: AxisArray) -> AxisArray:
-        # Update step
+        # Update step (respects accumulate setting via child EWMAs)
         mean_message = self._state.samps_ewma(message)
         var_sq_message = self._state.vars_sq_ewma(replace(message, data=message.data**2))
 
@@ -107,6 +135,27 @@ class AdaptiveStandardScaler(
     ]
 ):
     SETTINGS = AdaptiveStandardScalerSettings
+
+    @ez.subscriber(BaseTransformerUnit.INPUT_SETTINGS)
+    async def on_settings(self, msg: AdaptiveStandardScalerSettings) -> None:
+        """
+        Handle settings updates with smart reset behavior.
+
+        Only resets state if `axis` changes (structural change).
+        Changes to `time_constant` or `accumulate` are applied without
+        resetting accumulated statistics.
+        """
+        old_axis = self.SETTINGS.axis
+        self.apply_settings(msg)
+
+        if msg.axis != old_axis:
+            # Axis changed - need full reset
+            self.create_processor()
+        else:
+            # Update accumulate on processor (propagates to child EWMAs)
+            self.processor.accumulate = msg.accumulate
+            # Also update own settings reference
+            self.processor.settings = msg
 
 
 # Backwards compatibility...

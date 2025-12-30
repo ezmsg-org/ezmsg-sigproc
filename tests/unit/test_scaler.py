@@ -7,7 +7,12 @@ from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.chunker import array_chunker
 from frozendict import frozendict
 
-from ezmsg.sigproc.scaler import AdaptiveStandardScalerTransformer, scaler, scaler_np
+from ezmsg.sigproc.scaler import (
+    AdaptiveStandardScalerSettings,
+    AdaptiveStandardScalerTransformer,
+    scaler,
+    scaler_np,
+)
 from tests.helpers.util import assert_messages_equal
 
 
@@ -68,3 +73,175 @@ def test_scaler(fixture_arrays):
         outputs.append(xformer(chunk))
     output = AxisArray.concatenate(*outputs, dim="time")
     assert np.allclose(output.data, expected_result, atol=1e-3)
+
+
+def _make_scaler_test_msg(data: np.ndarray, fs: float = 1000.0) -> AxisArray:
+    """Helper to create test AxisArray messages."""
+    return AxisArray(
+        data=data,
+        dims=["time", "ch"],
+        axes={"time": AxisArray.TimeAxis(fs=fs)},
+    )
+
+
+class TestAdaptiveStandardScalerAccumulate:
+    """Tests for the accumulate setting on AdaptiveStandardScalerTransformer."""
+
+    def test_settings_default_accumulate(self):
+        """Test that AdaptiveStandardScalerSettings defaults to accumulate=True."""
+        settings = AdaptiveStandardScalerSettings(time_constant=1.0)
+        assert settings.accumulate is True
+
+    def test_settings_accumulate_false(self):
+        """Test that settings can be created with accumulate=False."""
+        settings = AdaptiveStandardScalerSettings(time_constant=1.0, accumulate=False)
+        assert settings.accumulate is False
+
+    def test_accumulate_true_updates_state(self):
+        """Test that accumulate=True updates internal EWMA states."""
+        scaler = AdaptiveStandardScalerTransformer(
+            settings=AdaptiveStandardScalerSettings(time_constant=0.1, accumulate=True)
+        )
+
+        # First message to initialize
+        np.random.seed(42)
+        msg1 = _make_scaler_test_msg(np.random.randn(100, 4))
+        _ = scaler(msg1)
+        zi1 = scaler._state.samps_ewma._state.zi.copy()
+
+        # Second message with shifted mean
+        msg2 = _make_scaler_test_msg(np.random.randn(100, 4) + 10.0)
+        _ = scaler(msg2)
+        zi2 = scaler._state.samps_ewma._state.zi.copy()
+
+        # State should have changed
+        assert not np.allclose(zi1, zi2)
+
+    def test_accumulate_false_preserves_state(self):
+        """Test that accumulate=False does not update internal EWMA states."""
+        scaler = AdaptiveStandardScalerTransformer(
+            settings=AdaptiveStandardScalerSettings(time_constant=0.1, accumulate=True)
+        )
+
+        # First message to initialize
+        np.random.seed(42)
+        msg1 = _make_scaler_test_msg(np.random.randn(100, 4))
+        _ = scaler(msg1)
+        zi1 = scaler._state.samps_ewma._state.zi.copy()
+
+        # Switch to accumulate=False via property
+        scaler.accumulate = False
+
+        # Second message with very different values
+        msg2 = _make_scaler_test_msg(np.random.randn(100, 4) + 100.0)
+        _ = scaler(msg2)
+        zi2 = scaler._state.samps_ewma._state.zi.copy()
+
+        # State should be unchanged
+        assert np.allclose(zi1, zi2)
+
+    def test_accumulate_property_getter(self):
+        """Test the accumulate property getter."""
+        scaler = AdaptiveStandardScalerTransformer(
+            settings=AdaptiveStandardScalerSettings(time_constant=0.1, accumulate=True)
+        )
+        assert scaler.accumulate is True
+
+        scaler2 = AdaptiveStandardScalerTransformer(
+            settings=AdaptiveStandardScalerSettings(time_constant=0.1, accumulate=False)
+        )
+        assert scaler2.accumulate is False
+
+    def test_accumulate_property_setter_propagates_to_children(self):
+        """Test that setting accumulate propagates to child EWMA transformers."""
+        scaler = AdaptiveStandardScalerTransformer(
+            settings=AdaptiveStandardScalerSettings(time_constant=0.1, accumulate=True)
+        )
+
+        # Initialize state by processing a message
+        msg = _make_scaler_test_msg(np.random.randn(10, 2))
+        _ = scaler(msg)
+
+        # Verify initial state
+        assert scaler._state.samps_ewma.settings.accumulate is True
+        assert scaler._state.vars_sq_ewma.settings.accumulate is True
+
+        # Change via property
+        scaler.accumulate = False
+
+        # Verify propagation
+        assert scaler._state.samps_ewma.settings.accumulate is False
+        assert scaler._state.vars_sq_ewma.settings.accumulate is False
+
+        # Change back
+        scaler.accumulate = True
+        assert scaler._state.samps_ewma.settings.accumulate is True
+        assert scaler._state.vars_sq_ewma.settings.accumulate is True
+
+    def test_accumulate_false_still_produces_output(self):
+        """Test that accumulate=False still produces valid z-scored output."""
+        scaler = AdaptiveStandardScalerTransformer(
+            settings=AdaptiveStandardScalerSettings(time_constant=0.1, accumulate=True)
+        )
+
+        # Initialize with some data
+        np.random.seed(42)
+        msg1 = _make_scaler_test_msg(np.random.randn(100, 4) * 5.0 + 10.0)
+        _ = scaler(msg1)
+
+        # Switch to accumulate=False
+        scaler.accumulate = False
+
+        # Process more data
+        msg2 = _make_scaler_test_msg(np.random.randn(50, 4) * 5.0 + 10.0)
+        out2 = scaler(msg2)
+
+        # Output should have correct shape and be roughly z-scored
+        assert out2.data.shape == msg2.data.shape
+        # Z-scores should be reasonable (not NaN, not extreme)
+        assert not np.any(np.isnan(out2.data))
+        assert np.abs(out2.data).max() < 100  # Sanity check
+
+    def test_accumulate_toggle(self):
+        """Test toggling accumulate between True and False."""
+        scaler = AdaptiveStandardScalerTransformer(
+            settings=AdaptiveStandardScalerSettings(time_constant=0.1, accumulate=True)
+        )
+
+        # Initialize
+        np.random.seed(42)
+        msg1 = _make_scaler_test_msg(np.random.randn(50, 4))
+        _ = scaler(msg1)
+
+        # Accumulate more
+        msg2 = _make_scaler_test_msg(np.random.randn(50, 4) + 5.0)
+        _ = scaler(msg2)
+        zi_after_accumulate = scaler._state.samps_ewma._state.zi.copy()
+
+        # Freeze
+        scaler.accumulate = False
+        msg3 = _make_scaler_test_msg(np.random.randn(50, 4) + 100.0)
+        _ = scaler(msg3)
+        zi_after_frozen = scaler._state.samps_ewma._state.zi.copy()
+        assert np.allclose(zi_after_accumulate, zi_after_frozen)
+
+        # Resume accumulation
+        scaler.accumulate = True
+        msg4 = _make_scaler_test_msg(np.random.randn(50, 4) + 100.0)
+        _ = scaler(msg4)
+        zi_after_resume = scaler._state.samps_ewma._state.zi.copy()
+        assert not np.allclose(zi_after_frozen, zi_after_resume)
+
+    def test_initial_accumulate_false(self):
+        """Test starting with accumulate=False from initialization."""
+        scaler = AdaptiveStandardScalerTransformer(
+            settings=AdaptiveStandardScalerSettings(time_constant=0.1, accumulate=False)
+        )
+
+        # First message initializes state but with accumulate=False
+        msg1 = _make_scaler_test_msg(np.ones((50, 4)))
+        _ = scaler(msg1)
+
+        # Verify child EWMAs inherited the setting
+        assert scaler._state.samps_ewma.settings.accumulate is False
+        assert scaler._state.vars_sq_ewma.settings.accumulate is False
