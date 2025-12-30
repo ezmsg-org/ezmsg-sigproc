@@ -1,7 +1,6 @@
 """Take the absolute value of the data."""
-# TODO: Array API
 
-import numpy as np
+from array_api_compat import get_namespace
 from ezmsg.baseproc import BaseTransformer, BaseTransformerUnit
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
@@ -13,7 +12,8 @@ class AbsSettings:
 
 class AbsTransformer(BaseTransformer[None, AxisArray, AxisArray]):
     def _process(self, message: AxisArray) -> AxisArray:
-        return replace(message, data=np.abs(message.data))
+        xp = get_namespace(message.data)
+        return replace(message, data=xp.abs(message.data))
 
 
 class Abs(BaseTransformerUnit[None, AxisArray, AxisArray, AbsTransformer]): ...  # SETTINGS = None
