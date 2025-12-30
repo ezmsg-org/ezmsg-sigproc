@@ -2,6 +2,7 @@ from types import EllipsisType
 
 import ezmsg.core as ez
 import numpy as np
+from array_api_compat import get_namespace, is_numpy_array
 from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
@@ -84,6 +85,7 @@ class TransposeTransformer(BaseStatefulTransformer[TransposeSettings, AxisArray,
         return super().__call__(message)
 
     def _process(self, message: AxisArray) -> AxisArray:
+        xp = get_namespace(message.data)
         if self.state.axes_ints is None:
             # No transpose required
             if self.settings.order is None:
@@ -91,15 +93,19 @@ class TransposeTransformer(BaseStatefulTransformer[TransposeSettings, AxisArray,
                 # Note: We should not be able to reach here because it should be shortcutted at passthrough.
                 msg_out = message
             else:
-                # If the memory is already contiguous in the correct order, np.require won't do anything.
-                msg_out = replace(
-                    message,
-                    data=np.require(message.data, requirements=self.settings.order.upper()[0]),
-                )
+                # Memory layout optimization only applies to numpy arrays
+                if is_numpy_array(message.data):
+                    msg_out = replace(
+                        message,
+                        data=np.require(message.data, requirements=self.settings.order.upper()[0]),
+                    )
+                else:
+                    msg_out = message
         else:
             dims_out = [message.dims[ix] for ix in self.state.axes_ints]
-            data_out = np.transpose(message.data, axes=self.state.axes_ints)
-            if self.settings.order is not None:
+            data_out = xp.permute_dims(message.data, axes=self.state.axes_ints)
+            if self.settings.order is not None and is_numpy_array(data_out):
+                # Memory layout optimization only applies to numpy arrays
                 data_out = np.require(data_out, requirements=self.settings.order.upper()[0])
             msg_out = replace(
                 message,
