@@ -1,3 +1,13 @@
+"""Affine transformations via matrix multiplication: y = Ax or y = Ax + B.
+
+For full matrix transformations where channels are mixed (off-diagonal weights),
+use :obj:`AffineTransformTransformer` or the `AffineTransform` unit.
+
+For simple per-channel scaling and offset (diagonal weights only), use
+:obj:`LinearTransformTransformer` from :mod:`ezmsg.sigproc.linear` instead,
+which is more efficient as it avoids matrix multiplication.
+"""
+
 import os
 from pathlib import Path
 
@@ -17,7 +27,6 @@ from ezmsg.util.messages.util import replace
 class AffineTransformSettings(ez.Settings):
     """
     Settings for :obj:`AffineTransform`.
-    See :obj:`affine_transform` for argument details.
     """
 
     weights: np.ndarray | str | Path
@@ -39,6 +48,19 @@ class AffineTransformState:
 class AffineTransformTransformer(
     BaseStatefulTransformer[AffineTransformSettings, AxisArray, AxisArray, AffineTransformState]
 ):
+    """Apply affine transformation via matrix multiplication: y = Ax or y = Ax + B.
+
+    Use this transformer when you need full matrix transformations that mix
+    channels (off-diagonal weights), such as spatial filters or projections.
+
+    For simple per-channel scaling and offset where each output channel depends
+    only on its corresponding input channel (diagonal weight matrix), use
+    :obj:`LinearTransformTransformer` instead, which is more efficient.
+
+    The weights matrix can include an offset row (stacked as [A|B]) where the
+    input is automatically augmented with a column of ones to compute y = Ax + B.
+    """
+
     def __call__(self, message: AxisArray) -> AxisArray:
         # Override __call__ so we can shortcut if weights are None.
         if self.settings.weights is None or (

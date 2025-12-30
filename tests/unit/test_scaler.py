@@ -11,7 +11,6 @@ from ezmsg.sigproc.scaler import (
     AdaptiveStandardScalerSettings,
     AdaptiveStandardScalerTransformer,
     scaler,
-    scaler_np,
 )
 from tests.helpers.util import assert_messages_equal
 
@@ -53,26 +52,13 @@ def test_scaler(fixture_arrays):
     backup = copy.deepcopy(test_input)
     tau = 0.010913566679372915
 
-    """
-    Test legacy interface. Should be deprecated.
-    """
-    gen = scaler_np(time_constant=tau, axis="time")
-    outputs = []
-    for chunk in test_input:
-        outputs.append(gen.send(chunk))
-    output = AxisArray.concatenate(*outputs, dim="time")
-    assert np.allclose(output.data, expected_result, atol=1e-3)
-    assert_messages_equal(test_input, backup)
-
-    """
-    Test new interface
-    """
     xformer = AdaptiveStandardScalerTransformer(time_constant=tau, axis="time")
     outputs = []
     for chunk in test_input:
         outputs.append(xformer(chunk))
     output = AxisArray.concatenate(*outputs, dim="time")
     assert np.allclose(output.data, expected_result, atol=1e-3)
+    assert_messages_equal(test_input, backup)
 
 
 def _make_scaler_test_msg(data: np.ndarray, fs: float = 1000.0) -> AxisArray:

@@ -3,7 +3,12 @@ import copy
 import numpy as np
 from ezmsg.util.messages.axisarray import AxisArray
 
-from ezmsg.sigproc.bandpower import AggregationFunction, SpectrogramSettings, bandpower
+from ezmsg.sigproc.bandpower import (
+    AggregationFunction,
+    BandPowerSettings,
+    BandPowerTransformer,
+    SpectrogramSettings,
+)
 from tests.helpers.util import (
     assert_messages_equal,
     create_messages_with_periodic_signal,
@@ -39,15 +44,17 @@ def test_bandpower():
     #  while being processed.
     backup = [copy.deepcopy(_) for _ in messages]
 
-    gen = bandpower(
-        spectrogram_settings=SpectrogramSettings(
-            window_dur=win_dur,
-            window_shift=0.1,
-        ),
-        bands=bands,
-        aggregation=AggregationFunction.MEAN,
+    xformer = BandPowerTransformer(
+        BandPowerSettings(
+            spectrogram_settings=SpectrogramSettings(
+                window_dur=win_dur,
+                window_shift=0.1,
+            ),
+            bands=bands,
+            aggregation=AggregationFunction.MEAN,
+        )
     )
-    results = [gen.send(_) for _ in messages]
+    results = [xformer(_) for _ in messages]
 
     assert_messages_equal(messages, backup)
 

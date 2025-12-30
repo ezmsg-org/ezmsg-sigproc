@@ -68,7 +68,7 @@ def test_spectrogram():
         output=SpectralOutput.POSITIVE,
     )
 
-    results = [proc.send(msg) for msg in messages]
+    results = [proc(msg) for msg in messages]
     results = [_ for _ in results if _.data.size]  # Drop empty messages
 
     assert_messages_equal(messages, backup)

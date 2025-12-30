@@ -9,8 +9,9 @@ from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
 from ezmsg.sigproc.spectrum import (
     SpectralOutput,
     SpectralTransform,
+    SpectrumSettings,
+    SpectrumTransformer,
     WindowFunction,
-    spectrum,
 )
 from tests.helpers.util import (
     assert_messages_equal,
@@ -71,8 +72,8 @@ def test_spectrum_gen_multiwin(window: WindowFunction, transform: SpectralTransf
     input_multiwin = AxisArray.concatenate(*messages, dim="win")
     input_multiwin.axes["win"] = AxisArray.TimeAxis(offset=0, fs=1 / win_step_dur)
 
-    gen = spectrum(axis="time", window=window, transform=transform, output=output)
-    result = gen.send(input_multiwin)
+    proc = SpectrumTransformer(SpectrumSettings(axis="time", window=window, transform=transform, output=output))
+    result = proc(input_multiwin)
     # _debug_plot_welch(input_multiwin, result, welch_db=True)
     assert isinstance(result, AxisArray)
     assert "time" not in result.dims
@@ -115,8 +116,8 @@ def test_spectrum_gen(window: WindowFunction, transform: SpectralTransform, outp
     )
     backup = [copy.deepcopy(_) for _ in messages]
 
-    gen = spectrum(axis="time", window=window, transform=transform, output=output)
-    results = [gen.send(msg) for msg in messages]
+    proc = SpectrumTransformer(SpectrumSettings(axis="time", window=window, transform=transform, output=output))
+    results = [proc(msg) for msg in messages]
 
     assert_messages_equal(messages, backup)
 
@@ -142,16 +143,18 @@ def test_spectrum_vs_sps_fft(complex: bool):
     )
     nfft = 1 << (messages[0].data.shape[0] - 1).bit_length()  # nextpow2
 
-    gen = spectrum(
-        axis="time",
-        window=WindowFunction.NONE,
-        transform=SpectralTransform.RAW_COMPLEX if complex else SpectralTransform.REAL,
-        output=SpectralOutput.FULL if complex else SpectralOutput.POSITIVE,
-        norm="backward",
-        do_fftshift=False,
-        nfft=nfft,
+    proc = SpectrumTransformer(
+        SpectrumSettings(
+            axis="time",
+            window=WindowFunction.NONE,
+            transform=SpectralTransform.RAW_COMPLEX if complex else SpectralTransform.REAL,
+            output=SpectralOutput.FULL if complex else SpectralOutput.POSITIVE,
+            norm="backward",
+            do_fftshift=False,
+            nfft=nfft,
+        )
     )
-    results = [gen.send(msg) for msg in messages]
+    results = [proc(msg) for msg in messages]
     test_spec = results[0].data
     if complex:
         sp_res = sp_fft.fft(messages[0].data, n=nfft, axis=0)

@@ -2,12 +2,12 @@ import numpy as np
 import pytest
 from ezmsg.util.messages.axisarray import AxisArray
 
-from ezmsg.sigproc.math.abs import abs
-from ezmsg.sigproc.math.clip import clip
-from ezmsg.sigproc.math.difference import const_difference
-from ezmsg.sigproc.math.invert import invert
-from ezmsg.sigproc.math.log import log
-from ezmsg.sigproc.math.scale import scale
+from ezmsg.sigproc.math.abs import AbsTransformer
+from ezmsg.sigproc.math.clip import ClipSettings, ClipTransformer
+from ezmsg.sigproc.math.difference import ConstDifferenceSettings, ConstDifferenceTransformer
+from ezmsg.sigproc.math.invert import InvertTransformer
+from ezmsg.sigproc.math.log import LogSettings, LogTransformer
+from ezmsg.sigproc.math.scale import ScaleSettings, ScaleTransformer
 
 
 def test_abs():
@@ -15,8 +15,8 @@ def test_abs():
     n_chans = 255
     in_dat = np.arange(n_times * n_chans).reshape(n_times, n_chans)
     msg_in = AxisArray(in_dat, dims=["time", "ch"])
-    proc = abs()
-    msg_out = proc.send(msg_in)
+    xformer = AbsTransformer()
+    msg_out = xformer(msg_in)
     assert np.array_equal(msg_out.data, np.abs(in_dat))
 
 
@@ -28,8 +28,8 @@ def test_clip(a_min: float, a_max: float):
     in_dat = np.arange(n_times * n_chans).reshape(n_times, n_chans)
     msg_in = AxisArray(in_dat, dims=["time", "ch"])
 
-    proc = clip(a_min, a_max)
-    msg_out = proc.send(msg_in)
+    xformer = ClipTransformer(ClipSettings(a_min=a_min, a_max=a_max))
+    msg_out = xformer(msg_in)
 
     assert all(msg_out.data[np.where(in_dat < a_min)] == a_min)
     assert all(msg_out.data[np.where(in_dat > a_max)] == a_max)
@@ -43,8 +43,8 @@ def test_const_difference(value: float, subtrahend: bool):
     in_dat = np.arange(n_times * n_chans).reshape(n_times, n_chans)
     msg_in = AxisArray(in_dat, dims=["time", "ch"])
 
-    proc = const_difference(value, subtrahend)
-    msg_out = proc.send(msg_in)
+    xformer = ConstDifferenceTransformer(ConstDifferenceSettings(value=value, subtrahend=subtrahend))
+    msg_out = xformer(msg_in)
     assert np.array_equal(msg_out.data, (in_dat - value) if subtrahend else (value - in_dat))
 
 
@@ -53,22 +53,22 @@ def test_invert():
     n_chans = 255
     in_dat = np.arange(n_times * n_chans).reshape(n_times, n_chans)
     msg_in = AxisArray(in_dat, dims=["time", "ch"])
-    proc = invert()
-    msg_out = proc.send(msg_in)
+    xformer = InvertTransformer()
+    msg_out = xformer(msg_in)
     assert np.array_equal(msg_out.data, 1 / in_dat)
 
 
 @pytest.mark.parametrize("base", [np.e, 2, 10])
 @pytest.mark.parametrize("dtype", [int, float])
-@pytest.mark.parametrize("clip", [False, True])
-def test_log(base: float, dtype, clip: bool):
+@pytest.mark.parametrize("clip_zero", [False, True])
+def test_log(base: float, dtype, clip_zero: bool):
     n_times = 130
     n_chans = 255
     in_dat = np.arange(n_times * n_chans).reshape(n_times, n_chans).astype(dtype)
     msg_in = AxisArray(in_dat, dims=["time", "ch"])
-    proc = log(base, clip_zero=clip)
-    msg_out = proc.send(msg_in)
-    if clip and dtype is float:
+    xformer = LogTransformer(LogSettings(base=base, clip_zero=clip_zero))
+    msg_out = xformer(msg_in)
+    if clip_zero and dtype is float:
         in_dat = np.clip(in_dat, a_min=np.finfo(msg_in.data.dtype).tiny, a_max=None)
     assert np.array_equal(msg_out.data, np.log(in_dat) / np.log(base))
 
@@ -80,8 +80,8 @@ def test_scale(scale_factor: float):
     in_dat = np.arange(n_times * n_chans).reshape(n_times, n_chans)
     msg_in = AxisArray(in_dat, dims=["time", "ch"])
 
-    proc = scale(scale_factor)
-    msg_out = proc.send(msg_in)
+    xformer = ScaleTransformer(ScaleSettings(scale=scale_factor))
+    msg_out = xformer(msg_in)
 
     assert msg_out.data.shape == (n_times, n_chans)
     assert np.array_equal(msg_out.data, in_dat * scale_factor)

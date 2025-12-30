@@ -2,7 +2,7 @@ import numpy as np
 import pywt
 from ezmsg.util.messages.axisarray import AxisArray
 
-from ezmsg.sigproc.wavelets import MinPhaseMode, cwt
+from ezmsg.sigproc.wavelets import CWTSettings, CWTTransformer, MinPhaseMode
 from tests.helpers.util import gaussian, make_chirp
 
 
@@ -91,16 +91,18 @@ def test_cwt():
     expected = np.swapaxes(expected, 0, 1)
 
     # Prep filterbank
-    gen = cwt(
-        frequencies=frequencies,
-        wavelet=wavelet,
-        min_phase=MinPhaseMode.HOMOMORPHIC,
-        axis="time",
+    proc = CWTTransformer(
+        CWTSettings(
+            frequencies=frequencies,
+            wavelet=wavelet,
+            min_phase=MinPhaseMode.HOMOMORPHIC,
+            axis="time",
+        )
     )
 
     # Pass the messages
-    out_messages = [gen.send(in_messages[0])]
-    out_messages += [gen.send(msg_in) for msg_in in in_messages[1:]]
+    out_messages = [proc(in_messages[0])]
+    out_messages += [proc(msg_in) for msg_in in in_messages[1:]]
     result = AxisArray.concatenate(*out_messages, dim="time")
     assert result.key == "test_cwt"
 

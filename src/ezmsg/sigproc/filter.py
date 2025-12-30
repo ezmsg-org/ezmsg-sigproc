@@ -6,10 +6,7 @@ import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
 import scipy.signal
-from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.util.messages.util import replace
-
-from ezmsg.sigproc.base import (
+from ezmsg.baseproc import (
     BaseConsumerUnit,
     BaseStatefulTransformer,
     BaseTransformerUnit,
@@ -17,6 +14,8 @@ from ezmsg.sigproc.base import (
     TransformerType,
     processor_state,
 )
+from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.util import replace
 
 
 @dataclass

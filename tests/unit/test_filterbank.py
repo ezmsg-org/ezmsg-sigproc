@@ -3,7 +3,7 @@ import pytest
 import scipy.signal as sps
 from ezmsg.util.messages.axisarray import AxisArray
 
-from ezmsg.sigproc.filterbank import FilterbankMode, filterbank
+from ezmsg.sigproc.filterbank import FilterbankMode, FilterbankSettings, FilterbankTransformer
 from tests.helpers.util import gaussian, make_chirp
 
 
@@ -76,10 +76,10 @@ def test_filterbank(mode: str, kernel_type: str):
             kernels.append(k)
 
     # Prep filterbank
-    gen = filterbank(kernels=kernels, mode=mode, axis="time")
+    proc = FilterbankTransformer(settings=FilterbankSettings(kernels=kernels, mode=mode, axis="time"))
 
     # Pass the messages
-    out_messages = [gen.send(msg_in) for msg_in in in_messages]
+    out_messages = [proc(msg_in) for msg_in in in_messages]
     result = AxisArray.concatenate(*out_messages, dim="time")
     assert result.key == "test_filterbank"
 

@@ -5,9 +5,7 @@ from typing import Any, Generator
 from unittest.mock import MagicMock
 
 import pytest
-from ezmsg.util.generator import consumer
-
-from ezmsg.sigproc.base import (
+from ezmsg.baseproc import (
     BaseAdaptiveTransformer,
     BaseAsyncTransformer,
     BaseConsumer,
@@ -28,6 +26,8 @@ from ezmsg.sigproc.base import (
     _get_processor_message_type,
     processor_state,
 )
+from ezmsg.util.generator import consumer
+
 from ezmsg.sigproc.cheby import ChebyshevFilterTransformer
 from ezmsg.sigproc.filter import FilterByDesignState
 

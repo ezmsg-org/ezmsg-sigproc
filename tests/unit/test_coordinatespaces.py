@@ -127,7 +127,7 @@ class TestCoordinateSpacesTransformer:
         backup = [copy.deepcopy(msg_in)]
 
         transformer = CoordinateSpacesTransformer(CoordinateSpacesSettings(mode=CoordinateMode.CART2POL, axis="ch"))
-        msg_out = transformer.send(msg_in)
+        msg_out = transformer(msg_in)
 
         # Check shape preserved
         assert msg_out.data.shape == data.shape
@@ -148,7 +148,7 @@ class TestCoordinateSpacesTransformer:
         msg_in = AxisArray(data, dims=["time", "ch"])
 
         transformer = CoordinateSpacesTransformer(CoordinateSpacesSettings(mode=CoordinateMode.POL2CART, axis="ch"))
-        msg_out = transformer.send(msg_in)
+        msg_out = transformer(msg_in)
 
         # Check values
         expected_x = np.array([1.0, 0.0, 1.0])
@@ -163,11 +163,11 @@ class TestCoordinateSpacesTransformer:
 
         # cart -> pol
         c2p = CoordinateSpacesTransformer(CoordinateSpacesSettings(mode=CoordinateMode.CART2POL, axis="ch"))
-        msg_polar = c2p.send(msg_in)
+        msg_polar = c2p(msg_in)
 
         # pol -> cart
         p2c = CoordinateSpacesTransformer(CoordinateSpacesSettings(mode=CoordinateMode.POL2CART, axis="ch"))
-        msg_back = p2c.send(msg_polar)
+        msg_back = p2c(msg_polar)
 
         assert np.allclose(msg_back.data, data)
 
@@ -178,7 +178,7 @@ class TestCoordinateSpacesTransformer:
 
         # No axis specified - should use last dim ("xy")
         transformer = CoordinateSpacesTransformer(CoordinateSpacesSettings(mode=CoordinateMode.CART2POL))
-        msg_out = transformer.send(msg_in)
+        msg_out = transformer(msg_in)
 
         assert msg_out.data.shape == data.shape
         assert np.isclose(msg_out.data[0, 0], 1.0)  # r=1 for (1,0)
@@ -191,7 +191,7 @@ class TestCoordinateSpacesTransformer:
         msg_in = AxisArray(data, dims=["ch", "time"])
 
         transformer = CoordinateSpacesTransformer(CoordinateSpacesSettings(mode=CoordinateMode.CART2POL, axis="ch"))
-        msg_out = transformer.send(msg_in)
+        msg_out = transformer(msg_in)
 
         assert msg_out.data.shape == data.shape
         # First column: (1, 0) -> r=1
@@ -206,10 +206,10 @@ class TestCoordinateSpacesTransformer:
         msg_in = AxisArray(data, dims=["batch", "time", "ch"])
 
         c2p = CoordinateSpacesTransformer(CoordinateSpacesSettings(mode=CoordinateMode.CART2POL, axis="ch"))
-        msg_polar = c2p.send(msg_in)
+        msg_polar = c2p(msg_in)
 
         p2c = CoordinateSpacesTransformer(CoordinateSpacesSettings(mode=CoordinateMode.POL2CART, axis="ch"))
-        msg_back = p2c.send(msg_polar)
+        msg_back = p2c(msg_polar)
 
         assert msg_polar.data.shape == data.shape
         assert np.allclose(msg_back.data, data)
@@ -222,7 +222,7 @@ class TestCoordinateSpacesTransformer:
         transformer = CoordinateSpacesTransformer(CoordinateSpacesSettings(mode=CoordinateMode.CART2POL, axis="ch"))
 
         with pytest.raises(ValueError, match="exactly 2 elements"):
-            transformer.send(msg_in)
+            transformer(msg_in)
 
     def test_axis_labels_updated_cart2pol(self):
         """Test that axis labels are updated for cart2pol."""
@@ -235,7 +235,7 @@ class TestCoordinateSpacesTransformer:
         )
 
         transformer = CoordinateSpacesTransformer(CoordinateSpacesSettings(mode=CoordinateMode.CART2POL, axis="ch"))
-        msg_out = transformer.send(msg_in)
+        msg_out = transformer(msg_in)
 
         assert "ch" in msg_out.axes
         assert list(msg_out.axes["ch"].data) == ["r", "theta"]
@@ -251,7 +251,7 @@ class TestCoordinateSpacesTransformer:
         )
 
         transformer = CoordinateSpacesTransformer(CoordinateSpacesSettings(mode=CoordinateMode.POL2CART, axis="ch"))
-        msg_out = transformer.send(msg_in)
+        msg_out = transformer(msg_in)
 
         assert "ch" in msg_out.axes
         assert list(msg_out.axes["ch"].data) == ["x", "y"]
@@ -268,5 +268,5 @@ class TestCoordinateSpacesTransformer:
         for _ in range(5):
             data = np.random.randn(10, 2)
             msg_in = AxisArray(data, dims=["time", "ch"])
-            msg_out = transformer.send(msg_in)
+            msg_out = transformer(msg_in)
             assert msg_out.data.shape == data.shape
