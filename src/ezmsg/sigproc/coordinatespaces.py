@@ -3,6 +3,10 @@ Coordinate space transformations for streaming data.
 
 This module provides utilities and ezmsg nodes for transforming between
 Cartesian (x, y) and polar (r, theta) coordinate systems.
+
+.. note::
+    This module supports the :doc:`Array API standard </guides/explanations/array_api>`,
+    enabling use with NumPy, CuPy, PyTorch, and other compatible array libraries.
 """
 
 from enum import Enum
@@ -11,6 +15,7 @@ from typing import Tuple
 import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
+from array_api_compat import get_namespace, is_array_api_obj
 from ezmsg.baseproc import (
     BaseTransformer,
     BaseTransformerUnit,
@@ -20,14 +25,24 @@ from ezmsg.util.messages.axisarray import AxisArray, replace
 # -- Utility functions for coordinate transformations --
 
 
+def _get_namespace_or_numpy(*args: npt.ArrayLike):
+    """Get array namespace if any arg is an array, otherwise return numpy."""
+    for arg in args:
+        if is_array_api_obj(arg):
+            return get_namespace(arg)
+    return np
+
+
 def polar2z(r: npt.ArrayLike, theta: npt.ArrayLike) -> npt.ArrayLike:
     """Convert polar coordinates to complex number representation."""
-    return r * np.exp(1j * theta)
+    xp = _get_namespace_or_numpy(r, theta)
+    return r * xp.exp(1j * theta)
 
 
 def z2polar(z: npt.ArrayLike) -> Tuple[npt.ArrayLike, npt.ArrayLike]:
     """Convert complex number to polar coordinates (r, theta)."""
-    return np.abs(z), np.angle(z)
+    xp = _get_namespace_or_numpy(z)
+    return xp.abs(z), xp.atan2(xp.imag(z), xp.real(z))
 
 
 def cart2z(x: npt.ArrayLike, y: npt.ArrayLike) -> npt.ArrayLike:
@@ -37,7 +52,8 @@ def cart2z(x: npt.ArrayLike, y: npt.ArrayLike) -> npt.ArrayLike:
 
 def z2cart(z: npt.ArrayLike) -> Tuple[npt.ArrayLike, npt.ArrayLike]:
     """Convert complex number to Cartesian coordinates (x, y)."""
-    return np.real(z), np.imag(z)
+    xp = _get_namespace_or_numpy(z)
+    return xp.real(z), xp.imag(z)
 
 
 def cart2pol(x: npt.ArrayLike, y: npt.ArrayLike) -> Tuple[npt.ArrayLike, npt.ArrayLike]:
@@ -90,6 +106,7 @@ class CoordinateSpacesTransformer(BaseTransformer[CoordinateSpacesSettings, Axis
     """
 
     def _process(self, message: AxisArray) -> AxisArray:
+        xp = get_namespace(message.data)
         axis = self.settings.axis or message.dims[-1]
         axis_idx = message.get_axis_idx(axis)
 
@@ -116,9 +133,9 @@ class CoordinateSpacesTransformer(BaseTransformer[CoordinateSpacesSettings, Axis
             out_a, out_b = pol2cart(component_a, component_b)
 
         # Stack results back along the same axis
-        result = np.stack([out_a, out_b], axis=axis_idx)
+        result = xp.stack([out_a, out_b], axis=axis_idx)
 
-        # Update axis labels if present
+        # Update axis labels if present (use numpy for string labels)
         axes = message.axes
         if axis in axes and hasattr(axes[axis], "data"):
             if self.settings.mode == CoordinateMode.CART2POL:

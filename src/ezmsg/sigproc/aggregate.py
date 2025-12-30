@@ -1,3 +1,12 @@
+"""
+Aggregation operations over arrays.
+
+.. note::
+    :obj:`AggregateTransformer` supports the :doc:`Array API standard </guides/explanations/array_api>`,
+    enabling use with NumPy, CuPy, PyTorch, and other compatible array libraries.
+    :obj:`RangedAggregateTransformer` currently requires NumPy arrays.
+"""
+
 import typing
 
 import ezmsg.core as ez

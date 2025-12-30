@@ -1,4 +1,11 @@
-"""Take the difference between 2 signals or between a signal and a constant value."""
+"""
+Take the difference between 2 signals or between a signal and a constant value.
+
+.. note::
+    :obj:`ConstDifferenceTransformer` supports the :doc:`Array API standard </guides/explanations/array_api>`,
+    enabling use with NumPy, CuPy, PyTorch, and other compatible array libraries.
+    :obj:`DifferenceProcessor` (two-input difference) currently requires NumPy arrays.
+"""
 
 import asyncio
 import typing

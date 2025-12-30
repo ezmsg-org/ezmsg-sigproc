@@ -20,19 +20,19 @@ def test_abs():
     assert np.array_equal(msg_out.data, np.abs(in_dat))
 
 
-@pytest.mark.parametrize("a_min", [1, 2])
-@pytest.mark.parametrize("a_max", [133, 134])
-def test_clip(a_min: float, a_max: float):
+@pytest.mark.parametrize("min_val", [1, 2])
+@pytest.mark.parametrize("max_val", [133, 134])
+def test_clip(min_val: float, max_val: float):
     n_times = 130
     n_chans = 255
     in_dat = np.arange(n_times * n_chans).reshape(n_times, n_chans)
     msg_in = AxisArray(in_dat, dims=["time", "ch"])
 
-    xformer = ClipTransformer(ClipSettings(a_min=a_min, a_max=a_max))
+    xformer = ClipTransformer(ClipSettings(min=min_val, max=max_val))
     msg_out = xformer(msg_in)
 
-    assert all(msg_out.data[np.where(in_dat < a_min)] == a_min)
-    assert all(msg_out.data[np.where(in_dat > a_max)] == a_max)
+    assert all(msg_out.data[np.where(in_dat < min_val)] == min_val)
+    assert all(msg_out.data[np.where(in_dat > max_val)] == max_val)
 
 
 @pytest.mark.parametrize("value", [-100, 0, 100])
