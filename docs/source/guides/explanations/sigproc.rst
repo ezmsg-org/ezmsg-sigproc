@@ -329,7 +329,7 @@ Often, all that is required is the following (e.g., for a custom transformer):
 
   import ezmsg.core as ez
   from ezmsg.util.messages.axisarray import AxisArray
-  from ezmsg.sigproc.base import BaseTransformer, BaseTransformerUnit
+  from ezmsg.baseproc import BaseTransformer, BaseTransformerUnit
 
 
   class CustomTransformerSettings(ez.Settings):

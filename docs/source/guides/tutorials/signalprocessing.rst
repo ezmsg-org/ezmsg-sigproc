@@ -132,7 +132,7 @@ Add the following import statements to the top of the `downsample.py` file:
     )
     import ezmsg.core as ez
 
-    from ezmsg.sigproc.base import (
+    from ezmsg.baseproc import (
         BaseStatefulTransformer,
         BaseTransformerUnit,
         processor_state,
