@@ -109,7 +109,7 @@ First, we need to install the `ezmsg-sigproc` package if we haven't already. Thi
 
 .. code-block:: bash
 
-    pip install "ezmsg[sigproc]"
+    pip install "ezmsg-sigproc"
 
 
 |ezmsg_logo_small| Creating the `Downsample` signal processor
