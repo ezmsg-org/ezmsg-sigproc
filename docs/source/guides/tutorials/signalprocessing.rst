@@ -237,7 +237,7 @@ The first two methods deal with the state of the processor (and are only require
 
 In order to implement these methods, we need to understand our preferred message format: `AxisArray`. This is a flexible and powerful class for handling multi-dimensional arrays with named axes, which is particularly useful for signal processing applications. I have already used `AxisArray` in our code as the input message and output message types.
 
-A detailed explanation of the `AxisArray` class is beyond the scope of this tutorial, but you can refer to the :doc:`AxisArray explainer <../explanations/axisarray>` as well as the :doc:`API reference <../reference/API/axisarray>` for more information.
+A detailed explanation of the `AxisArray` class is beyond the scope of this tutorial, but you can refer to the `AxisArray explainer <https://www.ezmsg.org/explanations/axisarray.html>`_ as well as the `API reference <https://www.ezmsg.org/ezmsg/reference/API/axisarray.html>`_ for more information.
 
 Brief Aside on AxisArray
 =================================
@@ -555,25 +555,6 @@ In a separate Python file in the same directory, you can test the `DownsampleTra
 
 Doing the above is very handy for unit testing your processor as well as for offline processing of data.
 
-.. note:: The `downsample` module in `ezmsg-sigproc` has a utility function for creating a `DownsampleTransformer` instance with the desired settings:
-
-    .. code-block:: python
-
-        def downsample(
-            axis: str = "time",
-            target_rate: float | None = None,
-            factor: int | None = None,
-        ) -> DownsampleTransformer:
-            return DownsampleTransformer(
-                DownsampleSettings(axis=axis, target_rate=target_rate, factor=factor)
-            )
-
-    After importing this utility function, lines 8 and 9 in our code above could now read:
-
-    .. code-block:: python
-
-        downsampler = downsample(axis="time", target_rate=50)
-
 Of course, the real power of `ezmsg` comes from integrating your processor into an `ezmsg` Unit and using it in a processing pipeline. We will see how to do this next.
 
 
@@ -600,15 +581,15 @@ A lot of the behind-the-scenes work is done for you by the `BaseTransformerUnit`
         SETTINGS = DownsampleSettings
 
 
-Connecting it to other `Component`\ s and initialising the transformer are accomplished in the same way that we did in the :doc:`pipeline tutorial <pipeline>`.
+Connecting it to other `Component`\ s and initialising the transformer are accomplished in the same way that we did in the `Pipeline Tutorial <https://www.ezmsg.org/tutorials/pipeline.html>`_
 
 
 |ezmsg_logo_small| See Also
 ************************************
 
 - `Further examples <https://github.com/ezmsg-org/ezmsg/tree/master/examples>`_ can be found in the examples directory in `ezmsg`. These are examples of creating and using `ezmsg` Units and pipelines.
-- `ezmsg-sigproc` has a large number of already implemented signal processors. More information can be found at the :doc:`ezmsg-sigproc reference <../extensions/sigproc/content-sigproc>`.
-- `Downsample` class reference
+- `ezmsg-sigproc` has a large number of already implemented signal processors. More information can be found at the :doc:`ezmsg-sigproc reference <../sigproc/content-sigproc>`.
+- :doc:`Downsample class reference <../../api/generated/ezmsg.sigproc.downsample>`
 
 .. |ezmsg_logo_small| image:: ../_static/_images/ezmsg_logo.png
   :width: 40

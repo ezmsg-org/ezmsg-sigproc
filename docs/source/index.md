@@ -7,10 +7,10 @@
 :maxdepth: 2
 :caption: Contents:
 
-guides/sigproc/content-sigproc
-guides/HybridBuffer
 guides/how-tos/signalprocessing/content-signalprocessing
+guides/sigproc/content-sigproc
 guides/tutorials/signalprocessing
+guides/HybridBuffer
 api/index
 ```
 
