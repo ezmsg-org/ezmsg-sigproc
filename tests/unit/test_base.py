@@ -1,7 +1,7 @@
 import dataclasses
 import pickle
 from types import NoneType
-from typing import Any, Generator
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -26,7 +26,6 @@ from ezmsg.baseproc import (
     _get_processor_message_type,
     processor_state,
 )
-from ezmsg.util.generator import consumer
 
 from ezmsg.sigproc.cheby import ChebyshevFilterTransformer
 from ezmsg.sigproc.filter import FilterByDesignState
@@ -251,18 +250,18 @@ class ChainedCompositeProcessorWithDeepProcessors(CompositeProcessor[MockSetting
         }
 
 
-@consumer
-def mock_generator() -> Generator[MockMessageA, MockMessageA, None]:
-    """A mock generator function for testing purposes."""
-    while True:
-        yield MockMessageA()
+class MockGeneratorTransformer(BaseTransformer[MockSettings, MockMessageA, MockMessageA]):
+    """A mock transformer replacing the legacy @consumer generator."""
+
+    def _process(self, message: MockMessageA) -> MockMessageA:
+        return MockMessageA()
 
 
 class MockGeneratorCompositeProcessor(CompositeProcessor[MockSettings, MockMessageA, MockMessageB]):
     @staticmethod
     def _initialize_processors(settings):
         return {
-            "generator": mock_generator(),
+            "generator": MockGeneratorTransformer(settings=settings),
             "stateful_processor": MockStatefulProcessor(settings=settings),
         }
 
@@ -333,27 +332,26 @@ class ChainedCompositeProducerWithDeepProcessors(CompositeProducer[MockSettings,
         }
 
 
-@consumer
-def mock_producer_generator() -> Generator[MockMessageA, None, None]:
-    """A mock generator function for testing purposes."""
-    while True:
-        yield MockMessageA()
+class MockGeneratorProducer(BaseProducer[MockSettings, MockMessageA]):
+    """A mock producer replacing the legacy @consumer producer generator."""
+
+    async def _produce(self) -> MockMessageA:
+        return MockMessageA()
 
 
-def mock_generator_unprimed() -> Generator[MockMessageA, MockMessageA, None]:
-    """A mock generator function for testing purposes."""
-    output = MockMessageA()
-    while True:
-        input = yield output
-        output = input or output
+class MockGeneratorPassthroughTransformer(BaseTransformer[MockSettings, MockMessageA, MockMessageA]):
+    """A mock transformer replacing the legacy unprimed generator."""
+
+    def _process(self, message: MockMessageA) -> MockMessageA:
+        return message or MockMessageA()
 
 
 class MockGeneratorCompositeProducer(CompositeProducer[MockSettings, MockMessageB]):
     @staticmethod
     def _initialize_processors(settings):
         return {
-            "generator": mock_producer_generator(),
-            "mock_generator_unprimed": mock_generator_unprimed(),
+            "generator": MockGeneratorProducer(settings=settings),
+            "mock_generator_passthrough": MockGeneratorPassthroughTransformer(settings=settings),
             "stateful_processor": MockStatefulProcessor(settings=settings),
         }
 

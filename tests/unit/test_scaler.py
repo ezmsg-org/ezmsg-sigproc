@@ -10,7 +10,8 @@ from frozendict import frozendict
 from ezmsg.sigproc.scaler import (
     AdaptiveStandardScalerSettings,
     AdaptiveStandardScalerTransformer,
-    scaler,
+    RiverAdaptiveStandardScalerSettings,
+    RiverAdaptiveStandardScalerTransformer,
 )
 from tests.helpers.util import assert_messages_equal
 
@@ -39,8 +40,10 @@ def test_adaptive_standard_scaler_river(fixture_arrays):
     # The River example used alpha = 0.6
     # tau = -gain / np.log(1 - alpha) and here we're using gain = 0.01
     tau = 0.010913566679372915
-    _scaler = scaler(time_constant=tau, axis="time")
-    output = _scaler.send(test_input)
+    _scaler = RiverAdaptiveStandardScalerTransformer(
+        settings=RiverAdaptiveStandardScalerSettings(time_constant=tau, axis="time")
+    )
+    output = _scaler(test_input)
     assert np.allclose(output.data[0], expected_result, atol=1e-3)
     assert_messages_equal([test_input], backup)
 

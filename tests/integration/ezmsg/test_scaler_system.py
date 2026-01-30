@@ -8,7 +8,11 @@ from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.terminate import TerminateOnTotal, TerminateOnTotalSettings
 from frozendict import frozendict
 
-from ezmsg.sigproc.scaler import AdaptiveStandardScaler, AdaptiveStandardScalerSettings, scaler_np
+from ezmsg.sigproc.scaler import (
+    AdaptiveStandardScaler,
+    AdaptiveStandardScalerSettings,
+    AdaptiveStandardScalerTransformer,
+)
 from tests.helpers.synth import Counter, CounterSettings
 from tests.helpers.util import get_test_fn
 
@@ -20,10 +24,10 @@ def test_scaler_system(
     test_name: str | None = None,
 ):
     """
-    For this test, we assume that Counter and scaler_np are functioning properly.
-    The purpose of this test is exclusively to test that the AdaptiveStandardScaler and AdaptiveStandardScalerSettings
-    generated classes are wrapping scaler_np and exposing its parameters.
-    This test passing should only be considered a success if test_scaler_np also passed.
+    For this test, we assume that Counter and AdaptiveStandardScalerTransformer are functioning properly.
+    The purpose of this test is exclusively to test that the AdaptiveStandardScaler Unit
+    correctly wraps AdaptiveStandardScalerTransformer and exposes its parameters.
+    This test passing should only be considered a success if test_scaler also passed.
     """
     block_size: int = 4
     test_filename = get_test_fn(test_name)
@@ -68,6 +72,6 @@ def test_scaler_system(
         dims=["ch", "time"],
         axes=frozendict({"time": AxisArray.TimeAxis(fs=fs)}),
     )
-    _scaler = scaler_np(time_constant=tau, axis="time")
+    _scaler = AdaptiveStandardScalerTransformer(settings=AdaptiveStandardScalerSettings(time_constant=tau, axis="time"))
     expected_output = _scaler.send(expected_input)
     assert np.allclose(expected_output.data.squeeze(), data)

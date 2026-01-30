@@ -7,7 +7,6 @@ from ezmsg.baseproc import (
     BaseTransformerUnit,
     processor_state,
 )
-from ezmsg.util.generator import consumer
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
@@ -18,50 +17,69 @@ from .ewma import _tau_from_alpha as _tau_from_alpha
 from .ewma import ewma_step as ewma_step
 
 
-@consumer
-def scaler(time_constant: float = 1.0, axis: str | None = None) -> typing.Generator[AxisArray, AxisArray, None]:
+class RiverAdaptiveStandardScalerSettings(ez.Settings):
+    time_constant: float = 1.0
+    """Decay constant ``tau`` in seconds."""
+
+    axis: str | None = None
+    """The name of the axis to accumulate statistics over."""
+
+
+@processor_state
+class RiverAdaptiveStandardScalerState:
+    scaler: typing.Any = None
+    axis: str | None = None
+    axis_idx: int = 0
+
+
+class RiverAdaptiveStandardScalerTransformer(
+    BaseStatefulTransformer[
+        RiverAdaptiveStandardScalerSettings,
+        AxisArray,
+        AxisArray,
+        RiverAdaptiveStandardScalerState,
+    ]
+):
     """
-    Apply the adaptive standard scaler from https://riverml.xyz/latest/api/preprocessing/AdaptiveStandardScaler/
-    This is faster than :obj:`scaler_np` for single-channel data.
+    Apply the adaptive standard scaler from
+    `river <https://riverml.xyz/latest/api/preprocessing/AdaptiveStandardScaler/>`_.
 
-    Args:
-        time_constant: Decay constant `tau` in seconds.
-        axis: The name of the axis to accumulate statistics over.
-
-    Returns:
-        A primed generator object that expects to be sent a :obj:`AxisArray` via `.send(axis_array)`
-         and yields an :obj:`AxisArray` with its data being a standardized, or "Z-scored" version of the input data.
+    This processes data sample-by-sample using River's online learning
+    implementation. For a vectorized EWMA-based alternative, see
+    :class:`AdaptiveStandardScalerTransformer`.
     """
-    from river import preprocessing
 
-    msg_out = AxisArray(np.array([]), dims=[""])
-    _scaler = None
-    while True:
-        msg_in: AxisArray = yield msg_out
-        data = msg_in.data
+    def _reset_state(self, message: AxisArray) -> None:
+        from river import preprocessing
+
+        axis = self.settings.axis
         if axis is None:
-            axis = msg_in.dims[0]
-            axis_idx = 0
+            axis = message.dims[0]
+            self._state.axis_idx = 0
         else:
-            axis_idx = msg_in.get_axis_idx(axis)
-            if axis_idx != 0:
-                data = np.moveaxis(data, axis_idx, 0)
+            self._state.axis_idx = message.get_axis_idx(axis)
+        self._state.axis = axis
 
-        if _scaler is None:
-            alpha = _alpha_from_tau(time_constant, msg_in.axes[axis].gain)
-            _scaler = preprocessing.AdaptiveStandardScaler(fading_factor=alpha)
+        alpha = _alpha_from_tau(self.settings.time_constant, message.axes[axis].gain)
+        self._state.scaler = preprocessing.AdaptiveStandardScaler(fading_factor=alpha)
+
+    def _process(self, message: AxisArray) -> AxisArray:
+        data = message.data
+        axis_idx = self._state.axis_idx
+        if axis_idx != 0:
+            data = np.moveaxis(data, axis_idx, 0)
 
         result = []
         for sample in data:
             x = {k: v for k, v in enumerate(sample.flatten().tolist())}
-            _scaler.learn_one(x)
-            y = _scaler.transform_one(x)
+            self._state.scaler.learn_one(x)
+            y = self._state.scaler.transform_one(x)
             k = sorted(y.keys())
             result.append(np.array([y[_] for _ in k]).reshape(sample.shape))
 
         result = np.stack(result)
         result = np.moveaxis(result, 0, axis_idx)
-        msg_out = replace(msg_in, data=result)
+        return replace(message, data=result)
 
 
 class AdaptiveStandardScalerSettings(EWMASettings): ...
@@ -158,7 +176,14 @@ class AdaptiveStandardScaler(
             self.processor.settings = msg
 
 
-# Backwards compatibility...
+# Convenience functions to support deprecated generator API
+def scaler(time_constant: float = 1.0, axis: str | None = None) -> RiverAdaptiveStandardScalerTransformer:
+    """Create a :class:`RiverAdaptiveStandardScalerTransformer` with the given parameters."""
+    return RiverAdaptiveStandardScalerTransformer(
+        settings=RiverAdaptiveStandardScalerSettings(time_constant=time_constant, axis=axis)
+    )
+
+
 def scaler_np(time_constant: float = 1.0, axis: str | None = None) -> AdaptiveStandardScalerTransformer:
     return AdaptiveStandardScalerTransformer(
         settings=AdaptiveStandardScalerSettings(time_constant=time_constant, axis=axis)
