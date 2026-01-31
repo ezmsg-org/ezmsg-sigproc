@@ -7,6 +7,7 @@ from ezmsg.sigproc.math.clip import ClipSettings, ClipTransformer
 from ezmsg.sigproc.math.difference import ConstDifferenceSettings, ConstDifferenceTransformer
 from ezmsg.sigproc.math.invert import InvertTransformer
 from ezmsg.sigproc.math.log import LogSettings, LogTransformer
+from ezmsg.sigproc.math.pow import PowSettings, PowTransformer
 from ezmsg.sigproc.math.scale import ScaleSettings, ScaleTransformer
 
 
@@ -85,3 +86,17 @@ def test_scale(scale_factor: float):
 
     assert msg_out.data.shape == (n_times, n_chans)
     assert np.array_equal(msg_out.data, in_dat * scale_factor)
+
+
+@pytest.mark.parametrize("exponent", [0.5, 2.0, 3.0])
+def test_pow(exponent: float):
+    n_times = 130
+    n_chans = 255
+    in_dat = np.abs(np.arange(n_times * n_chans).reshape(n_times, n_chans)).astype(float) + 1.0
+    msg_in = AxisArray(in_dat, dims=["time", "ch"])
+
+    xformer = PowTransformer(PowSettings(exponent=exponent))
+    msg_out = xformer(msg_in)
+
+    assert msg_out.data.shape == (n_times, n_chans)
+    assert np.allclose(msg_out.data, in_dat**exponent)
