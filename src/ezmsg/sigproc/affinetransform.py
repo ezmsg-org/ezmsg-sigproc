@@ -173,9 +173,9 @@ class AffineTransformSettings(ez.Settings):
 class AffineTransformState:
     weights: npt.NDArray | None = None
     new_axis: AxisBase | None = None
-    cluster_in_perm: npt.NDArray | None = None
-    cluster_out_inv_perm: npt.NDArray | None = None
-    cluster_weights: list | None = None
+    n_out: int = 0
+    clusters: list | None = None
+    """list of (in_indices_xp, out_indices_xp, sub_weights_xp) tuples when block-diagonal."""
 
 
 class AffineTransformTransformer(
@@ -258,26 +258,14 @@ class AffineTransformTransformer(
             clusters = _merge_small_clusters(clusters, self.settings.min_cluster_size)
 
         if clusters is not None and len(clusters) > 1:
-            in_perm = np.concatenate([c[0] for c in clusters])
-            out_perm = np.concatenate([c[1] for c in clusters])
-
-            out_inv_perm = np.empty(n_out, dtype=out_perm.dtype)
-            out_inv_perm[out_perm] = np.arange(len(out_perm))
-            # Omitted output channels map to zero-padded positions
-            omitted_out = np.setdiff1d(np.arange(n_out), out_perm)
-            if len(omitted_out) > 0:
-                out_inv_perm[omitted_out] = np.arange(len(out_perm), len(out_perm) + len(omitted_out))
-
-            self._state.cluster_weights = [
-                np.ascontiguousarray(weights[np.ix_(in_idx, out_idx)]) for in_idx, out_idx in clusters
+            self._state.n_out = n_out
+            self._state.clusters = [
+                (in_idx, out_idx, np.ascontiguousarray(weights[np.ix_(in_idx, out_idx)]))
+                for in_idx, out_idx in clusters
             ]
-            self._state.cluster_in_perm = in_perm
-            self._state.cluster_out_inv_perm = out_inv_perm
             self._state.weights = None
         else:
-            self._state.cluster_in_perm = None
-            self._state.cluster_out_inv_perm = None
-            self._state.cluster_weights = None
+            self._state.clusters = None
 
         # --- Axis label handling (for non-square transforms, non-cluster path) ---
         axis = self.settings.axis or message.dims[-1]
@@ -309,17 +297,19 @@ class AffineTransformTransformer(
         xp = get_namespace(message.data)
         if self._state.weights is not None:
             self._state.weights = xp.asarray(self._state.weights)
-        if self._state.cluster_in_perm is not None:
-            self._state.cluster_in_perm = xp.asarray(self._state.cluster_in_perm)
-            self._state.cluster_out_inv_perm = xp.asarray(self._state.cluster_out_inv_perm)
-            self._state.cluster_weights = [xp.asarray(w) for w in self._state.cluster_weights]
+        if self._state.clusters is not None:
+            self._state.clusters = [
+                (xp.asarray(in_idx), xp.asarray(out_idx), xp.asarray(sub_w))
+                for in_idx, out_idx, sub_w in self._state.clusters
+            ]
 
     def _block_diagonal_matmul(self, xp, data, axis_idx):
         """Perform matmul using block-diagonal decomposition.
 
-        Sorts input channels by cluster, performs per-cluster matmuls on
-        contiguous slices, then restores the original output channel order.
-        Supports both square and non-square block-diagonal weight matrices.
+        For each cluster, gathers input channels via ``xp.take``, performs a
+        matmul with the cluster's sub-weight matrix, and writes the result
+        directly into the pre-allocated output at the cluster's output indices.
+        Omitted output channels naturally remain zero.
         """
         needs_permute = axis_idx not in [-1, data.ndim - 1]
         if needs_permute:
@@ -327,36 +317,13 @@ class AffineTransformTransformer(
             dim_perm.append(dim_perm.pop(axis_idx))
             data = xp.permute_dims(data, dim_perm)
 
-        # Sort input channels by cluster for contiguous access (last axis)
-        # TODO: Is xp.take a copy or a view? If it's a copy then we might be better off
-        #  just doing indexing on the input on-the-fly.
-        sorted_data = xp.take(data, self._state.cluster_in_perm, axis=data.ndim - 1)
+        # Pre-allocate output (omitted channels stay zero)
+        out_shape = data.shape[:-1] + (self._state.n_out,)
+        result = xp.zeros(out_shape, dtype=data.dtype)
 
-        # Matmul each cluster block
-        # TODO: What if we initialized the output to zeros of the correct shape
-        #  then for each cluster we indexed into the output[..., output_indices] += xp.matmul(...)?
-        #  This would allow for clusters with partial overlap.
-        pieces = []
-        offset = 0
-        for sub_weights in self._state.cluster_weights:
-            n_in = sub_weights.shape[0]
-            pieces.append(xp.matmul(sorted_data[..., offset : offset + n_in], sub_weights))
-            offset += n_in
-
-        # Concatenate and restore original output channel order
-        sorted_result = xp.concat(pieces, axis=data.ndim - 1)
-
-        # Zero-pad for any output channels omitted from clusters
-        n_out = self._state.cluster_out_inv_perm.shape[0]
-        n_omitted = n_out - sorted_result.shape[-1]
-        if n_omitted > 0:
-            pad_shape = sorted_result.shape[:-1] + (n_omitted,)
-            sorted_result = xp.concat(
-                [sorted_result, xp.zeros(pad_shape, dtype=sorted_result.dtype)],
-                axis=data.ndim - 1,
-            )
-
-        result = xp.take(sorted_result, self._state.cluster_out_inv_perm, axis=data.ndim - 1)
+        for in_idx, out_idx, sub_weights in self._state.clusters:
+            chunk = xp.take(data, in_idx, axis=data.ndim - 1)
+            result[..., out_idx] = xp.matmul(chunk, sub_weights)
 
         if needs_permute:
             inv_dim_perm = list(range(result.ndim))
@@ -371,7 +338,7 @@ class AffineTransformTransformer(
         axis_idx = message.get_axis_idx(axis)
         data = message.data
 
-        if self._state.cluster_in_perm is not None:
+        if self._state.clusters is not None:
             data = self._block_diagonal_matmul(xp, data, axis_idx)
         else:
             if data.shape[axis_idx] == (self._state.weights.shape[0] - 1):
@@ -453,6 +420,8 @@ class CommonRereferenceSettings(ez.Settings):
 
     include_current: bool = True
     """Set False to exclude each channel from participating in the calculation of its reference."""
+
+    # TODO: channel_clusters: list[list[int]] | None = None
 
 
 class CommonRereferenceTransformer(BaseTransformer[CommonRereferenceSettings, AxisArray, AxisArray]):

@@ -220,7 +220,7 @@ def test_block_diagonal_auto_detect():
     assert msg_out.data.shape == expected.shape
     assert np.allclose(msg_out.data, expected)
     # Verify cluster optimization was actually used
-    assert xformer._state.cluster_in_perm is not None
+    assert xformer._state.clusters is not None
     assert xformer._state.weights is None
 
 
@@ -246,7 +246,7 @@ def test_block_diagonal_explicit_clusters():
     msg_out = xformer(msg_in)
 
     assert np.allclose(msg_out.data, expected)
-    assert xformer._state.cluster_in_perm is not None
+    assert xformer._state.clusters is not None
 
 
 def test_block_diagonal_unsorted_channels():
@@ -275,7 +275,7 @@ def test_block_diagonal_unsorted_channels():
 
     assert msg_out.data.shape == expected.shape
     assert np.allclose(msg_out.data, expected)
-    assert xformer._state.cluster_in_perm is not None
+    assert xformer._state.clusters is not None
 
 
 def test_block_diagonal_many_clusters():
@@ -296,7 +296,7 @@ def test_block_diagonal_many_clusters():
     msg_out = xformer(msg_in)
 
     assert np.allclose(msg_out.data, expected)
-    assert xformer._state.cluster_in_perm is not None
+    assert xformer._state.clusters is not None
 
 
 def test_block_diagonal_unequal_cluster_sizes():
@@ -316,7 +316,7 @@ def test_block_diagonal_unequal_cluster_sizes():
     msg_out = xformer(msg_in)
 
     assert np.allclose(msg_out.data, expected)
-    assert xformer._state.cluster_in_perm is not None
+    assert xformer._state.clusters is not None
 
 
 def test_block_diagonal_not_triggered_for_dense():
@@ -335,7 +335,7 @@ def test_block_diagonal_not_triggered_for_dense():
 
     assert np.allclose(msg_out.data, expected)
     # Should NOT use cluster optimization
-    assert xformer._state.cluster_in_perm is None
+    assert xformer._state.clusters is None
     assert xformer._state.weights is not None
 
 
@@ -362,7 +362,7 @@ def test_block_diagonal_non_last_axis():
 
     assert msg_out.data.shape == expected.shape
     assert np.allclose(msg_out.data, expected)
-    assert xformer._state.cluster_in_perm is not None
+    assert xformer._state.clusters is not None
 
 
 def test_block_diagonal_right_multiply_false():
@@ -382,7 +382,7 @@ def test_block_diagonal_right_multiply_false():
     msg_out = xformer(msg_in)
 
     assert np.allclose(msg_out.data, expected)
-    assert xformer._state.cluster_in_perm is not None
+    assert xformer._state.clusters is not None
 
 
 def test_block_diagonal_identity_preserves_data():
@@ -536,9 +536,9 @@ def test_merge_small_clusters_correctness():
     msg_out = xformer(msg_in)
 
     assert np.allclose(msg_out.data, expected)
-    assert xformer._state.cluster_in_perm is not None
+    assert xformer._state.clusters is not None
     # Should have far fewer than 33 clusters after merging
-    assert len(xformer._state.cluster_weights) <= 3
+    assert len(xformer._state.clusters) <= 3
 
 
 def test_merge_collapses_to_dense():
@@ -558,7 +558,7 @@ def test_merge_collapses_to_dense():
 
     assert np.allclose(msg_out.data, in_dat)
     # Merged into 1 cluster → should fall back to dense (no cluster optimization)
-    assert xformer._state.cluster_in_perm is None
+    assert xformer._state.clusters is None
 
 
 def test_min_cluster_size_1_disables_merging():
@@ -579,8 +579,8 @@ def test_min_cluster_size_1_disables_merging():
     msg_out = xformer(msg_in)
 
     assert np.allclose(msg_out.data, expected)
-    assert xformer._state.cluster_in_perm is not None
-    assert len(xformer._state.cluster_weights) == 8
+    assert xformer._state.clusters is not None
+    assert len(xformer._state.clusters) == 8
 
 
 # --- Non-square block-diagonal tests ---
@@ -622,8 +622,8 @@ def test_nonsquare_auto_detect():
 
     assert msg_out.data.shape == (n_times, 40)
     assert np.allclose(msg_out.data, expected)
-    assert xformer._state.cluster_in_perm is not None
-    assert len(xformer._state.cluster_weights) == 4
+    assert xformer._state.clusters is not None
+    assert len(xformer._state.clusters) == 4
 
 
 def test_nonsquare_explicit_clusters():
@@ -678,7 +678,7 @@ def test_nonsquare_unequal_blocks():
 
     assert msg_out.data.shape == (n_times, 35)
     assert np.allclose(msg_out.data, expected)
-    assert xformer._state.cluster_in_perm is not None
+    assert xformer._state.clusters is not None
 
 
 def test_nonsquare_shuffled():
@@ -709,7 +709,7 @@ def test_nonsquare_shuffled():
 
     assert msg_out.data.shape == (n_times, 20)
     assert np.allclose(msg_out.data, expected)
-    assert xformer._state.cluster_in_perm is not None
+    assert xformer._state.clusters is not None
 
 
 def test_nonsquare_non_last_axis():
