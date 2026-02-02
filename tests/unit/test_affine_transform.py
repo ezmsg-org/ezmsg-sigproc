@@ -128,6 +128,52 @@ def test_common_rereference():
         assert np.allclose(msg_out.data, expected_out)
 
 
+def test_common_rereference_clusters():
+    n_times = 300
+    n_chans = 8
+    rng = np.random.default_rng(42)
+    in_dat = rng.standard_normal((n_times, n_chans))
+    msg_in = AxisArray(in_dat, dims=["time", "ch"])
+
+    cluster_a = [0, 1, 2, 3]
+    cluster_b = [4, 5, 6, 7]
+    clusters = [cluster_a, cluster_b]
+
+    # --- include_current=True ---
+    xformer = CommonRereferenceTransformer(
+        CommonRereferenceSettings(mode="mean", axis="ch", include_current=True, channel_clusters=clusters)
+    )
+    msg_out = xformer(msg_in)
+
+    # Expected: per-cluster CAR
+    expected = np.zeros_like(in_dat)
+    for cluster in clusters:
+        cluster_data = in_dat[:, cluster]
+        ref = np.mean(cluster_data, axis=1, keepdims=True)
+        expected[:, cluster] = cluster_data - ref
+
+    assert np.allclose(msg_out.data, expected)
+    assert not np.may_share_memory(msg_out.data, in_dat)
+
+    # --- include_current=False ---
+    xformer = CommonRereferenceTransformer(
+        CommonRereferenceSettings(mode="mean", axis="ch", include_current=False, channel_clusters=clusters)
+    )
+    msg_out = xformer(msg_in)
+
+    # Expected: per-cluster CAR excluding current channel (slow deliberate way)
+    expected = np.zeros_like(in_dat)
+    for cluster in clusters:
+        cluster_data = in_dat[:, cluster]
+        N = len(cluster)
+        for i, ch in enumerate(cluster):
+            others = [j for j in range(N) if j != i]
+            ref = np.mean(cluster_data[:, others], axis=1)
+            expected[:, ch] = cluster_data[:, i] - ref
+
+    assert np.allclose(msg_out.data, expected)
+
+
 def test_car_passthrough():
     n_times = 300
     n_chans = 64

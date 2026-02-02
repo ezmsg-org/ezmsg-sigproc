@@ -17,7 +17,6 @@ import numpy.typing as npt
 from array_api_compat import get_namespace
 from ezmsg.baseproc import (
     BaseStatefulTransformer,
-    BaseTransformer,
     BaseTransformerUnit,
     processor_state,
 )
@@ -402,11 +401,6 @@ def affine_transform(
     )
 
 
-def zeros_for_noop(data, **ignore_kwargs):
-    xp = get_namespace(data)
-    return xp.zeros_like(data)
-
-
 class CommonRereferenceSettings(ez.Settings):
     """
     Settings for :obj:`CommonRereference`
@@ -421,10 +415,37 @@ class CommonRereferenceSettings(ez.Settings):
     include_current: bool = True
     """Set False to exclude each channel from participating in the calculation of its reference."""
 
-    # TODO: channel_clusters: list[list[int]] | None = None
+    channel_clusters: list[list[int]] | None = None
+    """Optional channel clusters for per-cluster rereferencing. Each element is a
+    list of channel indices forming one cluster. The common reference is computed
+    independently within each cluster. If None, all channels form a single cluster."""
 
 
-class CommonRereferenceTransformer(BaseTransformer[CommonRereferenceSettings, AxisArray, AxisArray]):
+@processor_state
+class CommonRereferenceState:
+    clusters: list | None = None
+    """list of xp arrays of channel indices, one per cluster."""
+
+
+class CommonRereferenceTransformer(
+    BaseStatefulTransformer[CommonRereferenceSettings, AxisArray, AxisArray, CommonRereferenceState]
+):
+    def _hash_message(self, message: AxisArray) -> int:
+        axis = self.settings.axis or message.dims[-1]
+        axis_idx = message.get_axis_idx(axis)
+        return hash((message.key, message.data.shape[axis_idx]))
+
+    def _reset_state(self, message: AxisArray) -> None:
+        xp = get_namespace(message.data)
+        axis = self.settings.axis or message.dims[-1]
+        axis_idx = message.get_axis_idx(axis)
+        n_chans = message.data.shape[axis_idx]
+
+        if self.settings.channel_clusters is not None:
+            self._state.clusters = [xp.asarray(group) for group in self.settings.channel_clusters]
+        else:
+            self._state.clusters = [xp.arange(n_chans)]
+
     def _process(self, message: AxisArray) -> AxisArray:
         if self.settings.mode == "passthrough":
             return message
@@ -432,27 +453,26 @@ class CommonRereferenceTransformer(BaseTransformer[CommonRereferenceSettings, Ax
         xp = get_namespace(message.data)
         axis = self.settings.axis or message.dims[-1]
         axis_idx = message.get_axis_idx(axis)
+        func = {"mean": xp.mean, "median": np.median}[self.settings.mode]
 
-        func = {"mean": xp.mean, "median": np.median, "passthrough": zeros_for_noop}[self.settings.mode]
+        # Use result_type to match dtype promotion from data - float operations.
+        out_dtype = np.result_type(message.data.dtype, np.float64)
+        output = xp.zeros(message.data.shape, dtype=out_dtype)
 
-        ref_data = func(message.data, axis=axis_idx, keepdims=True)
+        for cluster_idx in self._state.clusters:
+            cluster_data = xp.take(message.data, cluster_idx, axis=axis_idx)
+            ref_data = func(cluster_data, axis=axis_idx, keepdims=True)
 
-        if not self.settings.include_current:
-            # Typical `CAR = x[0]/N + x[1]/N + ... x[i-1]/N + x[i]/N + x[i+1]/N + ... + x[N-1]/N`
-            # and is the same for all i, so it is calculated only once in `ref_data`.
-            # However, if we had excluded the current channel,
-            # then we would have omitted the contribution of the current channel:
-            # `CAR[i] = x[0]/(N-1) + x[1]/(N-1) + ... x[i-1]/(N-1) + x[i+1]/(N-1) + ... + x[N-1]/(N-1)`
-            # The majority of the calculation is the same as when the current channel is included;
-            # we need only rescale CAR so the divisor is `N-1` instead of `N`, then subtract the contribution
-            # from the current channel (i.e., `x[i] / (N-1)`)
-            #  i.e., `CAR[i] = (N / (N-1)) * common_CAR - x[i]/(N-1)`
-            # We can use broadcasting subtraction instead of looping over channels.
-            N = message.data.shape[axis_idx]
-            ref_data = (N / (N - 1)) * ref_data - message.data / (N - 1)
-            # Note: I profiled using AffineTransformTransformer; it's ~30x slower than this implementation.
+            if not self.settings.include_current:
+                N = cluster_data.shape[axis_idx]
+                ref_data = (N / (N - 1)) * ref_data - cluster_data / (N - 1)
 
-        return replace(message, data=message.data - ref_data)
+            # Write per-cluster result into output at the correct axis position
+            idx = [slice(None)] * output.ndim
+            idx[axis_idx] = cluster_idx
+            output[tuple(idx)] = cluster_data - ref_data
+
+        return replace(message, data=output)
 
 
 class CommonRereference(
@@ -462,19 +482,26 @@ class CommonRereference(
 
 
 def common_rereference(
-    mode: str = "mean", axis: str | None = None, include_current: bool = True
+    mode: str = "mean",
+    axis: str | None = None,
+    include_current: bool = True,
+    channel_clusters: list[list[int]] | None = None,
 ) -> CommonRereferenceTransformer:
     """
     Perform common average referencing (CAR) on streaming data.
 
     Args:
         mode: The statistical mode to apply -- either "mean" or "median"
-        axis: The name of hte axis to apply the transformation to.
+        axis: The name of the axis to apply the transformation to.
         include_current: Set False to exclude each channel from participating in the calculation of its reference.
+        channel_clusters: Optional channel clusters for per-cluster rereferencing. See
+            :attr:`CommonRereferenceSettings.channel_clusters`.
 
     Returns:
         :obj:`CommonRereferenceTransformer`
     """
     return CommonRereferenceTransformer(
-        CommonRereferenceSettings(mode=mode, axis=axis, include_current=include_current)
+        CommonRereferenceSettings(
+            mode=mode, axis=axis, include_current=include_current, channel_clusters=channel_clusters
+        )
     )
