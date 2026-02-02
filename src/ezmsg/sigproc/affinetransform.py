@@ -14,6 +14,7 @@ from pathlib import Path
 import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
+from array_api_compat import get_namespace
 from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformer,
@@ -111,7 +112,13 @@ class AffineTransformTransformer(
 
             self._state.new_axis = replace(message.axes[axis], data=np.array(new_labels))
 
+        # Convert weights to match message.data namespace for efficient operations in _process
+        xp = get_namespace(message.data)
+        if self._state.weights is not None:
+            self._state.weights = xp.asarray(self._state.weights)
+
     def _process(self, message: AxisArray) -> AxisArray:
+        xp = get_namespace(message.data)
         axis = self.settings.axis or message.dims[-1]
         axis_idx = message.get_axis_idx(axis)
         data = message.data
@@ -120,14 +127,18 @@ class AffineTransformTransformer(
             # The weights are stacked A|B where A is the transform and B is a single row
             #  in the equation y = Ax + B. This supports NeuroKey's weights matrices.
             sample_shape = data.shape[:axis_idx] + (1,) + data.shape[axis_idx + 1 :]
-            data = np.concatenate((data, np.ones(sample_shape).astype(data.dtype)), axis=axis_idx)
+            data = xp.concat((data, xp.ones(sample_shape, dtype=data.dtype)), axis=axis_idx)
 
         if axis_idx in [-1, len(message.dims) - 1]:
-            data = np.matmul(data, self._state.weights)
+            data = xp.matmul(data, self._state.weights)
         else:
-            data = np.moveaxis(data, axis_idx, -1)
-            data = np.matmul(data, self._state.weights)
-            data = np.moveaxis(data, -1, axis_idx)
+            perm = list(range(data.ndim))
+            perm.append(perm.pop(axis_idx))
+            data = xp.permute_dims(data, perm)
+            data = xp.matmul(data, self._state.weights)
+            inv_perm = list(range(data.ndim))
+            inv_perm.insert(axis_idx, inv_perm.pop(-1))
+            data = xp.permute_dims(data, inv_perm)
 
         replace_kwargs = {"data": data}
         if self._state.new_axis is not None:
@@ -161,8 +172,9 @@ def affine_transform(
     )
 
 
-def zeros_for_noop(data: npt.NDArray, **ignore_kwargs) -> npt.NDArray:
-    return np.zeros_like(data)
+def zeros_for_noop(data, **ignore_kwargs):
+    xp = get_namespace(data)
+    return xp.zeros_like(data)
 
 
 class CommonRereferenceSettings(ez.Settings):
@@ -185,10 +197,11 @@ class CommonRereferenceTransformer(BaseTransformer[CommonRereferenceSettings, Ax
         if self.settings.mode == "passthrough":
             return message
 
+        xp = get_namespace(message.data)
         axis = self.settings.axis or message.dims[-1]
         axis_idx = message.get_axis_idx(axis)
 
-        func = {"mean": np.mean, "median": np.median, "passthrough": zeros_for_noop}[self.settings.mode]
+        func = {"mean": xp.mean, "median": np.median, "passthrough": zeros_for_noop}[self.settings.mode]
 
         ref_data = func(message.data, axis=axis_idx, keepdims=True)
 
