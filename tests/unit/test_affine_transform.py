@@ -158,20 +158,34 @@ def _make_block_diagonal_weights(block_sizes: list[int], rng=None) -> np.ndarray
 
 def test_find_block_diagonal_clusters():
     """Test the cluster detection helper function directly."""
+    # Square block-diagonal
     weights = _make_block_diagonal_weights([64, 64])
     clusters = _find_block_diagonal_clusters(weights)
     assert clusters is not None
     assert len(clusters) == 2
-    assert np.array_equal(clusters[0], np.arange(64))
-    assert np.array_equal(clusters[1], np.arange(64, 128))
+    in0, out0 = clusters[0]
+    in1, out1 = clusters[1]
+    assert np.array_equal(in0, np.arange(64))
+    assert np.array_equal(out0, np.arange(64))
+    assert np.array_equal(in1, np.arange(64, 128))
+    assert np.array_equal(out1, np.arange(64, 128))
+
+    # Non-square block-diagonal
+    weights_ns = np.zeros((128, 20))
+    weights_ns[:64, :10] = 1.0
+    weights_ns[64:, 10:] = 1.0
+    clusters_ns = _find_block_diagonal_clusters(weights_ns)
+    assert clusters_ns is not None
+    assert len(clusters_ns) == 2
+    assert np.array_equal(clusters_ns[0][0], np.arange(64))
+    assert np.array_equal(clusters_ns[0][1], np.arange(10))
+    assert np.array_equal(clusters_ns[1][0], np.arange(64, 128))
+    assert np.array_equal(clusters_ns[1][1], np.arange(10, 20))
 
     # Dense matrix should not be detected as block-diagonal
     rng = np.random.default_rng(0)
     dense = rng.standard_normal((64, 64))
     assert _find_block_diagonal_clusters(dense) is None
-
-    # Non-square should return None
-    assert _find_block_diagonal_clusters(rng.standard_normal((64, 32))) is None
 
     # 1x1 should return None
     assert _find_block_diagonal_clusters(np.array([[1.0]])) is None
@@ -180,7 +194,7 @@ def test_find_block_diagonal_clusters():
 def test_max_cross_cluster_weight():
     """Test the cross-cluster weight magnitude checker."""
     weights = _make_block_diagonal_weights([64, 64])
-    clusters = [np.arange(64), np.arange(64, 128)]
+    clusters = [(np.arange(64), np.arange(64)), (np.arange(64, 128), np.arange(64, 128))]
     assert _max_cross_cluster_weight(weights, clusters) == 0.0
 
     # Add a small cross-cluster weight
@@ -206,7 +220,7 @@ def test_block_diagonal_auto_detect():
     assert msg_out.data.shape == expected.shape
     assert np.allclose(msg_out.data, expected)
     # Verify cluster optimization was actually used
-    assert xformer._state.cluster_perm is not None
+    assert xformer._state.cluster_in_perm is not None
     assert xformer._state.weights is None
 
 
@@ -232,7 +246,7 @@ def test_block_diagonal_explicit_clusters():
     msg_out = xformer(msg_in)
 
     assert np.allclose(msg_out.data, expected)
-    assert xformer._state.cluster_perm is not None
+    assert xformer._state.cluster_in_perm is not None
 
 
 def test_block_diagonal_unsorted_channels():
@@ -261,7 +275,7 @@ def test_block_diagonal_unsorted_channels():
 
     assert msg_out.data.shape == expected.shape
     assert np.allclose(msg_out.data, expected)
-    assert xformer._state.cluster_perm is not None
+    assert xformer._state.cluster_in_perm is not None
 
 
 def test_block_diagonal_many_clusters():
@@ -282,7 +296,7 @@ def test_block_diagonal_many_clusters():
     msg_out = xformer(msg_in)
 
     assert np.allclose(msg_out.data, expected)
-    assert xformer._state.cluster_perm is not None
+    assert xformer._state.cluster_in_perm is not None
 
 
 def test_block_diagonal_unequal_cluster_sizes():
@@ -302,7 +316,7 @@ def test_block_diagonal_unequal_cluster_sizes():
     msg_out = xformer(msg_in)
 
     assert np.allclose(msg_out.data, expected)
-    assert xformer._state.cluster_perm is not None
+    assert xformer._state.cluster_in_perm is not None
 
 
 def test_block_diagonal_not_triggered_for_dense():
@@ -321,7 +335,7 @@ def test_block_diagonal_not_triggered_for_dense():
 
     assert np.allclose(msg_out.data, expected)
     # Should NOT use cluster optimization
-    assert xformer._state.cluster_perm is None
+    assert xformer._state.cluster_in_perm is None
     assert xformer._state.weights is not None
 
 
@@ -348,7 +362,7 @@ def test_block_diagonal_non_last_axis():
 
     assert msg_out.data.shape == expected.shape
     assert np.allclose(msg_out.data, expected)
-    assert xformer._state.cluster_perm is not None
+    assert xformer._state.cluster_in_perm is not None
 
 
 def test_block_diagonal_right_multiply_false():
@@ -368,7 +382,7 @@ def test_block_diagonal_right_multiply_false():
     msg_out = xformer(msg_in)
 
     assert np.allclose(msg_out.data, expected)
-    assert xformer._state.cluster_perm is not None
+    assert xformer._state.cluster_in_perm is not None
 
 
 def test_block_diagonal_identity_preserves_data():
@@ -389,33 +403,65 @@ def test_block_diagonal_identity_preserves_data():
 
 
 def test_block_diagonal_invalid_clusters():
-    """Test that channel_clusters missing channels raises ValueError."""
-    n_chans = 128
+    """Test that out-of-range channel indices raise ValueError."""
+    n_chans = 64
     weights = np.eye(n_chans)
 
-    # Only covers half the channels
-    with pytest.raises(ValueError, match="channel_clusters must cover all channel indices"):
+    with pytest.raises(ValueError, match="out-of-range input indices"):
         xformer = AffineTransformTransformer(
             AffineTransformSettings(
                 weights=weights,
                 axis="ch",
-                channel_clusters=[list(range(64))],
+                channel_clusters=[[0, 1, 2], [64]],  # 64 is out of range for 64-channel matrix
             )
         )
         msg_in = AxisArray(data=np.zeros((10, n_chans)), dims=["time", "ch"])
         xformer(msg_in)
 
-    # Covers 0..63 twice but never 64..127
-    with pytest.raises(ValueError, match="channel_clusters must cover all channel indices"):
+    with pytest.raises(ValueError, match="out-of-range input indices"):
         xformer = AffineTransformTransformer(
             AffineTransformSettings(
                 weights=weights,
                 axis="ch",
-                channel_clusters=[list(range(64)), list(range(64))],
+                channel_clusters=[[-1, 0, 1]],
             )
         )
         msg_in = AxisArray(data=np.zeros((10, n_chans)), dims=["time", "ch"])
         xformer(msg_in)
+
+
+def test_block_diagonal_omitted_zero_channels():
+    """Test that channels with all-zero weights can be omitted from channel_clusters."""
+    n_times = 30
+    n_chans = 6
+    rng = np.random.default_rng(42)
+
+    # Channels 0,1 form cluster A; channels 4,5 form cluster B;
+    # channels 2,3 have all-zero rows and columns.
+    weights = np.zeros((n_chans, n_chans))
+    weights[:2, :2] = rng.standard_normal((2, 2))
+    weights[4:, 4:] = rng.standard_normal((2, 2))
+
+    in_dat = rng.standard_normal((n_times, n_chans))
+    msg_in = AxisArray(data=in_dat, dims=["time", "ch"])
+
+    expected = in_dat @ weights  # channels 2,3 output should be zero
+
+    xformer = AffineTransformTransformer(
+        AffineTransformSettings(
+            weights=weights,
+            axis="ch",
+            channel_clusters=[[0, 1], [4, 5]],  # channels 2,3 omitted
+            min_cluster_size=1,
+        )
+    )
+    msg_out = xformer(msg_in)
+
+    assert msg_out.data.shape == expected.shape
+    assert np.allclose(msg_out.data, expected)
+    # Verify omitted channels are indeed zero
+    assert np.all(msg_out.data[:, 2] == 0)
+    assert np.all(msg_out.data[:, 3] == 0)
 
 
 def test_block_diagonal_streaming():
@@ -441,27 +487,32 @@ def test_block_diagonal_streaming():
 def test_merge_small_clusters_unit():
     """Test _merge_small_clusters helper directly."""
     # All clusters already large enough — no change
-    clusters = [np.arange(32), np.arange(32, 64)]
+    clusters = [(np.arange(32), np.arange(32)), (np.arange(32, 64), np.arange(32, 64))]
     result = _merge_small_clusters(clusters, min_size=32)
     assert len(result) == 2
 
     # Many tiny clusters get merged greedily
-    clusters = [np.array([i]) for i in range(64)]  # 64 clusters of size 1
+    clusters = [(np.array([i]), np.array([i])) for i in range(64)]  # 64 clusters of size 1
     result = _merge_small_clusters(clusters, min_size=32)
     # 64 channels / 32 min_size = 2 merged groups
     assert len(result) == 2
-    assert all(len(c) == 32 for c in result)
+    assert all(len(c[0]) == 32 for c in result)
 
     # Mix of large and small
-    clusters = [np.arange(64), np.array([64]), np.array([65]), np.array([66])]
+    clusters = [
+        (np.arange(64), np.arange(64)),
+        (np.array([64]), np.array([64])),
+        (np.array([65]), np.array([65])),
+        (np.array([66]), np.array([66])),
+    ]
     result = _merge_small_clusters(clusters, min_size=32)
     # 1 large (64) + 1 merged remainder (3 channels, below threshold but grouped)
     assert len(result) == 2
-    assert 64 in [len(c) for c in result]
-    assert 3 in [len(c) for c in result]
+    assert 64 in [len(c[0]) for c in result]
+    assert 3 in [len(c[0]) for c in result]
 
     # min_size=1 disables merging
-    clusters = [np.array([i]) for i in range(10)]
+    clusters = [(np.array([i]), np.array([i])) for i in range(10)]
     result = _merge_small_clusters(clusters, min_size=1)
     assert len(result) == 10
 
@@ -485,7 +536,7 @@ def test_merge_small_clusters_correctness():
     msg_out = xformer(msg_in)
 
     assert np.allclose(msg_out.data, expected)
-    assert xformer._state.cluster_perm is not None
+    assert xformer._state.cluster_in_perm is not None
     # Should have far fewer than 33 clusters after merging
     assert len(xformer._state.cluster_weights) <= 3
 
@@ -507,7 +558,7 @@ def test_merge_collapses_to_dense():
 
     assert np.allclose(msg_out.data, in_dat)
     # Merged into 1 cluster → should fall back to dense (no cluster optimization)
-    assert xformer._state.cluster_perm is None
+    assert xformer._state.cluster_in_perm is None
 
 
 def test_min_cluster_size_1_disables_merging():
@@ -528,5 +579,159 @@ def test_min_cluster_size_1_disables_merging():
     msg_out = xformer(msg_in)
 
     assert np.allclose(msg_out.data, expected)
-    assert xformer._state.cluster_perm is not None
+    assert xformer._state.cluster_in_perm is not None
     assert len(xformer._state.cluster_weights) == 8
+
+
+# --- Non-square block-diagonal tests ---
+
+
+def _make_block_diagonal_weights_nonsquare(block_shapes: list[tuple[int, int]], rng=None) -> np.ndarray:
+    """Helper: create a non-square block-diagonal weight matrix."""
+    if rng is None:
+        rng = np.random.default_rng(42)
+    n_in = sum(s[0] for s in block_shapes)
+    n_out = sum(s[1] for s in block_shapes)
+    weights = np.zeros((n_in, n_out))
+    in_offset = 0
+    out_offset = 0
+    for rows, cols in block_shapes:
+        weights[in_offset : in_offset + rows, out_offset : out_offset + cols] = rng.standard_normal((rows, cols))
+        in_offset += rows
+        out_offset += cols
+    return weights
+
+
+def test_nonsquare_auto_detect():
+    """Test auto-detection on a non-square block-diagonal matrix."""
+    n_times = 30
+    rng = np.random.default_rng(42)
+
+    # 4 blocks of 64 input → 10 output
+    block_shapes = [(64, 10)] * 4
+    weights = _make_block_diagonal_weights_nonsquare(block_shapes, rng=rng)
+    assert weights.shape == (256, 40)
+
+    in_dat = rng.standard_normal((n_times, 256))
+    msg_in = AxisArray(data=in_dat, dims=["time", "ch"])
+
+    expected = in_dat @ weights
+
+    xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch", min_cluster_size=1))
+    msg_out = xformer(msg_in)
+
+    assert msg_out.data.shape == (n_times, 40)
+    assert np.allclose(msg_out.data, expected)
+    assert xformer._state.cluster_in_perm is not None
+    assert len(xformer._state.cluster_weights) == 4
+
+
+def test_nonsquare_explicit_clusters():
+    """Test explicit input-only channel_clusters for non-square matrices."""
+    n_times = 30
+    rng = np.random.default_rng(42)
+
+    block_shapes = [(64, 10)] * 4
+    weights = _make_block_diagonal_weights_nonsquare(block_shapes, rng=rng)
+
+    in_dat = rng.standard_normal((n_times, 256))
+    msg_in = AxisArray(data=in_dat, dims=["time", "ch"])
+
+    expected = in_dat @ weights
+
+    # Only specify input clusters; output indices derived from weight matrix
+    xformer = AffineTransformTransformer(
+        AffineTransformSettings(
+            weights=weights,
+            axis="ch",
+            channel_clusters=[
+                list(range(0, 64)),
+                list(range(64, 128)),
+                list(range(128, 192)),
+                list(range(192, 256)),
+            ],
+            min_cluster_size=1,
+        )
+    )
+    msg_out = xformer(msg_in)
+
+    assert msg_out.data.shape == (n_times, 40)
+    assert np.allclose(msg_out.data, expected)
+
+
+def test_nonsquare_unequal_blocks():
+    """Test non-square with blocks of different shapes."""
+    n_times = 30
+    rng = np.random.default_rng(42)
+
+    block_shapes = [(64, 10), (96, 20), (32, 5)]
+    weights = _make_block_diagonal_weights_nonsquare(block_shapes, rng=rng)
+    assert weights.shape == (192, 35)
+
+    in_dat = rng.standard_normal((n_times, 192))
+    msg_in = AxisArray(data=in_dat, dims=["time", "ch"])
+
+    expected = in_dat @ weights
+
+    xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch", min_cluster_size=1))
+    msg_out = xformer(msg_in)
+
+    assert msg_out.data.shape == (n_times, 35)
+    assert np.allclose(msg_out.data, expected)
+    assert xformer._state.cluster_in_perm is not None
+
+
+def test_nonsquare_shuffled():
+    """Test non-square block-diagonal with shuffled input/output channels."""
+    n_times = 30
+    rng = np.random.default_rng(42)
+
+    # Sorted block-diagonal
+    block_shapes = [(64, 10)] * 2
+    sorted_weights = _make_block_diagonal_weights_nonsquare(block_shapes, rng=rng)
+
+    # Shuffle input channels
+    in_perm = np.arange(128)
+    rng.shuffle(in_perm)
+    # Shuffle output channels
+    out_perm = np.arange(20)
+    rng.shuffle(out_perm)
+
+    weights = sorted_weights[np.ix_(in_perm, out_perm)]
+
+    in_dat = rng.standard_normal((n_times, 128))
+    msg_in = AxisArray(data=in_dat, dims=["time", "ch"])
+
+    expected = in_dat @ weights
+
+    xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch", min_cluster_size=1))
+    msg_out = xformer(msg_in)
+
+    assert msg_out.data.shape == (n_times, 20)
+    assert np.allclose(msg_out.data, expected)
+    assert xformer._state.cluster_in_perm is not None
+
+
+def test_nonsquare_non_last_axis():
+    """Test non-square block-diagonal with the target axis not being the last axis."""
+    n_times = 30
+    n_features = 5
+    rng = np.random.default_rng(42)
+
+    block_shapes = [(64, 10)] * 2
+    weights = _make_block_diagonal_weights_nonsquare(block_shapes, rng=rng)
+
+    # Data shape: (n_times, n_in, n_features) — ch is the middle axis
+    in_dat = rng.standard_normal((n_times, 128, n_features))
+    msg_in = AxisArray(data=in_dat, dims=["time", "ch", "feat"])
+
+    # Expected: move ch to last, matmul, move back
+    data_perm = np.transpose(in_dat, (0, 2, 1))  # (time, feat, 128)
+    expected_perm = data_perm @ weights  # (time, feat, 20)
+    expected = np.transpose(expected_perm, (0, 2, 1))  # (time, 20, feat)
+
+    xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch", min_cluster_size=1))
+    msg_out = xformer(msg_in)
+
+    assert msg_out.data.shape == expected.shape
+    assert np.allclose(msg_out.data, expected)

@@ -25,56 +25,75 @@ from ezmsg.util.messages.axisarray import AxisArray, AxisBase
 from ezmsg.util.messages.util import replace
 
 
-def _find_block_diagonal_clusters(weights: np.ndarray) -> list[np.ndarray] | None:
-    """Detect block-diagonal structure in a square weight matrix.
+def _find_block_diagonal_clusters(weights: np.ndarray) -> list[tuple[np.ndarray, np.ndarray]] | None:
+    """Detect block-diagonal structure in a weight matrix.
 
-    Finds connected components in the non-zero structure of the matrix.
-    If the matrix has more than one component, returns a list of index
-    arrays (one per block/cluster).
+    Finds connected components in the bipartite graph of non-zero weights,
+    where input channels and output channels are separate node sets.
 
     Args:
-        weights: Weight matrix. Must be square for detection to apply.
+        weights: 2-D weight matrix of shape (n_in, n_out).
 
     Returns:
-        List of sorted 1-D index arrays, one per cluster, or None if the matrix
-        is not block-diagonal (single connected component or non-square).
+        List of (input_indices, output_indices) tuples, one per block, or
+        None if the matrix is not block-diagonal (single connected component).
     """
-    if weights.ndim != 2 or weights.shape[0] != weights.shape[1]:
+    if weights.ndim != 2:
         return None
 
-    n = weights.shape[0]
-    if n <= 1:
+    n_in, n_out = weights.shape
+    if n_in + n_out <= 2:
         return None
 
-    from scipy.sparse import csr_matrix
+    from scipy.sparse import coo_matrix
     from scipy.sparse.csgraph import connected_components
 
-    # Symmetric adjacency: i and j are in the same cluster if W[i,j] or W[j,i] is non-zero
-    nonzero = weights != 0
-    adjacency = nonzero | nonzero.T
-    n_components, labels = connected_components(csr_matrix(adjacency), directed=False)
+    rows, cols = np.nonzero(weights)
+    if len(rows) == 0:
+        return None
+
+    # Bipartite graph: input nodes [0, n_in), output nodes [n_in, n_in + n_out)
+    shifted_cols = cols + n_in
+    adj_rows = np.concatenate([rows, shifted_cols])
+    adj_cols = np.concatenate([shifted_cols, rows])
+    adj_data = np.ones(len(adj_rows), dtype=bool)
+    n_nodes = n_in + n_out
+    adj = coo_matrix((adj_data, (adj_rows, adj_cols)), shape=(n_nodes, n_nodes))
+
+    n_components, labels = connected_components(adj, directed=False)
 
     if n_components <= 1:
         return None
 
-    return [np.sort(np.where(labels == c)[0]) for c in range(n_components)]
+    clusters = []
+    for comp in range(n_components):
+        members = np.where(labels == comp)[0]
+        in_idx = np.sort(members[members < n_in])
+        out_idx = np.sort(members[members >= n_in] - n_in)
+        if len(in_idx) > 0 and len(out_idx) > 0:
+            clusters.append((in_idx, out_idx))
+
+    return clusters if len(clusters) > 1 else None
 
 
-def _max_cross_cluster_weight(weights: np.ndarray, clusters: list[np.ndarray]) -> float:
+def _max_cross_cluster_weight(weights: np.ndarray, clusters: list[tuple[np.ndarray, np.ndarray]]) -> float:
     """Return the maximum absolute weight between different clusters."""
     mask = np.zeros(weights.shape, dtype=bool)
-    for indices in clusters:
-        mask[np.ix_(indices, indices)] = True
+    for in_idx, out_idx in clusters:
+        mask[np.ix_(in_idx, out_idx)] = True
     cross = np.abs(weights[~mask])
     return float(cross.max()) if cross.size > 0 else 0.0
 
 
-def _merge_small_clusters(clusters: list[np.ndarray], min_size: int) -> list[np.ndarray]:
+def _merge_small_clusters(
+    clusters: list[tuple[np.ndarray, np.ndarray]], min_size: int
+) -> list[tuple[np.ndarray, np.ndarray]]:
     """Merge clusters smaller than *min_size* into combined groups.
 
     Small clusters are greedily concatenated until each merged group has
-    at least *min_size* channels. Any leftover small clusters that don't
-    reach the threshold are combined into a final group.
+    at least *min_size* channels (measured as ``max(n_in, n_out)``).
+    Any leftover small clusters that don't reach the threshold are
+    combined into a final group.
 
     The merged group's sub-weight-matrix will contain the original small
     diagonal blocks with zeros between them — a dense matmul on that
@@ -85,27 +104,34 @@ def _merge_small_clusters(clusters: list[np.ndarray], min_size: int) -> list[np.
 
     large = []
     small = []
-    for c in clusters:
-        if len(c) >= min_size:
-            large.append(c)
+    for cluster in clusters:
+        in_idx, out_idx = cluster
+        if max(len(in_idx), len(out_idx)) >= min_size:
+            large.append(cluster)
         else:
-            small.append(c)
+            small.append(cluster)
 
     if not small:
         return clusters
 
-    current: list[np.ndarray] = []
-    current_size = 0
-    for c in small:
-        current.append(c)
-        current_size += len(c)
-        if current_size >= min_size:
-            large.append(np.sort(np.concatenate(current)))
-            current = []
-            current_size = 0
+    current_in: list[np.ndarray] = []
+    current_out: list[np.ndarray] = []
+    current_in_size = 0
+    current_out_size = 0
+    for in_idx, out_idx in small:
+        current_in.append(in_idx)
+        current_out.append(out_idx)
+        current_in_size += len(in_idx)
+        current_out_size += len(out_idx)
+        if max(current_in_size, current_out_size) >= min_size:
+            large.append((np.sort(np.concatenate(current_in)), np.sort(np.concatenate(current_out))))
+            current_in = []
+            current_out = []
+            current_in_size = 0
+            current_out_size = 0
 
-    if current:
-        large.append(np.sort(np.concatenate(current)))
+    if current_in:
+        large.append((np.sort(np.concatenate(current_in)), np.sort(np.concatenate(current_out))))
 
     return large
 
@@ -125,13 +151,17 @@ class AffineTransformSettings(ez.Settings):
     """Set False to transpose the weights before applying."""
 
     channel_clusters: list[list[int]] | None = None
-    """Optional explicit channel cluster specification for block-diagonal optimization.
-    Each inner list contains channel indices belonging to one cluster. When provided,
-    the weight matrix is decomposed into per-cluster sub-matrices and multiplied
-    separately, which is faster when cross-cluster weights are zero.
+    """Optional explicit input channel cluster specification for block-diagonal optimization.
 
-    If None and the weight matrix is square, block-diagonal structure is
-    auto-detected from the zero pattern of the weights."""
+    Each element is a list of input channel indices forming one cluster. The
+    corresponding output indices are derived automatically from the non-zero
+    columns of the weight matrix for those input rows.
+
+    When provided, the weight matrix is decomposed into per-cluster sub-matrices
+    and multiplied separately, which is faster when cross-cluster weights are zero.
+
+    If None, block-diagonal structure is auto-detected from the zero pattern
+    of the weights."""
 
     min_cluster_size: int = 32
     """Minimum number of channels per cluster for the block-diagonal optimization.
@@ -143,8 +173,8 @@ class AffineTransformSettings(ez.Settings):
 class AffineTransformState:
     weights: npt.NDArray | None = None
     new_axis: AxisBase | None = None
-    cluster_perm: npt.NDArray | None = None
-    cluster_inv_perm: npt.NDArray | None = None
+    cluster_in_perm: npt.NDArray | None = None
+    cluster_out_inv_perm: npt.NDArray | None = None
     cluster_weights: list | None = None
 
 
@@ -192,32 +222,35 @@ class AffineTransformTransformer(
         #  However, that would break compatibility with Array API.
 
         # --- Block-diagonal cluster detection ---
-        clusters = None
+        # Clusters are a list of (input_indices, output_indices) tuples.
+        n_in, n_out = weights.shape
         if self.settings.channel_clusters is not None:
-            if weights.shape[0] != weights.shape[1]:
-                ez.logger.warning(
-                    "channel_clusters ignored: weight matrix is not square " f"({weights.shape[0]}x{weights.shape[1]})"
+            # Validate input index bounds
+            all_in = np.concatenate([np.asarray(group) for group in self.settings.channel_clusters])
+            if np.any((all_in < 0) | (all_in >= n_in)):
+                raise ValueError(
+                    "channel_clusters contains out-of-range input indices " f"(valid range: 0..{n_in - 1})"
                 )
-            else:
-                clusters = [np.asarray(group) for group in self.settings.channel_clusters]
-                all_idx = np.concatenate(clusters)
-                n_unique = len(np.unique(all_idx))
-                if n_unique != weights.shape[0]:
-                    raise ValueError(
-                        "channel_clusters must cover all channel indices 0..n-1 "
-                        f"(expected {weights.shape[0]} unique indices, got {n_unique})"
-                    )
-                max_cross = _max_cross_cluster_weight(weights, clusters)
-                if max_cross > 0:
-                    ez.logger.warning(
-                        f"Non-zero cross-cluster weights detected (max abs: {max_cross:.2e}). "
-                        "These will be ignored in block-diagonal multiplication."
-                    )
-        elif weights.shape[0] == weights.shape[1]:
+
+            # Derive output indices from non-zero weights for each input cluster
+            clusters = []
+            for group in self.settings.channel_clusters:
+                in_idx = np.asarray(group)
+                out_idx = np.where(np.any(weights[in_idx, :] != 0, axis=0))[0]
+                clusters.append((in_idx, out_idx))
+
+            max_cross = _max_cross_cluster_weight(weights, clusters)
+            if max_cross > 0:
+                ez.logger.warning(
+                    f"Non-zero cross-cluster weights detected (max abs: {max_cross:.2e}). "
+                    "These will be ignored in block-diagonal multiplication."
+                )
+        else:
             clusters = _find_block_diagonal_clusters(weights)
             if clusters is not None:
                 ez.logger.info(
-                    f"Auto-detected {len(clusters)} block-diagonal clusters " f"(sizes: {[len(c) for c in clusters]})"
+                    f"Auto-detected {len(clusters)} block-diagonal clusters "
+                    f"(sizes: {[(len(i), len(o)) for i, o in clusters]})"
                 )
 
         # Merge small clusters to avoid excessive loop overhead
@@ -225,24 +258,32 @@ class AffineTransformTransformer(
             clusters = _merge_small_clusters(clusters, self.settings.min_cluster_size)
 
         if clusters is not None and len(clusters) > 1:
-            perm = np.concatenate(clusters)
-            inv_perm = np.empty_like(perm)
-            inv_perm[perm] = np.arange(len(perm))
-            self._state.cluster_weights = [np.ascontiguousarray(weights[np.ix_(idx, idx)]) for idx in clusters]
-            self._state.cluster_perm = perm
-            self._state.cluster_inv_perm = inv_perm
+            in_perm = np.concatenate([c[0] for c in clusters])
+            out_perm = np.concatenate([c[1] for c in clusters])
+
+            out_inv_perm = np.empty(n_out, dtype=out_perm.dtype)
+            out_inv_perm[out_perm] = np.arange(len(out_perm))
+            # Omitted output channels map to zero-padded positions
+            omitted_out = np.setdiff1d(np.arange(n_out), out_perm)
+            if len(omitted_out) > 0:
+                out_inv_perm[omitted_out] = np.arange(len(out_perm), len(out_perm) + len(omitted_out))
+
+            self._state.cluster_weights = [
+                np.ascontiguousarray(weights[np.ix_(in_idx, out_idx)]) for in_idx, out_idx in clusters
+            ]
+            self._state.cluster_in_perm = in_perm
+            self._state.cluster_out_inv_perm = out_inv_perm
             self._state.weights = None
         else:
-            self._state.cluster_perm = None
-            self._state.cluster_inv_perm = None
+            self._state.cluster_in_perm = None
+            self._state.cluster_out_inv_perm = None
             self._state.cluster_weights = None
 
-        # --- Axis label handling (for non-square transforms) ---
+        # --- Axis label handling (for non-square transforms, non-cluster path) ---
         axis = self.settings.axis or message.dims[-1]
-        if axis in message.axes and hasattr(message.axes[axis], "data") and weights.shape[0] != weights.shape[1]:
+        if axis in message.axes and hasattr(message.axes[axis], "data") and n_in != n_out:
             in_labels = message.axes[axis].data
             new_labels = []
-            n_in, n_out = weights.shape
             if len(in_labels) != n_in:
                 ez.logger.warning(f"Received {len(in_labels)} for {n_in} inputs. Check upstream labels.")
             else:
@@ -268,16 +309,17 @@ class AffineTransformTransformer(
         xp = get_namespace(message.data)
         if self._state.weights is not None:
             self._state.weights = xp.asarray(self._state.weights)
-        if self._state.cluster_perm is not None:
-            self._state.cluster_perm = xp.asarray(self._state.cluster_perm)
-            self._state.cluster_inv_perm = xp.asarray(self._state.cluster_inv_perm)
+        if self._state.cluster_in_perm is not None:
+            self._state.cluster_in_perm = xp.asarray(self._state.cluster_in_perm)
+            self._state.cluster_out_inv_perm = xp.asarray(self._state.cluster_out_inv_perm)
             self._state.cluster_weights = [xp.asarray(w) for w in self._state.cluster_weights]
 
     def _block_diagonal_matmul(self, xp, data, axis_idx):
         """Perform matmul using block-diagonal decomposition.
 
-        Permutes channels into cluster-sorted order, performs per-cluster
-        matmuls on contiguous slices, then restores the original channel order.
+        Sorts input channels by cluster, performs per-cluster matmuls on
+        contiguous slices, then restores the original output channel order.
+        Supports both square and non-square block-diagonal weight matrices.
         """
         needs_permute = axis_idx not in [-1, data.ndim - 1]
         if needs_permute:
@@ -285,23 +327,39 @@ class AffineTransformTransformer(
             dim_perm.append(dim_perm.pop(axis_idx))
             data = xp.permute_dims(data, dim_perm)
 
-        # Sort channels by cluster for contiguous access (last axis)
-        sorted_data = xp.take(data, self._state.cluster_perm, axis=data.ndim - 1)
+        # Sort input channels by cluster for contiguous access (last axis)
+        # TODO: Is xp.take a copy or a view? If it's a copy then we might be better off
+        #  just doing indexing on the input on-the-fly.
+        sorted_data = xp.take(data, self._state.cluster_in_perm, axis=data.ndim - 1)
 
         # Matmul each cluster block
+        # TODO: What if we initialized the output to zeros of the correct shape
+        #  then for each cluster we indexed into the output[..., output_indices] += xp.matmul(...)?
+        #  This would allow for clusters with partial overlap.
         pieces = []
         offset = 0
         for sub_weights in self._state.cluster_weights:
-            n = sub_weights.shape[0]
-            pieces.append(xp.matmul(sorted_data[..., offset : offset + n], sub_weights))
-            offset += n
+            n_in = sub_weights.shape[0]
+            pieces.append(xp.matmul(sorted_data[..., offset : offset + n_in], sub_weights))
+            offset += n_in
 
-        # Concatenate and restore original channel order
+        # Concatenate and restore original output channel order
         sorted_result = xp.concat(pieces, axis=data.ndim - 1)
-        result = xp.take(sorted_result, self._state.cluster_inv_perm, axis=data.ndim - 1)
+
+        # Zero-pad for any output channels omitted from clusters
+        n_out = self._state.cluster_out_inv_perm.shape[0]
+        n_omitted = n_out - sorted_result.shape[-1]
+        if n_omitted > 0:
+            pad_shape = sorted_result.shape[:-1] + (n_omitted,)
+            sorted_result = xp.concat(
+                [sorted_result, xp.zeros(pad_shape, dtype=sorted_result.dtype)],
+                axis=data.ndim - 1,
+            )
+
+        result = xp.take(sorted_result, self._state.cluster_out_inv_perm, axis=data.ndim - 1)
 
         if needs_permute:
-            inv_dim_perm = list(range(data.ndim))
+            inv_dim_perm = list(range(result.ndim))
             inv_dim_perm.insert(axis_idx, inv_dim_perm.pop(-1))
             result = xp.permute_dims(result, inv_dim_perm)
 
@@ -313,7 +371,7 @@ class AffineTransformTransformer(
         axis_idx = message.get_axis_idx(axis)
         data = message.data
 
-        if self._state.cluster_perm is not None:
+        if self._state.cluster_in_perm is not None:
             data = self._block_diagonal_matmul(xp, data, axis_idx)
         else:
             if data.shape[axis_idx] == (self._state.weights.shape[0] - 1):
