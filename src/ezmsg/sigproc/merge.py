@@ -6,6 +6,7 @@ import typing
 
 import ezmsg.core as ez
 import numpy as np
+from array_api_compat import get_namespace
 from ezmsg.baseproc.protocols import processor_state
 from ezmsg.baseproc.stateful import BaseStatefulTransformer
 from ezmsg.baseproc.units import BaseProcessorUnit
@@ -135,8 +136,8 @@ class MergeProcessor(BaseStatefulTransformer[MergeSettings, AxisArray, AxisArray
         """Process input A: detect structural changes, buffer, try merge."""
         # Detect per-input structural changes.
         align_idx = message.dims.index(self._state.align_axis)
-        concat_idx = message.get_axis_idx(self.settings.axis)
-        concat_dim = message.data.shape[concat_idx]
+        concat_idx = message.dims.index(self.settings.axis) if self.settings.axis in message.dims else None
+        concat_dim = message.data.shape[concat_idx] if concat_idx is not None else None
         other_dims = tuple(s for i, s in enumerate(message.data.shape) if i != align_idx and i != concat_idx)
 
         if self._state.a_concat_dim is not None and concat_dim != self._state.a_concat_dim:
@@ -178,8 +179,8 @@ class MergeProcessor(BaseStatefulTransformer[MergeSettings, AxisArray, AxisArray
 
         # Detect per-input structural changes.
         align_idx = message.dims.index(align_axis)
-        concat_idx = message.get_axis_idx(self.settings.axis)
-        concat_dim = message.data.shape[concat_idx]
+        concat_idx = message.dims.index(self.settings.axis) if self.settings.axis in message.dims else None
+        concat_dim = message.data.shape[concat_idx] if concat_idx is not None else None
         other_dims = tuple(s for i, s in enumerate(message.data.shape) if i != align_idx and i != concat_idx)
 
         if self._state.b_concat_dim is not None and concat_dim != self._state.b_concat_dim:
@@ -301,12 +302,22 @@ class MergeProcessor(BaseStatefulTransformer[MergeSettings, AxisArray, AxisArray
 
     def _concat(self, a: AxisArray, b: AxisArray) -> AxisArray:
         """Concatenate *a* and *b* along the configured merge axis."""
+        merge_dim = self.settings.axis
+
+        # If the merge dim doesn't exist in an input, add it as a trailing axis.
+        if merge_dim not in a.dims:
+            xp = get_namespace(a.data)
+            a = replace(a, data=xp.expand_dims(a.data, axis=-1), dims=[*a.dims, merge_dim])
+        if merge_dim not in b.dims:
+            xp = get_namespace(b.data)
+            b = replace(b, data=xp.expand_dims(b.data, axis=-1), dims=[*b.dims, merge_dim])
+
         # Use the cached merged axis (rebuilt lazily when labels change).
         if self._state.merged_concat_axis is None:
             self._state.merged_concat_axis = self._build_merged_concat_axis()
 
         key = self.settings.new_key if self.settings.new_key is not None else a.key
-        result = AxisArray.concatenate(a, b, dim=self.settings.axis, axis=self._state.merged_concat_axis)
+        result = AxisArray.concatenate(a, b, dim=merge_dim, axis=self._state.merged_concat_axis)
         if key != result.key:
             result = replace(result, key=key)
         return result

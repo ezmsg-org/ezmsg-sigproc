@@ -342,3 +342,28 @@ class TestNoRelabel:
         ch_ax = merged.axes["ch"]
         labels = list(ch_ax.data)
         assert labels == ["A0", "A1", "B0", "B1", "B2"]
+
+
+class TestNewAxisMerge:
+    """Merge along an axis that doesn't exist in either input."""
+
+    def test_merge_on_new_axis(self):
+        """Two streams with identical dims merged on a new 'feature' axis."""
+        settings = MergeSettings(axis="feature", relabel_axis=False)
+        proc = MergeProcessor(settings)
+        fs = 100.0
+        n = 5
+
+        data_a = np.ones((n, 3))
+        data_b = np.ones((n, 3)) * 2
+        msg_a = _make_msg(data_a, fs=fs, ch_labels=["C0", "C1", "C2"])
+        msg_b = _make_msg(data_b, fs=fs, ch_labels=["C0", "C1", "C2"])
+
+        proc(msg_a)
+        merged = proc.push_b(msg_b)
+        assert merged is not None
+        # New trailing 'feature' axis with size 2.
+        assert merged.data.shape == (n, 3, 2)
+        np.testing.assert_array_equal(merged.data[:, :, 0], 1.0)
+        np.testing.assert_array_equal(merged.data[:, :, 1], 2.0)
+        assert "feature" in merged.dims
