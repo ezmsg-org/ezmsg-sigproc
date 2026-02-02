@@ -2,6 +2,7 @@ import typing
 
 import ezmsg.core as ez
 import numpy as np
+from array_api_compat import get_namespace
 from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
@@ -132,15 +133,20 @@ class AdaptiveStandardScalerTransformer(
             self._state.vars_sq_ewma.settings = replace(self._state.vars_sq_ewma.settings, accumulate=value)
 
     def _process(self, message: AxisArray) -> AxisArray:
+        xp = get_namespace(message.data)
+
         # Update step (respects accumulate setting via child EWMAs)
         mean_message = self._state.samps_ewma(message)
         var_sq_message = self._state.vars_sq_ewma(replace(message, data=message.data**2))
 
-        # Get step
+        # Get step: safe division avoids warnings from zero/negative variance
         varis = var_sq_message.data - mean_message.data**2
-        with np.errstate(divide="ignore", invalid="ignore"):
-            result = (message.data - mean_message.data) / (varis**0.5)
-        result[np.isnan(result)] = 0.0
+        std = varis**0.5
+        mask = std > 0
+        safe_std = xp.where(mask, std, xp.asarray(1.0, dtype=std.dtype))
+        result = xp.where(
+            mask, (message.data - mean_message.data) / safe_std, xp.asarray(0.0, dtype=message.data.dtype)
+        )
         return replace(message, data=result)
 
 
