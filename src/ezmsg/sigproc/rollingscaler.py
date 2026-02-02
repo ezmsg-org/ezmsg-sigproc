@@ -1,8 +1,9 @@
+import math
 from collections import deque
 
 import ezmsg.core as ez
-import numpy as np
 import numpy.typing as npt
+from array_api_compat import get_namespace
 from ezmsg.baseproc import (
     BaseAdaptiveTransformer,
     BaseAdaptiveTransformerUnit,
@@ -111,12 +112,13 @@ class RollingScalerProcessor(BaseAdaptiveTransformer[RollingScalerSettings, Axis
         return hash((message.key, samp_shape, gain))
 
     def _reset_state(self, message: AxisArray) -> None:
+        xp = get_namespace(message.data)
         ch = message.data.shape[-1]
-        self._state.mean = np.zeros(ch)
+        self._state.mean = xp.zeros(ch, dtype=xp.float64)
         self._state.N = 0
-        self._state.M2 = np.zeros(ch)
+        self._state.M2 = xp.zeros(ch, dtype=xp.float64)
         self._state.k_samples = (
-            int(np.ceil(self.settings.window_size / message.axes[self.settings.axis].gain))
+            math.ceil(self.settings.window_size / message.axes[self.settings.axis].gain)
             if self.settings.window_size is not None
             else self.settings.k_samples
         )
@@ -127,7 +129,7 @@ class RollingScalerProcessor(BaseAdaptiveTransformer[RollingScalerSettings, Axis
             ez.logger.warning("k_samples is None; z-score accumulation will be unbounded.")
         self._state.samples = deque(maxlen=self._state.k_samples)
         self._state.min_samples = (
-            int(np.ceil(self.settings.min_seconds / message.axes[self.settings.axis].gain))
+            math.ceil(self.settings.min_seconds / message.axes[self.settings.axis].gain)
             if self.settings.window_size is not None
             else self.settings.min_samples
         )
@@ -136,10 +138,11 @@ class RollingScalerProcessor(BaseAdaptiveTransformer[RollingScalerSettings, Axis
             self._state.min_samples = self._state.k_samples
 
     def _add_batch_stats(self, x: npt.NDArray) -> None:
-        x = np.asarray(x, dtype=np.float64)
+        xp = get_namespace(x)
+        x = xp.asarray(x, dtype=xp.float64)
         n_b = x.shape[0]
-        mean_b = np.mean(x, axis=0)
-        M2_b = np.sum((x - mean_b) ** 2, axis=0)
+        mean_b = xp.mean(x, axis=0)
+        M2_b = xp.sum((x - mean_b) ** 2, axis=0)
 
         if self._state.k_samples is not None and len(self._state.samples) == self._state.k_samples:
             n_old, mean_old, M2_old = self._state.samples.popleft()
@@ -148,8 +151,8 @@ class RollingScalerProcessor(BaseAdaptiveTransformer[RollingScalerSettings, Axis
 
             if N_new <= 0:
                 self._state.N = 0
-                self._state.mean = np.zeros_like(self._state.mean)
-                self._state.M2 = np.zeros_like(self._state.M2)
+                self._state.mean = xp.zeros_like(self._state.mean)
+                self._state.M2 = xp.zeros_like(self._state.M2)
             else:
                 delta = mean_old - self._state.mean
                 self._state.N = N_new
@@ -170,32 +173,37 @@ class RollingScalerProcessor(BaseAdaptiveTransformer[RollingScalerSettings, Axis
         self._add_batch_stats(x)
 
     def _process(self, message: AxisArray) -> AxisArray:
+        xp = get_namespace(message.data)
+
         if self._state.N == 0 or self._state.N < self._state.min_samples:
             if self.settings.update_with_signal:
                 x = message.data
                 if self.settings.artifact_z_thresh is not None and self._state.N > 0:
                     varis = self._state.M2 / self._state.N
-                    std = np.maximum(np.sqrt(varis), 1e-8)
-                    z = np.abs((x - self._state.mean) / std)
-                    mask = np.any(z > self.settings.artifact_z_thresh, axis=1)
+                    raw_std = varis**0.5
+                    std = xp.where(xp.isnan(raw_std), raw_std, xp.clip(raw_std, min=1e-8))
+                    z = xp.abs((x - self._state.mean) / std)
+                    mask = xp.any(z > self.settings.artifact_z_thresh, axis=1)
                     x = x[~mask]
                 if x.size > 0:
                     self._add_batch_stats(x)
             return message
 
         varis = self._state.M2 / self._state.N
-        std = np.maximum(np.sqrt(varis), 1e-8)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            result = (message.data - self._state.mean) / std
-        result = np.nan_to_num(result, nan=0.0, posinf=0.0, neginf=0.0)
+        raw_std = varis**0.5
+        # Preserve NaN from negative variance (will be caught below), clip positive std to floor
+        std = xp.where(xp.isnan(raw_std), raw_std, xp.clip(raw_std, min=1e-8))
+        result = (message.data - self._state.mean) / std
+        # Replace NaN/inf with 0 (equivalent to nan_to_num with nan=0, posinf=0, neginf=0)
+        result = xp.where(xp.isfinite(result), result, xp.asarray(0.0, dtype=result.dtype))
         if self.settings.clip is not None:
-            result = np.clip(result, -self.settings.clip, self.settings.clip)
+            result = xp.clip(result, -self.settings.clip, self.settings.clip)
 
         if self.settings.update_with_signal:
             x = message.data
             if self.settings.artifact_z_thresh is not None:
-                z_scores = np.abs((x - self._state.mean) / std)
-                mask = np.any(z_scores > self.settings.artifact_z_thresh, axis=1)
+                z_scores = xp.abs((x - self._state.mean) / std)
+                mask = xp.any(z_scores > self.settings.artifact_z_thresh, axis=1)
                 x = x[~mask]
             if x.size > 0:
                 self._add_batch_stats(x)
