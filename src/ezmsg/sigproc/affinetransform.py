@@ -215,58 +215,11 @@ class AffineTransformTransformer(
         if weights is not None:
             weights = np.ascontiguousarray(weights)
 
-        self._state.weights = weights
-
-        # Note: If weights were scipy.sparse BSR then maybe we could use automate this next part.
-        #  However, that would break compatibility with Array API.
-
-        # --- Block-diagonal cluster detection ---
-        # Clusters are a list of (input_indices, output_indices) tuples.
-        n_in, n_out = weights.shape
-        if self.settings.channel_clusters is not None:
-            # Validate input index bounds
-            all_in = np.concatenate([np.asarray(group) for group in self.settings.channel_clusters])
-            if np.any((all_in < 0) | (all_in >= n_in)):
-                raise ValueError(
-                    "channel_clusters contains out-of-range input indices " f"(valid range: 0..{n_in - 1})"
-                )
-
-            # Derive output indices from non-zero weights for each input cluster
-            clusters = []
-            for group in self.settings.channel_clusters:
-                in_idx = np.asarray(group)
-                out_idx = np.where(np.any(weights[in_idx, :] != 0, axis=0))[0]
-                clusters.append((in_idx, out_idx))
-
-            max_cross = _max_cross_cluster_weight(weights, clusters)
-            if max_cross > 0:
-                ez.logger.warning(
-                    f"Non-zero cross-cluster weights detected (max abs: {max_cross:.2e}). "
-                    "These will be ignored in block-diagonal multiplication."
-                )
-        else:
-            clusters = _find_block_diagonal_clusters(weights)
-            if clusters is not None:
-                ez.logger.info(
-                    f"Auto-detected {len(clusters)} block-diagonal clusters "
-                    f"(sizes: {[(len(i), len(o)) for i, o in clusters]})"
-                )
-
-        # Merge small clusters to avoid excessive loop overhead
-        if clusters is not None:
-            clusters = _merge_small_clusters(clusters, self.settings.min_cluster_size)
-
-        if clusters is not None and len(clusters) > 1:
-            self._state.n_out = n_out
-            self._state.clusters = [
-                (in_idx, out_idx, np.ascontiguousarray(weights[np.ix_(in_idx, out_idx)]))
-                for in_idx, out_idx in clusters
-            ]
-            self._state.weights = None
-        else:
-            self._state.clusters = None
+        # Cluster detection + weight storage (delegated)
+        self.set_weights(weights, recalc_clusters=True)
 
         # --- Axis label handling (for non-square transforms, non-cluster path) ---
+        n_in, n_out = weights.shape
         axis = self.settings.axis or message.dims[-1]
         if axis in message.axes and hasattr(message.axes[axis], "data") and n_in != n_out:
             in_labels = message.axes[axis].data
@@ -301,6 +254,80 @@ class AffineTransformTransformer(
                 (xp.asarray(in_idx), xp.asarray(out_idx), xp.asarray(sub_w))
                 for in_idx, out_idx, sub_w in self._state.clusters
             ]
+
+    def set_weights(self, weights, *, recalc_clusters=False) -> None:
+        """Replace weight values, optionally recalculating cluster decomposition.
+
+        *weights* must be in **canonical orientation** (``right_multiply``
+        already applied by the caller or by ``_reset_state``).  The array may
+        live in any Array-API namespace (NumPy, CuPy, etc.).
+
+        Args:
+            weights: Weight matrix in canonical orientation.
+            recalc_clusters: When True, re-run block-diagonal cluster detection
+                and store the new decomposition.  When False (default), reuse
+                the existing cluster structure and only update weight values.
+        """
+        if recalc_clusters:
+            # Note: If weights were scipy.sparse BSR then maybe we could automate this next part.
+            #  However, that would break compatibility with Array API.
+
+            # --- Block-diagonal cluster detection ---
+            # Clusters are a list of (input_indices, output_indices) tuples.
+            w_np = np.ascontiguousarray(weights)
+            n_in, n_out = w_np.shape
+            if self.settings.channel_clusters is not None:
+                # Validate input index bounds
+                all_in = np.concatenate([np.asarray(group) for group in self.settings.channel_clusters])
+                if np.any((all_in < 0) | (all_in >= n_in)):
+                    raise ValueError(
+                        "channel_clusters contains out-of-range input indices " f"(valid range: 0..{n_in - 1})"
+                    )
+
+                # Derive output indices from non-zero weights for each input cluster
+                clusters = []
+                for group in self.settings.channel_clusters:
+                    in_idx = np.asarray(group)
+                    out_idx = np.where(np.any(w_np[in_idx, :] != 0, axis=0))[0]
+                    clusters.append((in_idx, out_idx))
+
+                max_cross = _max_cross_cluster_weight(w_np, clusters)
+                if max_cross > 0:
+                    ez.logger.warning(
+                        f"Non-zero cross-cluster weights detected (max abs: {max_cross:.2e}). "
+                        "These will be ignored in block-diagonal multiplication."
+                    )
+            else:
+                clusters = _find_block_diagonal_clusters(w_np)
+                if clusters is not None:
+                    ez.logger.info(
+                        f"Auto-detected {len(clusters)} block-diagonal clusters "
+                        f"(sizes: {[(len(i), len(o)) for i, o in clusters]})"
+                    )
+
+            # Merge small clusters to avoid excessive loop overhead
+            if clusters is not None:
+                clusters = _merge_small_clusters(clusters, self.settings.min_cluster_size)
+
+            if clusters is not None and len(clusters) > 1:
+                self._state.n_out = n_out
+                self._state.clusters = [
+                    (in_idx, out_idx, np.ascontiguousarray(w_np[np.ix_(in_idx, out_idx)]))
+                    for in_idx, out_idx in clusters
+                ]
+                self._state.weights = None
+            else:
+                self._state.weights = weights
+                self._state.clusters = None
+        else:
+            xp = get_namespace(weights)
+            if self._state.clusters is not None:
+                self._state.clusters = [
+                    (in_idx, out_idx, xp.take(xp.take(weights, in_idx, axis=0), out_idx, axis=1))
+                    for in_idx, out_idx, _ in self._state.clusters
+                ]
+            else:
+                self._state.weights = weights
 
     def _block_diagonal_matmul(self, xp, data, axis_idx):
         """Perform matmul using block-diagonal decomposition.
