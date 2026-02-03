@@ -23,6 +23,8 @@ from ezmsg.baseproc import (
 from ezmsg.util.messages.axisarray import AxisArray, AxisBase
 from ezmsg.util.messages.util import replace
 
+from ezmsg.sigproc.util.array import array_device, is_float_dtype, xp_asarray, xp_create
+
 
 def _find_block_diagonal_clusters(weights: np.ndarray) -> list[tuple[np.ndarray, np.ndarray]] | None:
     """Detect block-diagonal structure in a weight matrix.
@@ -245,13 +247,25 @@ class AffineTransformTransformer(
 
             self._state.new_axis = replace(message.axes[axis], data=np.array(new_labels))
 
-        # Convert to match message.data namespace for efficient operations in _process
+        # Convert to match message.data namespace and device for _process.
+        # Weights are stored as numpy float64 after cluster detection; some
+        # devices (e.g. MPS) don't support float64, so we downcast weight
+        # arrays to the message's dtype when the message is floating-point.
         xp = get_namespace(message.data)
+        dev = array_device(message.data)
+        msg_dt = message.data.dtype
+        # Downcast weights dtype only for float message data (avoids casting
+        # float weights to integer when message data happens to be int).
+        w_dt = msg_dt if is_float_dtype(xp, msg_dt) else None
         if self._state.weights is not None:
-            self._state.weights = xp.asarray(self._state.weights)
+            self._state.weights = xp_asarray(xp, self._state.weights, dtype=w_dt, device=dev)
         if self._state.clusters is not None:
             self._state.clusters = [
-                (xp.asarray(in_idx), xp.asarray(out_idx), xp.asarray(sub_w))
+                (
+                    xp_asarray(xp, in_idx, device=dev),
+                    xp_asarray(xp, out_idx, device=dev),
+                    xp_asarray(xp, sub_w, dtype=w_dt, device=dev),
+                )
                 for in_idx, out_idx, sub_w in self._state.clusters
             ]
 
@@ -345,7 +359,7 @@ class AffineTransformTransformer(
 
         # Pre-allocate output (omitted channels stay zero)
         out_shape = data.shape[:-1] + (self._state.n_out,)
-        result = xp.zeros(out_shape, dtype=data.dtype)
+        result = xp_create(xp.zeros, out_shape, dtype=data.dtype, device=array_device(data))
 
         for in_idx, out_idx, sub_weights in self._state.clusters:
             chunk = xp.take(data, in_idx, axis=data.ndim - 1)
@@ -371,7 +385,10 @@ class AffineTransformTransformer(
                 # The weights are stacked A|B where A is the transform and B is a single row
                 #  in the equation y = Ax + B. This supports NeuroKey's weights matrices.
                 sample_shape = data.shape[:axis_idx] + (1,) + data.shape[axis_idx + 1 :]
-                data = xp.concat((data, xp.ones(sample_shape, dtype=data.dtype)), axis=axis_idx)
+                data = xp.concat(
+                    (data, xp_create(xp.ones, sample_shape, dtype=data.dtype, device=array_device(data))),
+                    axis=axis_idx,
+                )
 
             if axis_idx in [-1, len(message.dims) - 1]:
                 data = xp.matmul(data, self._state.weights)
