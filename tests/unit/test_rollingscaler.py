@@ -6,7 +6,6 @@ from ezmsg.sigproc.rollingscaler import (
     RollingScalerProcessor,
     RollingScalerSettings,
 )
-from ezmsg.sigproc.sampler import SampleMessage
 
 
 def _axisarray_from_ndarray(x: np.ndarray, fs: float = 100.0, t0: float = 0.0) -> AxisArray:
@@ -47,7 +46,7 @@ def test_partial_fit_updates_and_process_uses_snapshot():
             [5.0, 3.0],
         ]
     )
-    proc.partial_fit(SampleMessage(trigger=None, sample=_axisarray_from_ndarray(epoch)))
+    proc.partial_fit(_axisarray_from_ndarray(epoch))
 
     x = np.array([[1.0, 3.0], [3.0, 3.0], [5.0, 3.0]])
     msg = _axisarray_from_ndarray(x)
@@ -68,7 +67,7 @@ def test_rolling_window_drops_oldest():
 
     def add_epoch(vals):
         arr = np.array(vals, dtype=float).reshape(-1, 1)
-        proc.partial_fit(SampleMessage(trigger=None, sample=_axisarray_from_ndarray(arr)))
+        proc.partial_fit(_axisarray_from_ndarray(arr))
 
     add_epoch([1, 1, 1, 1])
     add_epoch([3, 3])

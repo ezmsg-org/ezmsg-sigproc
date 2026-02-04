@@ -12,8 +12,6 @@ from ezmsg.baseproc import (
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
-from ezmsg.sigproc.sampler import SampleMessage
-
 
 class RollingScalerSettings(ez.Settings):
     axis: str = "time"
@@ -168,8 +166,8 @@ class RollingScalerProcessor(BaseAdaptiveTransformer[RollingScalerSettings, Axis
 
         self._state.samples.append((n_b, mean_b, M2_b))
 
-    def partial_fit(self, message: SampleMessage) -> None:
-        x = message.sample.data
+    def partial_fit(self, message: AxisArray) -> None:
+        x = message.data
         self._add_batch_stats(x)
 
     def _process(self, message: AxisArray) -> AxisArray:

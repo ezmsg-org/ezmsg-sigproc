@@ -90,8 +90,10 @@ def test_sampler_system(test_name: str | None = None):
     os.remove(test_filename)
     ez.logger.info(f"Analyzing recording of {len(messages)} messages...")
     assert len(messages) >= n_msgs
-    assert all([_.sample.data.shape == (int(freq * sample_dur), 1) for _ in messages])
+    assert all([_.data.shape == (int(freq * sample_dur), 1) for _ in messages])
     # Test the sample window slice vs the trigger timestamps
-    latencies = [_.sample.axes["time"].offset - (_.trigger.timestamp + _.trigger.period[0]) for _ in messages]
+    latencies = [
+        _.axes["time"].offset - (_.attrs["trigger"].timestamp + _.attrs["trigger"].period[0]) for _ in messages
+    ]
     assert all([0 <= _ < 1 / freq for _ in latencies])
     # Given that the input is a pure sinusoid, we could test that the signal has expected characteristics.

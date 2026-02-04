@@ -13,7 +13,7 @@ requires-python = ">=3.10.15"
 dynamic = ["version"]
 dependencies = [
   "array-api-compat>=1.11.1",
-  "ezmsg-baseproc>=1.1.0",
+  "ezmsg-baseproc>=1.3.0",
   "ezmsg>=3.6.0",
   "numba>=0.61.0",
   "numpy>=1.26.0",
