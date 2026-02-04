@@ -21,7 +21,7 @@ from ezmsg.util.messages.util import replace
 
 from .util.axisarray_buffer import HybridAxisArrayBuffer
 from .util.buffer import UpdateStrategy
-from .util.message import SampleMessage, SampleTriggerMessage
+from .util.message import SampleTriggerMessage
 from .util.profile import profile_subpub
 
 
@@ -75,17 +75,7 @@ class SamplerState:
 
 
 class SamplerTransformer(BaseStatefulTransformer[SamplerSettings, AxisArray, AxisArray, SamplerState]):
-    def __call__(self, message: AxisArray | SampleTriggerMessage) -> list[SampleMessage]:
-        # TODO: Currently we have a single entry point that accepts both
-        #  data and trigger messages and we choose a code path based on
-        #  the message type. However, in the future we will likely replace
-        #  SampleTriggerMessage with an agumented form of AxisArray,
-        #  leveraging its attrs field, which makes this a bit harder.
-        #  We should probably force callers of this object to explicitly
-        #  call `push_trigger` for trigger messages. This will also
-        #  simplify typing somewhat because `push_trigger` should not
-        #  return anything yet we currently have it returning an empty
-        #  list just to be compatible with __call__.
+    def __call__(self, message: AxisArray | SampleTriggerMessage) -> list[AxisArray]:
         if isinstance(message, AxisArray):
             return super().__call__(message)
         else:
@@ -109,7 +99,7 @@ class SamplerTransformer(BaseStatefulTransformer[SamplerSettings, AxisArray, Axi
             self._state.triggers = deque()
         self._state.triggers.clear()
 
-    def _process(self, message: AxisArray) -> list[SampleMessage]:
+    def _process(self, message: AxisArray) -> list[AxisArray]:
         self._state.buffer.write(message)
 
         # How much data in the buffer?
@@ -119,7 +109,7 @@ class SamplerTransformer(BaseStatefulTransformer[SamplerSettings, AxisArray, Axi
         )
 
         # Process in reverse order so that we can remove triggers safely as we iterate.
-        msgs_out: list[SampleMessage] = []
+        msgs_out: list[AxisArray] = []
         for trig_ix in range(len(self._state.triggers) - 1, -1, -1):
             trig = self._state.triggers[trig_ix]
             if trig.period is None:
@@ -152,13 +142,13 @@ class SamplerTransformer(BaseStatefulTransformer[SamplerSettings, AxisArray, Axi
             # Note: buffer will trim itself as needed based on buffer_dur.
 
             # Prepare output and drop trigger
-            msgs_out.append(SampleMessage(trigger=copy.copy(trig), sample=buff_axarr))
+            msgs_out.append(replace(buff_axarr, attrs={**buff_axarr.attrs, "trigger": copy.copy(trig)}))
             del self._state.triggers[trig_ix]
 
         msgs_out.reverse()  # in-place
         return msgs_out
 
-    def push_trigger(self, message: SampleTriggerMessage) -> list[SampleMessage]:
+    def push_trigger(self, message: SampleTriggerMessage) -> list[AxisArray]:
         # Input is a trigger message that we will use to sample the buffer.
 
         if self._state.buffer is None:
@@ -198,7 +188,7 @@ class Sampler(BaseTransformerUnit[SamplerSettings, AxisArray, AxisArray, Sampler
     SETTINGS = SamplerSettings
 
     INPUT_TRIGGER = ez.InputStream(SampleTriggerMessage)
-    OUTPUT_SIGNAL = ez.OutputStream(SampleMessage)
+    OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
 
     @ez.subscriber(INPUT_TRIGGER)
     async def on_trigger(self, msg: SampleTriggerMessage) -> None:
@@ -228,7 +218,8 @@ def sampler(
 
     Returns:
         A generator that expects `.send` either an :obj:`AxisArray` containing streaming data messages,
-        or a :obj:`SampleTriggerMessage` containing a trigger, and yields the list of :obj:`SampleMessage` s.
+        or a :obj:`SampleTriggerMessage` containing a trigger, and yields the list of :obj:`AxisArray` s
+        with trigger info stored in ``attrs["trigger"]``.
     """
     return SamplerTransformer(
         settings=SamplerSettings(

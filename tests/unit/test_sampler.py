@@ -70,9 +70,9 @@ def test_sampler():
 
     assert len(samples) == n_trigs
     # Check sample data size. Note: sampler puts the time axis first.
-    assert all([_.sample.data.shape == (int(fs * period_dur), n_chans) for _ in samples])
+    assert all([_.data.shape == (int(fs * period_dur), n_chans) for _ in samples])
     # Compare the sample window slice against the trigger timestamps
-    latencies = [_.sample.axes["time"].offset - (_.trigger.timestamp + _.trigger.period[0]) for _ in samples]
+    latencies = [_.axes["time"].offset - (_.attrs["trigger"].timestamp + _.attrs["trigger"].period[0]) for _ in samples]
     assert all([0 <= _ < 1 / fs for _ in latencies])
     # Check the sample trigger value matches the trigger input.
-    assert all([_.trigger.value == ["Start", "Stop"][ix % 2] for ix, _ in enumerate(samples)])
+    assert all([_.attrs["trigger"].value == ["Start", "Stop"][ix % 2] for ix, _ in enumerate(samples)])
