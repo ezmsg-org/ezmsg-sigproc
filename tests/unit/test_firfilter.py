@@ -9,6 +9,7 @@ from ezmsg.sigproc.firfilter import (
     FIRFilterTransformer,
     firwin_design_fun,
 )
+from tests.helpers.empty_time import check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
 
 
 @pytest.mark.parametrize(
@@ -283,3 +284,26 @@ def test_firfilter_kaiser_width():
 
     result = transformer(msg)
     assert result.data.shape == in_dat.shape
+
+
+def test_fir_empty_after_init():
+    from ezmsg.sigproc.firfilter import FIRFilterSettings, FIRFilterTransformer
+
+    proc = FIRFilterTransformer(FIRFilterSettings(order=10, cutoff=10.0, wn_hz=True, axis="time"))
+    normal = make_msg()
+    empty = make_empty_msg()
+    _ = proc(normal)
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)
+
+
+def test_fir_empty_first():
+    from ezmsg.sigproc.firfilter import FIRFilterSettings, FIRFilterTransformer
+
+    proc = FIRFilterTransformer(FIRFilterSettings(order=10, cutoff=10.0, wn_hz=True, axis="time"))
+    empty = make_empty_msg()
+    normal = make_msg()
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)

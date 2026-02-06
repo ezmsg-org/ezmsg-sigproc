@@ -10,6 +10,7 @@ from ezmsg.sigproc.ewma import (
     _tau_from_alpha,
     ewma_step,
 )
+from tests.helpers.empty_time import check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
 
 
 def test_tc_from_alpha():
@@ -160,3 +161,33 @@ def test_ewma_settings_accumulate_false():
     """Test that EWMASettings can be created with accumulate=False."""
     settings = EWMASettings(time_constant=1.0, accumulate=False)
     assert settings.accumulate is False
+
+
+def test_ewma_empty_after_init():
+    proc = EWMATransformer(settings=EWMASettings(time_constant=0.1, axis="time"))
+    normal = make_msg()
+    empty = make_empty_msg()
+    _ = proc(normal)
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)
+
+
+def test_ewma_empty_accumulate_false():
+    proc = EWMATransformer(settings=EWMASettings(time_constant=0.1, axis="time", accumulate=False))
+    normal = make_msg()
+    empty = make_empty_msg()
+    _ = proc(normal)
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)
+
+
+def test_ewma_empty_first():
+    """Empty message as first input triggers _reset_state on empty data."""
+    proc = EWMATransformer(settings=EWMASettings(time_constant=0.1, axis="time"))
+    empty = make_empty_msg()
+    normal = make_msg()
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)

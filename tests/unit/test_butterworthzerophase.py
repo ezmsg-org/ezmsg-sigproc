@@ -9,6 +9,7 @@ from ezmsg.sigproc.butterworthzerophase import (
     ButterworthZeroPhaseSettings,
     ButterworthZeroPhaseTransformer,
 )
+from tests.helpers.empty_time import check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
 
 
 def _compute_pad_length(
@@ -543,3 +544,30 @@ def test_composite_structure():
 
     # Backward should be ButterworthBackwardFilterTransformer
     assert isinstance(transformer._procs["backward"], ButterworthBackwardFilterTransformer)
+
+
+def test_bwzp_empty_after_init():
+    from ezmsg.sigproc.butterworthzerophase import ButterworthZeroPhaseSettings, ButterworthZeroPhaseTransformer
+
+    proc = ButterworthZeroPhaseTransformer(
+        ButterworthZeroPhaseSettings(order=2, cuton=1.0, cutoff=10.0, axis="time", max_pad_duration=0.01)
+    )
+    normal = make_msg(n_time=200)
+    empty = make_empty_msg()
+    _ = proc(normal)
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)
+
+
+def test_bwzp_empty_first():
+    from ezmsg.sigproc.butterworthzerophase import ButterworthZeroPhaseSettings, ButterworthZeroPhaseTransformer
+
+    proc = ButterworthZeroPhaseTransformer(
+        ButterworthZeroPhaseSettings(order=2, cuton=1.0, cutoff=10.0, axis="time", max_pad_duration=0.01)
+    )
+    empty = make_empty_msg()
+    normal = make_msg(n_time=200)
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)

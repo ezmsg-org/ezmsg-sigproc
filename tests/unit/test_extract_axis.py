@@ -3,6 +3,7 @@ import pytest
 from ezmsg.util.messages.axisarray import AxisArray
 
 from ezmsg.sigproc.extract_axis import ExtractAxisData
+from tests.helpers.empty_time import FS, N_CH
 
 
 @pytest.mark.parametrize(
@@ -61,3 +62,19 @@ class TestExtractAxisData:
         assert result.data.shape == (500, 32)
         assert np.array_equal(result.data, message.axes["freq"].data)
         assert np.shares_memory(result.data, message.axes["freq"].data)
+
+
+def test_extract_linear_axis_empty_time():
+    from ezmsg.sigproc.extract_axis import ExtractAxisData, ExtractAxisSettings
+
+    msg = AxisArray(
+        data=np.empty((0, N_CH)),
+        dims=["time", "ch"],
+        axes={
+            "time": AxisArray.TimeAxis(fs=FS),
+            "ch": AxisArray.CoordinateAxis(data=np.arange(N_CH).astype(str), dims=["ch"]),
+        },
+    )
+    proc = ExtractAxisData(ExtractAxisSettings(axis="time", reference="time"))
+    result = proc(msg)
+    assert result.data.size == 0

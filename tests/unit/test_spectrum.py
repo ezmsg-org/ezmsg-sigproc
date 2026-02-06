@@ -13,6 +13,7 @@ from ezmsg.sigproc.spectrum import (
     SpectrumTransformer,
     WindowFunction,
 )
+from tests.helpers.empty_time import FS, N_CH
 from tests.helpers.util import (
     assert_messages_equal,
     create_messages_with_periodic_signal,
@@ -161,3 +162,80 @@ def test_spectrum_vs_sps_fft(complex: bool):
     else:
         sp_res = sp_fft.rfft(messages[0].data, n=nfft, axis=0).real
     assert np.allclose(test_spec, sp_res)
+
+
+def test_spectrum_empty_after_init():
+    """After processing normal windowed data, an empty-win message should pass through."""
+    from frozendict import frozendict
+
+    from ezmsg.sigproc.spectrum import SpectrumSettings, SpectrumTransformer
+
+    window_samples = 10
+    proc = SpectrumTransformer(SpectrumSettings(axis="time"))
+    normal = AxisArray(
+        data=np.random.randn(5, window_samples, N_CH).astype(np.float64),
+        dims=["win", "time", "ch"],
+        axes=frozendict(
+            {
+                "win": AxisArray.LinearAxis(gain=0.05, offset=0.0),
+                "time": AxisArray.TimeAxis(fs=FS),
+                "ch": AxisArray.CoordinateAxis(data=np.arange(N_CH).astype(str), dims=["ch"]),
+            }
+        ),
+    )
+    empty = AxisArray(
+        data=np.random.randn(0, window_samples, N_CH).astype(np.float64),
+        dims=["win", "time", "ch"],
+        axes=frozendict(
+            {
+                "win": AxisArray.LinearAxis(gain=0.05, offset=0.0),
+                "time": AxisArray.TimeAxis(fs=FS),
+                "ch": AxisArray.CoordinateAxis(data=np.arange(N_CH).astype(str), dims=["ch"]),
+            }
+        ),
+    )
+    result1 = proc(normal)
+    assert result1.data.shape[0] == 5
+    result = proc(empty)
+    assert result.data.shape[0] == 0
+    assert result.data.shape[2] == N_CH
+    result3 = proc(normal)
+    assert result3.data.shape[0] == 5
+    assert np.all(np.isfinite(result3.data))
+
+
+def test_spectrum_empty_first():
+    """Empty-win message as first input."""
+    from frozendict import frozendict
+
+    from ezmsg.sigproc.spectrum import SpectrumSettings, SpectrumTransformer
+
+    window_samples = 10
+    proc = SpectrumTransformer(SpectrumSettings(axis="time"))
+    empty = AxisArray(
+        data=np.random.randn(0, window_samples, N_CH).astype(np.float64),
+        dims=["win", "time", "ch"],
+        axes=frozendict(
+            {
+                "win": AxisArray.LinearAxis(gain=0.05, offset=0.0),
+                "time": AxisArray.TimeAxis(fs=FS),
+                "ch": AxisArray.CoordinateAxis(data=np.arange(N_CH).astype(str), dims=["ch"]),
+            }
+        ),
+    )
+    normal = AxisArray(
+        data=np.random.randn(5, window_samples, N_CH).astype(np.float64),
+        dims=["win", "time", "ch"],
+        axes=frozendict(
+            {
+                "win": AxisArray.LinearAxis(gain=0.05, offset=0.0),
+                "time": AxisArray.TimeAxis(fs=FS),
+                "ch": AxisArray.CoordinateAxis(data=np.arange(N_CH).astype(str), dims=["ch"]),
+            }
+        ),
+    )
+    result = proc(empty)
+    assert result.data.shape[0] == 0
+    result2 = proc(normal)
+    assert result2.data.shape[0] == 5
+    assert np.all(np.isfinite(result2.data))

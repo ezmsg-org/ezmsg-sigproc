@@ -5,6 +5,7 @@ import pytest
 from ezmsg.util.messages.axisarray import AxisArray
 
 from ezmsg.sigproc.slicer import SlicerSettings, SlicerTransformer, parse_slice
+from tests.helpers.empty_time import check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
 from tests.helpers.util import assert_messages_equal
 
 
@@ -114,3 +115,37 @@ def test_slicer_label(selection: str):
     assert msg_out.data.shape == (n_times, 3)
     assert np.array_equal(msg_out.data, msg_in.data[:, :3])
     assert np.array_equal(msg_out.axes["ch"].data, msg_in.axes["ch"].data[:3])
+
+
+def test_slicer_empty_along_ch():
+    from ezmsg.sigproc.slicer import SlicerSettings, SlicerTransformer
+
+    proc = SlicerTransformer(SlicerSettings(selection="0:2", axis="ch"))
+    normal = make_msg()
+    empty = make_empty_msg()
+    _ = proc(normal)
+    result = proc(empty)
+    check_empty_result(result)
+    assert result.data.shape[1] == 2
+
+
+def test_slicer_empty_along_time():
+    from ezmsg.sigproc.slicer import SlicerSettings, SlicerTransformer
+
+    proc = SlicerTransformer(SlicerSettings(selection=":", axis="time"))
+    normal = make_msg()
+    empty = make_empty_msg()
+    _ = proc(normal)
+    result = proc(empty)
+    check_empty_result(result)
+
+
+def test_slicer_empty_first():
+    from ezmsg.sigproc.slicer import SlicerSettings, SlicerTransformer
+
+    proc = SlicerTransformer(SlicerSettings(selection="0:2", axis="ch"))
+    empty = make_empty_msg()
+    normal = make_msg()
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)

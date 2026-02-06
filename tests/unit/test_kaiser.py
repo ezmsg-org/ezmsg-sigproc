@@ -9,6 +9,7 @@ from ezmsg.sigproc.kaiser import (
     KaiserFilterTransformer,
     kaiser_design_fun,
 )
+from tests.helpers.empty_time import check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
 
 
 @pytest.mark.parametrize(
@@ -418,3 +419,26 @@ def test_kaiser_higher_ripple_more_taps():
 
     # Higher ripple should require more taps
     assert len(b_high) > len(b_low)
+
+
+def test_kaiser_empty_after_init():
+    from ezmsg.sigproc.kaiser import KaiserFilterSettings, KaiserFilterTransformer
+
+    proc = KaiserFilterTransformer(KaiserFilterSettings(cutoff=10.0, ripple=60.0, width=5.0, wn_hz=True, axis="time"))
+    normal = make_msg()
+    empty = make_empty_msg()
+    _ = proc(normal)
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)
+
+
+def test_kaiser_empty_first():
+    from ezmsg.sigproc.kaiser import KaiserFilterSettings, KaiserFilterTransformer
+
+    proc = KaiserFilterTransformer(KaiserFilterSettings(cutoff=10.0, ripple=60.0, width=5.0, wn_hz=True, axis="time"))
+    empty = make_empty_msg()
+    normal = make_msg()
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)

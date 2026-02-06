@@ -6,6 +6,7 @@ from ezmsg.util.messages.axisarray import AxisArray
 from frozendict import frozendict
 
 from ezmsg.sigproc.quantize import QuantizeTransformer
+from tests.helpers.empty_time import check_empty_result, make_empty_msg
 from tests.helpers.util import assert_messages_equal
 
 
@@ -82,3 +83,9 @@ def test_quantize(bits: int):
             assert output_msg.data[0, 1] == 1
             assert output_msg.data[0, 5] == 2**bits - 2
             assert output_msg.data[0, 6] == 2**bits - 1
+
+
+def test_quantize_empty_time():
+    proc = QuantizeTransformer(max_val=1.0, min_val=0.0, bits=8)
+    result = proc(make_empty_msg())
+    check_empty_result(result)

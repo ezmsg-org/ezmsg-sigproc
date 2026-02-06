@@ -8,6 +8,7 @@ from ezmsg.sigproc.linear import (
     LinearTransformSettings,
     LinearTransformTransformer,
 )
+from tests.helpers.empty_time import check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
 from tests.helpers.util import assert_messages_equal
 
 
@@ -305,3 +306,38 @@ class TestLinearTransformEdgeCases:
             ]
         )
         assert np.allclose(msg_out.data, expected)
+
+
+def test_linear_empty_scalar():
+    from ezmsg.sigproc.linear import LinearTransformSettings, LinearTransformTransformer
+
+    proc = LinearTransformTransformer(LinearTransformSettings(scale=2.0, offset=1.0))
+    normal = make_msg()
+    empty = make_empty_msg()
+    _ = proc(normal)
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)
+
+
+def test_linear_empty_per_channel():
+    from ezmsg.sigproc.linear import LinearTransformSettings, LinearTransformTransformer
+
+    proc = LinearTransformTransformer(LinearTransformSettings(scale=[1.0, 2.0, 3.0], offset=[0.0, 0.1, 0.2], axis="ch"))
+    normal = make_msg()
+    empty = make_empty_msg()
+    _ = proc(normal)
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)
+
+
+def test_linear_empty_first():
+    from ezmsg.sigproc.linear import LinearTransformSettings, LinearTransformTransformer
+
+    proc = LinearTransformTransformer(LinearTransformSettings(scale=2.0, offset=1.0))
+    empty = make_empty_msg()
+    normal = make_msg()
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)

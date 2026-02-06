@@ -15,6 +15,7 @@ from ezmsg.sigproc.coordinatespaces import (
     z2cart,
     z2polar,
 )
+from tests.helpers.empty_time import FS, check_empty_result
 from tests.helpers.util import assert_messages_equal
 
 
@@ -270,3 +271,17 @@ class TestCoordinateSpacesTransformer:
             msg_in = AxisArray(data, dims=["time", "ch"])
             msg_out = transformer(msg_in)
             assert msg_out.data.shape == data.shape
+
+
+def test_cart2pol_empty_time():
+    msg = AxisArray(
+        data=np.empty((0, 2)),
+        dims=["time", "coord"],
+        axes={
+            "time": AxisArray.TimeAxis(fs=FS),
+            "coord": AxisArray.CoordinateAxis(data=np.array(["x", "y"]), dims=["coord"]),
+        },
+    )
+    proc = CoordinateSpacesTransformer(CoordinateSpacesSettings(mode=CoordinateMode.CART2POL, axis="coord"))
+    result = proc(msg)
+    check_empty_result(result)

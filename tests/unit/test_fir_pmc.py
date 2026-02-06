@@ -2,6 +2,7 @@ import numpy as np
 import scipy.signal as sps
 
 from ezmsg.sigproc.fir_pmc import parks_mcclellan_design_fun
+from tests.helpers.empty_time import check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
 
 
 def test_pmcfir_behavior():
@@ -91,3 +92,26 @@ def test_pmcfir_design_quality():
     att_hi_db = 20 * np.log10(np.maximum(mag[stop_hi], 1e-12) / ref)
     assert np.median(att_lo_db) < -20
     assert np.median(att_hi_db) < -20
+
+
+def test_pmc_empty_after_init():
+    from ezmsg.sigproc.fir_pmc import ParksMcClellanFIRSettings, ParksMcClellanFIRTransformer
+
+    proc = ParksMcClellanFIRTransformer(ParksMcClellanFIRSettings(order=10, cuton=5.0, cutoff=15.0, axis="time"))
+    normal = make_msg()
+    empty = make_empty_msg()
+    _ = proc(normal)
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)
+
+
+def test_pmc_empty_first():
+    from ezmsg.sigproc.fir_pmc import ParksMcClellanFIRSettings, ParksMcClellanFIRTransformer
+
+    proc = ParksMcClellanFIRTransformer(ParksMcClellanFIRSettings(order=10, cuton=5.0, cutoff=15.0, axis="time"))
+    empty = make_empty_msg()
+    normal = make_msg()
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)

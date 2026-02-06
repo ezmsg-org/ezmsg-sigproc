@@ -13,6 +13,7 @@ from ezmsg.sigproc.aggregate import (
     RangedAggregateSettings,
     RangedAggregateTransformer,
 )
+from tests.helpers.empty_time import check_empty_result, make_empty_msg
 from tests.helpers.util import assert_messages_equal
 
 
@@ -378,3 +379,30 @@ def test_aggregate_transformer_multiple_calls():
 
         expected = np.sum(msg_in.data, axis=2)
         assert np.allclose(msg_out.data, expected)
+
+
+def test_aggregate_empty_mean():
+    from ezmsg.sigproc.aggregate import AggregateSettings, AggregateTransformer, AggregationFunction
+
+    proc = AggregateTransformer(AggregateSettings(axis="ch", operation=AggregationFunction.MEAN))
+    empty = make_empty_msg()
+    result = proc(empty)
+    assert result.data.shape == (0,)
+
+
+def test_aggregate_empty_sum():
+    from ezmsg.sigproc.aggregate import AggregateSettings, AggregateTransformer, AggregationFunction
+
+    proc = AggregateTransformer(AggregateSettings(axis="ch", operation=AggregationFunction.SUM))
+    empty = make_empty_msg()
+    result = proc(empty)
+    assert result.data.shape == (0,)
+
+
+def test_ranged_aggregate_empty_passthrough():
+    from ezmsg.sigproc.aggregate import RangedAggregateSettings, RangedAggregateTransformer
+
+    proc = RangedAggregateTransformer(RangedAggregateSettings(bands=None))
+    empty = make_empty_msg()
+    result = proc(empty)
+    check_empty_result(result)

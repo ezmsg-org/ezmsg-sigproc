@@ -7,6 +7,7 @@ from ezmsg.sigproc.combfilter import (
     CombFilterTransformer,
     comb_design_fun,
 )
+from tests.helpers.empty_time import check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
 
 
 def test_comb_filter_design():
@@ -315,3 +316,26 @@ def test_comb_filter_update_settings():
     # Verify that the filter behavior changed correctly
     assert np.all((power2[0, :, 0] / power0[0, :, 0]) > 0.9)  # 50Hz and harmonics should be mostly preserved
     assert np.all((power2[1, :, 1] / power0[1, :, 1]) < 0.02)  # 60Hz and harmonics should be attenuated
+
+
+def test_comb_empty_after_init():
+    from ezmsg.sigproc.combfilter import CombFilterSettings, CombFilterTransformer
+
+    proc = CombFilterTransformer(CombFilterSettings(fundamental_freq=10.0, num_harmonics=2, q_factor=30.0, axis="time"))
+    normal = make_msg()
+    empty = make_empty_msg()
+    _ = proc(normal)
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)
+
+
+def test_comb_empty_first():
+    from ezmsg.sigproc.combfilter import CombFilterSettings, CombFilterTransformer
+
+    proc = CombFilterTransformer(CombFilterSettings(fundamental_freq=10.0, num_harmonics=2, q_factor=30.0, axis="time"))
+    empty = make_empty_msg()
+    normal = make_msg()
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)

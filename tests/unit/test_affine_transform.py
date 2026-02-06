@@ -14,6 +14,7 @@ from ezmsg.sigproc.affinetransform import (
     _max_cross_cluster_weight,
     _merge_small_clusters,
 )
+from tests.helpers.empty_time import N_CH, check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
 from tests.helpers.util import assert_messages_equal
 
 
@@ -781,3 +782,81 @@ def test_nonsquare_non_last_axis():
 
     assert msg_out.data.shape == expected.shape
     assert np.allclose(msg_out.data, expected)
+
+
+def test_affine_empty_square():
+    from ezmsg.sigproc.affinetransform import AffineTransformSettings, AffineTransformTransformer
+
+    weights = np.eye(N_CH)
+    proc = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch"))
+    normal = make_msg()
+    empty = make_empty_msg()
+    _ = proc(normal)
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)
+
+
+def test_affine_empty_nonsquare():
+    from ezmsg.sigproc.affinetransform import AffineTransformSettings, AffineTransformTransformer
+
+    weights = np.random.randn(N_CH, 2)
+    proc = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch"))
+    normal = make_msg()
+    empty = make_empty_msg()
+    _ = proc(normal)
+    result = proc(empty)
+    check_empty_result(result)
+
+
+def test_affine_empty_passthrough():
+    from ezmsg.sigproc.affinetransform import AffineTransformSettings, AffineTransformTransformer
+
+    proc = AffineTransformTransformer(AffineTransformSettings(weights="passthrough", axis="ch"))
+    empty = make_empty_msg()
+    result = proc(empty)
+    check_empty_result(result)
+
+
+def test_affine_empty_first():
+    from ezmsg.sigproc.affinetransform import AffineTransformSettings, AffineTransformTransformer
+
+    weights = np.eye(N_CH)
+    proc = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch"))
+    empty = make_empty_msg()
+    normal = make_msg()
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)
+
+
+def test_common_rereference_empty_mean():
+    from ezmsg.sigproc.affinetransform import CommonRereferenceSettings, CommonRereferenceTransformer
+
+    proc = CommonRereferenceTransformer(CommonRereferenceSettings(mode="mean", axis="ch"))
+    normal = make_msg()
+    empty = make_empty_msg()
+    _ = proc(normal)
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)
+
+
+def test_common_rereference_empty_passthrough():
+    from ezmsg.sigproc.affinetransform import CommonRereferenceSettings, CommonRereferenceTransformer
+
+    proc = CommonRereferenceTransformer(CommonRereferenceSettings(mode="passthrough", axis="ch"))
+    empty = make_empty_msg()
+    result = proc(empty)
+    check_empty_result(result)
+
+
+def test_common_rereference_empty_first():
+    from ezmsg.sigproc.affinetransform import CommonRereferenceSettings, CommonRereferenceTransformer
+
+    proc = CommonRereferenceTransformer(CommonRereferenceSettings(mode="mean", axis="ch"))
+    empty = make_empty_msg()
+    normal = make_msg()
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)

@@ -7,6 +7,7 @@ from ezmsg.sigproc.gaussiansmoothing import (
     GaussianSmoothingSettings,
     gaussian_smoothing_filter_design,
 )
+from tests.helpers.empty_time import check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
 
 
 @pytest.mark.parametrize(
@@ -245,3 +246,26 @@ def test_gaussian_smoothing_update_settings():
 
     # Even larger sigma should reduce variance further
     assert np.all(variance3 < variance2)
+
+
+def test_gaussian_empty_after_init():
+    from ezmsg.sigproc.gaussiansmoothing import GaussianSmoothingFilterTransformer, GaussianSmoothingSettings
+
+    proc = GaussianSmoothingFilterTransformer(GaussianSmoothingSettings(sigma=0.01, axis="time"))
+    normal = make_msg()
+    empty = make_empty_msg()
+    _ = proc(normal)
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)
+
+
+def test_gaussian_empty_first():
+    from ezmsg.sigproc.gaussiansmoothing import GaussianSmoothingFilterTransformer, GaussianSmoothingSettings
+
+    proc = GaussianSmoothingFilterTransformer(GaussianSmoothingSettings(sigma=0.01, axis="time"))
+    empty = make_empty_msg()
+    normal = make_msg()
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)

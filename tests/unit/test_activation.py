@@ -10,6 +10,7 @@ from ezmsg.sigproc.activation import (
     ActivationSettings,
     ActivationTransformer,
 )
+from tests.helpers.empty_time import check_empty_result, make_empty_msg
 
 
 @pytest.mark.parametrize("function", [_ for _ in ActivationFunction] + ActivationFunction.options())
@@ -45,3 +46,9 @@ def test_activation(function: str):
         }.get(function.lower(), lambda x: x)
     expected_dat = expected_func(sig)
     assert np.allclose(out_dat, expected_dat)
+
+
+def test_activation_empty_time():
+    proc = ActivationTransformer(ActivationSettings(function=ActivationFunction.SIGMOID))
+    result = proc(make_empty_msg())
+    check_empty_result(result)
