@@ -6,6 +6,7 @@ from ezmsg.sigproc.rollingscaler import (
     RollingScalerProcessor,
     RollingScalerSettings,
 )
+from tests.helpers.empty_time import check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
 
 
 def _axisarray_from_ndarray(x: np.ndarray, fs: float = 100.0, t0: float = 0.0) -> AxisArray:
@@ -144,3 +145,27 @@ def test_artifact_rejection_excludes_rows_from_update():
 
     assert proc.state.N == 150
     np.testing.assert_allclose(proc.state.mean, 0.0, atol=1e-12)
+
+
+def test_rolling_scaler_empty_after_init():
+    from ezmsg.sigproc.rollingscaler import RollingScalerProcessor, RollingScalerSettings
+
+    proc = RollingScalerProcessor(settings=RollingScalerSettings(axis="time", k_samples=20))
+    normal = make_msg()
+    empty = make_empty_msg()
+    _ = proc(normal)
+    proc.partial_fit(normal)
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)
+
+
+def test_rolling_scaler_empty_first():
+    from ezmsg.sigproc.rollingscaler import RollingScalerProcessor, RollingScalerSettings
+
+    proc = RollingScalerProcessor(settings=RollingScalerSettings(axis="time", k_samples=20))
+    empty = make_empty_msg()
+    normal = make_msg()
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)

@@ -6,6 +6,7 @@ from ezmsg.sigproc.fir_hilbert import (
     FIRHilbertEnvelopeTransformer,
     FIRHilbertFilterTransformer,
 )
+from tests.helpers.empty_time import check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
 
 
 def axisarray(x: np.ndarray, fs: float, t0: float = 0.0) -> AxisArray:
@@ -261,3 +262,49 @@ def test_fir_hilbert_envelope_constant_tones_gain():
     assert s0 < 0.02 and s1 < 0.02
 
     assert np.min(y) >= -1e-6
+
+
+def test_hilbert_filter_empty_after_init():
+    from ezmsg.sigproc.fir_hilbert import FIRHilbertFilterSettings, FIRHilbertFilterTransformer
+
+    proc = FIRHilbertFilterTransformer(FIRHilbertFilterSettings(order=20, f_lo=5.0, f_hi=15.0, axis="time"))
+    normal = make_msg()
+    empty = make_empty_msg()
+    _ = proc(normal)
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)
+
+
+def test_hilbert_envelope_empty_after_init():
+    from ezmsg.sigproc.fir_hilbert import FIRHilbertEnvelopeTransformer, FIRHilbertFilterSettings
+
+    proc = FIRHilbertEnvelopeTransformer(FIRHilbertFilterSettings(order=20, f_lo=5.0, f_hi=15.0, axis="time"))
+    normal = make_msg()
+    empty = make_empty_msg()
+    _ = proc(normal)
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)
+
+
+def test_hilbert_filter_empty_first():
+    from ezmsg.sigproc.fir_hilbert import FIRHilbertFilterSettings, FIRHilbertFilterTransformer
+
+    proc = FIRHilbertFilterTransformer(FIRHilbertFilterSettings(order=20, f_lo=5.0, f_hi=15.0, axis="time"))
+    empty = make_empty_msg()
+    normal = make_msg()
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)
+
+
+def test_hilbert_envelope_empty_first():
+    from ezmsg.sigproc.fir_hilbert import FIRHilbertEnvelopeTransformer, FIRHilbertFilterSettings
+
+    proc = FIRHilbertEnvelopeTransformer(FIRHilbertFilterSettings(order=20, f_lo=5.0, f_hi=15.0, axis="time"))
+    empty = make_empty_msg()
+    normal = make_msg()
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)

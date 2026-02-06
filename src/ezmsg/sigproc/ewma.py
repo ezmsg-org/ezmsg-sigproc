@@ -156,6 +156,16 @@ class EWMAState:
 
 
 class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray, EWMAState]):
+    def __call__(self, message: AxisArray) -> AxisArray:
+        if np.prod(message.data.shape) == 0:
+            return message
+        return super().__call__(message)
+
+    async def __acall__(self, message: AxisArray) -> AxisArray:
+        if np.prod(message.data.shape) == 0:
+            return message
+        return await super().__acall__(message)
+
     def _hash_message(self, message: AxisArray) -> int:
         axis = self.settings.axis or message.dims[0]
         axis_idx = message.get_axis_idx(axis)
@@ -169,8 +179,6 @@ class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray
         self._state.zi = (1 - self._state.alpha) * sub_dat
 
     def _process(self, message: AxisArray) -> AxisArray:
-        if np.prod(message.data.shape) == 0:
-            return message
         axis = self.settings.axis or message.dims[0]
         axis_idx = message.get_axis_idx(axis)
         if self.settings.accumulate:

@@ -5,6 +5,7 @@ from ezmsg.util.messages.axisarray import AxisArray
 from frozendict import frozendict
 
 from ezmsg.sigproc.butterworthfilter import ButterworthFilterSettings, ButterworthFilterTransformer
+from tests.helpers.empty_time import check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
 
 
 @pytest.mark.parametrize(
@@ -248,3 +249,52 @@ def test_butterworth_update_settings():
     power4 = _calc_power(result4, targ_freqs=freqs)
     assert 0.9 > (power4[0][0] / power0[0][0]) > 0.8  # 10Hz should be passed, but not as much
     assert power4[1][1] / power0[1][1] < 0.1  # 40Hz should be attenuated
+
+
+def test_butterworth_empty_after_init_ba():
+    from ezmsg.sigproc.butterworthfilter import ButterworthFilterSettings, ButterworthFilterTransformer
+
+    proc = ButterworthFilterTransformer(
+        ButterworthFilterSettings(order=4, cuton=1.0, cutoff=10.0, coef_type="ba", axis="time")
+    )
+    normal = make_msg()
+    empty = make_empty_msg()
+    _ = proc(normal)
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)
+
+
+def test_butterworth_empty_after_init_sos():
+    from ezmsg.sigproc.butterworthfilter import ButterworthFilterSettings, ButterworthFilterTransformer
+
+    proc = ButterworthFilterTransformer(
+        ButterworthFilterSettings(order=4, cuton=1.0, cutoff=10.0, coef_type="sos", axis="time")
+    )
+    normal = make_msg()
+    empty = make_empty_msg()
+    _ = proc(normal)
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)
+
+
+def test_butterworth_empty_order0_passthrough():
+    from ezmsg.sigproc.butterworthfilter import ButterworthFilterSettings, ButterworthFilterTransformer
+
+    proc = ButterworthFilterTransformer(ButterworthFilterSettings(order=0, cuton=1.0, cutoff=10.0, axis="time"))
+    result = proc(make_empty_msg())
+    check_empty_result(result)
+
+
+def test_butterworth_empty_first():
+    from ezmsg.sigproc.butterworthfilter import ButterworthFilterSettings, ButterworthFilterTransformer
+
+    proc = ButterworthFilterTransformer(
+        ButterworthFilterSettings(order=4, cuton=1.0, cutoff=10.0, coef_type="sos", axis="time")
+    )
+    empty = make_empty_msg()
+    normal = make_msg()
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)

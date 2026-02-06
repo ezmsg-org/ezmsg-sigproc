@@ -8,6 +8,7 @@ from ezmsg.util.messages.axisarray import AxisArray
 from frozendict import frozendict
 
 from ezmsg.sigproc.window import WindowTransformer
+from tests.helpers.empty_time import check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
 from tests.helpers.util import assert_messages_equal, calculate_expected_windows
 
 
@@ -236,3 +237,38 @@ def test_sparse_window(
 
     assert nwins == len(expected_tvec)
     assert np.allclose(win_tvec, expected_tvec)
+
+
+def test_window_empty_passthrough():
+    from ezmsg.sigproc.window import WindowTransformer
+
+    proc = WindowTransformer(window_dur=None)
+    result = proc(make_empty_msg())
+    check_empty_result(result)
+
+
+def test_window_empty_first():
+    from ezmsg.sigproc.window import WindowSettings, WindowTransformer
+
+    proc = WindowTransformer(
+        WindowSettings(axis="time", newaxis="win", window_dur=0.1, window_shift=0.05, zero_pad_until="shift")
+    )
+    empty = make_empty_msg()
+    normal = make_msg()
+    result = proc(empty)
+    assert result.data.size >= 0  # Just check no crash
+    check_state_not_corrupted(proc, normal, time_dim="time")
+
+
+def test_window_empty_with_shift():
+    from ezmsg.sigproc.window import WindowSettings, WindowTransformer
+
+    proc = WindowTransformer(
+        WindowSettings(axis="time", newaxis="win", window_dur=0.1, window_shift=0.05, zero_pad_until="shift")
+    )
+    normal = make_msg()
+    empty = make_empty_msg()
+    _ = proc(normal)
+    result = proc(empty)
+    assert result.data.size >= 0  # Just check no crash
+    check_state_not_corrupted(proc, normal, time_dim="time")

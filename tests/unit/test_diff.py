@@ -3,6 +3,7 @@ import pytest
 from ezmsg.util.messages.axisarray import AxisArray
 
 from ezmsg.sigproc.diff import DiffSettings, DiffTransformer
+from tests.helpers.empty_time import check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
 
 
 @pytest.fixture
@@ -125,3 +126,50 @@ def test_continuous_processing(channel_axis):
     # Evaluate its output
     expected2 = np.array([[2.8], [1.0], [1.0]])
     assert np.array_equal(result2.data, expected2)
+
+
+def test_diff_empty_after_init():
+    proc = DiffTransformer(DiffSettings(axis="time", scale_by_fs=False))
+    normal = make_msg()
+    empty = make_empty_msg()
+    _ = proc(normal)
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)
+
+
+def test_diff_empty_scale_by_fs():
+    proc = DiffTransformer(DiffSettings(axis="time", scale_by_fs=True))
+    normal = make_msg()
+    empty = make_empty_msg()
+    _ = proc(normal)
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)
+
+
+def test_diff_empty_first():
+    """Empty message as first input triggers _reset_state on empty data."""
+    proc = DiffTransformer(DiffSettings(axis="time", scale_by_fs=False))
+    empty = make_empty_msg()
+    normal = make_msg()
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)
+
+
+def test_diff_empty_output_shape_preserved():
+    """Diff should produce output with same time dim as input, even after empty message."""
+    proc = DiffTransformer(DiffSettings(axis="time", scale_by_fs=False))
+    normal = make_msg(n_time=10)
+    empty = make_empty_msg()
+    result1 = proc(normal)
+    assert result1.data.shape[0] == 10, "First call should return 10 time samples"
+    result_empty = proc(empty)
+    check_empty_result(result_empty)
+    result2 = proc(normal)
+    assert result2.data.shape[0] == 10, (
+        f"After empty message, Diff should still produce {normal.data.shape[0]} "
+        f"time samples, got {result2.data.shape[0]}. "
+        "State (last_dat) may have been corrupted by the empty message."
+    )

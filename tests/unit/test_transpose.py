@@ -5,6 +5,7 @@ import pytest
 from ezmsg.util.messages.chunker import array_chunker
 
 from ezmsg.sigproc.transpose import TransposeTransformer
+from tests.helpers.empty_time import check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
 from tests.helpers.util import assert_messages_equal
 
 
@@ -59,3 +60,34 @@ def test_transpose(axes: tuple[int, ...] | None, order: str | None):
                 assert msg_out.data.flags.c_contiguous
             elif order == "F":
                 assert msg_out.data.flags.f_contiguous
+
+
+def test_transpose_empty_passthrough():
+    from ezmsg.sigproc.transpose import TransposeTransformer
+
+    proc = TransposeTransformer(axes=None, order=None)
+    result = proc(make_empty_msg())
+    check_empty_result(result)
+
+
+def test_transpose_empty_swap_dims():
+    from ezmsg.sigproc.transpose import TransposeSettings, TransposeTransformer
+
+    proc = TransposeTransformer(TransposeSettings(axes=("ch", "time")))
+    normal = make_msg()
+    empty = make_empty_msg()
+    _ = proc(normal)
+    result = proc(empty)
+    assert result.data.shape[1] == 0
+    assert result.dims[1] == "time"
+
+
+def test_transpose_empty_first():
+    from ezmsg.sigproc.transpose import TransposeSettings, TransposeTransformer
+
+    proc = TransposeTransformer(TransposeSettings(axes=("ch", "time")))
+    empty = make_empty_msg()
+    normal = make_msg()
+    result = proc(empty)
+    assert result.data.shape[1] == 0
+    check_state_not_corrupted(proc, normal, time_dim="time")

@@ -9,6 +9,7 @@ from ezmsg.sigproc.math.invert import InvertTransformer
 from ezmsg.sigproc.math.log import LogSettings, LogTransformer
 from ezmsg.sigproc.math.pow import PowSettings, PowTransformer
 from ezmsg.sigproc.math.scale import ScaleSettings, ScaleTransformer
+from tests.helpers.empty_time import check_empty_result, make_empty_msg
 
 
 def test_abs():
@@ -100,3 +101,59 @@ def test_pow(exponent: float):
 
     assert msg_out.data.shape == (n_times, n_chans)
     assert np.allclose(msg_out.data, in_dat**exponent)
+
+
+def test_abs_empty_time():
+    from ezmsg.sigproc.math.abs import AbsTransformer
+
+    proc = AbsTransformer()
+    result = proc(make_empty_msg())
+    check_empty_result(result)
+
+
+def test_clip_empty_time():
+    from ezmsg.sigproc.math.clip import ClipSettings, ClipTransformer
+
+    proc = ClipTransformer(ClipSettings(min=0.0, max=1.0))
+    result = proc(make_empty_msg())
+    check_empty_result(result)
+
+
+def test_const_difference_empty_time():
+    from ezmsg.sigproc.math.difference import ConstDifferenceSettings, ConstDifferenceTransformer
+
+    proc = ConstDifferenceTransformer(ConstDifferenceSettings(value=5.0))
+    result = proc(make_empty_msg())
+    check_empty_result(result)
+
+
+def test_invert_empty_time():
+    from ezmsg.sigproc.math.invert import InvertTransformer
+
+    proc = InvertTransformer()
+    result = proc(make_empty_msg())
+    check_empty_result(result)
+
+
+def test_log_empty_time():
+    from ezmsg.sigproc.math.log import LogSettings, LogTransformer
+
+    proc = LogTransformer(LogSettings(base=np.e, clip_zero=True))
+    result = proc(make_empty_msg())
+    check_empty_result(result)
+
+
+def test_pow_empty_time():
+    from ezmsg.sigproc.math.pow import PowSettings, PowTransformer
+
+    proc = PowTransformer(PowSettings(exponent=2.0))
+    result = proc(make_empty_msg())
+    check_empty_result(result)
+
+
+def test_scale_empty_time():
+    from ezmsg.sigproc.math.scale import ScaleSettings, ScaleTransformer
+
+    proc = ScaleTransformer(ScaleSettings(scale=2.0))
+    result = proc(make_empty_msg())
+    check_empty_result(result)

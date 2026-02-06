@@ -6,6 +6,7 @@ from ezmsg.util.messages.axisarray import AxisArray
 from frozendict import frozendict
 
 from ezmsg.sigproc.downsample import DownsampleTransformer
+from tests.helpers.empty_time import check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
 from tests.helpers.util import assert_messages_equal
 
 
@@ -68,3 +69,38 @@ def test_downsample_core(block_size: int, target_rate: float, factor: int | None
     # Compare returned values to expected values.
     allres_msg = AxisArray.concatenate(*out_msgs, dim="time")
     assert np.array_equal(allres_msg.data, sig[::expected_factor])
+
+
+def test_downsample_empty_after_init():
+    from ezmsg.sigproc.downsample import DownsampleTransformer
+
+    proc = DownsampleTransformer(axis="time", factor=2)
+    normal = make_msg()
+    empty = make_empty_msg()
+    _ = proc(normal)
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)
+
+
+def test_downsample_empty_target_rate():
+    from ezmsg.sigproc.downsample import DownsampleTransformer
+
+    proc = DownsampleTransformer(axis="time", target_rate=25.0)
+    normal = make_msg()
+    empty = make_empty_msg()
+    _ = proc(normal)
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)
+
+
+def test_downsample_empty_first():
+    from ezmsg.sigproc.downsample import DownsampleTransformer
+
+    proc = DownsampleTransformer(axis="time", factor=2)
+    empty = make_empty_msg()
+    normal = make_msg()
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)

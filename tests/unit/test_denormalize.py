@@ -9,6 +9,7 @@ from ezmsg.sigproc.denormalize import (
     DenormalizeSettings,
     DenormalizeTransformer,
 )
+from tests.helpers.empty_time import check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
 from tests.helpers.util import assert_messages_equal
 
 
@@ -230,3 +231,26 @@ class TestDenormalizeTransformer:
         output = xformer(basic_input_time_ch)
 
         assert not np.may_share_memory(output.data, basic_input_time_ch.data)
+
+
+def test_denormalize_empty_after_init():
+    from ezmsg.sigproc.denormalize import DenormalizeSettings, DenormalizeTransformer
+
+    proc = DenormalizeTransformer(DenormalizeSettings(distribution="constant"))
+    normal = make_msg()
+    empty = make_empty_msg()
+    _ = proc(normal)
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)
+
+
+def test_denormalize_empty_first():
+    from ezmsg.sigproc.denormalize import DenormalizeSettings, DenormalizeTransformer
+
+    proc = DenormalizeTransformer(DenormalizeSettings(distribution="constant"))
+    empty = make_empty_msg()
+    normal = make_msg()
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)

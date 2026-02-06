@@ -4,6 +4,7 @@ from ezmsg.util.messages.axisarray import AxisArray, replace
 from ezmsg.sigproc.adaptive_lattice_notch import (
     AdaptiveLatticeNotchFilterTransformer,
 )
+from tests.helpers.empty_time import check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
 from tests.helpers.util import (
     create_messages_with_periodic_signal,
 )
@@ -145,3 +146,32 @@ def test_adaptive_lattice_notch_transformer():
     assert np.allclose(ref_concat.data, result_f, atol=1e-9)
 
     # debug_alnf_plot(result)
+
+
+def test_aln_empty_after_init():
+    from ezmsg.sigproc.adaptive_lattice_notch import (
+        AdaptiveLatticeNotchFilterSettings,
+        AdaptiveLatticeNotchFilterTransformer,
+    )
+
+    proc = AdaptiveLatticeNotchFilterTransformer(AdaptiveLatticeNotchFilterSettings(axis="time"))
+    normal = make_msg()
+    empty = make_empty_msg()
+    _ = proc(normal)
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)
+
+
+def test_aln_empty_first():
+    from ezmsg.sigproc.adaptive_lattice_notch import (
+        AdaptiveLatticeNotchFilterSettings,
+        AdaptiveLatticeNotchFilterTransformer,
+    )
+
+    proc = AdaptiveLatticeNotchFilterTransformer(AdaptiveLatticeNotchFilterSettings(axis="time"))
+    empty = make_empty_msg()
+    normal = make_msg()
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)

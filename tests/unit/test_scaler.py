@@ -13,6 +13,7 @@ from ezmsg.sigproc.scaler import (
     RiverAdaptiveStandardScalerSettings,
     RiverAdaptiveStandardScalerTransformer,
 )
+from tests.helpers.empty_time import check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
 from tests.helpers.util import assert_messages_equal
 
 
@@ -234,3 +235,67 @@ class TestAdaptiveStandardScalerAccumulate:
         # Verify child EWMAs inherited the setting
         assert scaler._state.samps_ewma.settings.accumulate is False
         assert scaler._state.vars_sq_ewma.settings.accumulate is False
+
+
+def test_adaptive_scaler_np_empty_after_init():
+    from ezmsg.sigproc.scaler import AdaptiveStandardScalerSettings, AdaptiveStandardScalerTransformer
+
+    proc = AdaptiveStandardScalerTransformer(settings=AdaptiveStandardScalerSettings(time_constant=0.1, axis="time"))
+    normal = make_msg()
+    empty = make_empty_msg()
+    _ = proc(normal)
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("river") is None,
+    reason="requires `river` package",
+)
+def test_adaptive_scaler_river_empty_after_init():
+    from ezmsg.sigproc.scaler import (
+        RiverAdaptiveStandardScalerSettings,
+        RiverAdaptiveStandardScalerTransformer,
+    )
+
+    proc = RiverAdaptiveStandardScalerTransformer(
+        settings=RiverAdaptiveStandardScalerSettings(time_constant=0.1, axis="time")
+    )
+    normal = make_msg()
+    empty = make_empty_msg()
+    _ = proc(normal)
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)
+
+
+def test_adaptive_scaler_np_empty_first():
+    from ezmsg.sigproc.scaler import AdaptiveStandardScalerSettings, AdaptiveStandardScalerTransformer
+
+    proc = AdaptiveStandardScalerTransformer(settings=AdaptiveStandardScalerSettings(time_constant=0.1, axis="time"))
+    empty = make_empty_msg()
+    normal = make_msg()
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("river") is None,
+    reason="requires `river` package",
+)
+def test_adaptive_scaler_river_empty_first():
+    from ezmsg.sigproc.scaler import (
+        RiverAdaptiveStandardScalerSettings,
+        RiverAdaptiveStandardScalerTransformer,
+    )
+
+    proc = RiverAdaptiveStandardScalerTransformer(
+        settings=RiverAdaptiveStandardScalerSettings(time_constant=0.1, axis="time")
+    )
+    empty = make_empty_msg()
+    normal = make_msg()
+    result = proc(empty)
+    check_empty_result(result)
+    check_state_not_corrupted(proc, normal)
