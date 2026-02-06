@@ -31,6 +31,18 @@ class DiffState:
 
 
 class DiffTransformer(BaseStatefulTransformer[DiffSettings, AxisArray, AxisArray, DiffState]):
+    def __call__(self, message: AxisArray) -> AxisArray:
+        ax_idx = message.get_axis_idx(self.settings.axis)
+        if message.data.shape[ax_idx] == 0:
+            return message
+        return super().__call__(message)
+
+    async def __acall__(self, message: AxisArray) -> AxisArray:
+        ax_idx = message.get_axis_idx(self.settings.axis)
+        if message.data.shape[ax_idx] == 0:
+            return message
+        return await super().__acall__(message)
+
     def _hash_message(self, message: AxisArray) -> int:
         ax_idx = message.get_axis_idx(self.settings.axis)
         sample_shape = message.data.shape[:ax_idx] + message.data.shape[ax_idx + 1 :]
