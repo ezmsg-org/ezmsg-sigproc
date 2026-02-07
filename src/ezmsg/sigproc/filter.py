@@ -6,6 +6,7 @@ import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
 import scipy.signal
+from array_api_compat import get_namespace, is_numpy_array
 from ezmsg.baseproc import (
     BaseConsumerUnit,
     BaseStatefulTransformer,
@@ -14,8 +15,10 @@ from ezmsg.baseproc import (
     TransformerType,
     processor_state,
 )
-from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
 from ezmsg.util.messages.util import replace
+
+from .util.array import array_device, xp_asarray, xp_create
 
 
 @dataclass
@@ -47,6 +50,104 @@ def _normalize_coefs(
     return coef_type, coefs
 
 
+def _fir_filt_fft(b, data, zi, axis_idx, xp):
+    """FIR filtering via FFT convolution with streaming state.
+
+    Args:
+        b: FIR filter taps, shape (1, ..., M+1, ..., 1) with filter length at axis_idx.
+        data: Input array.
+        zi: State array holding the last M input samples along axis_idx.
+        axis_idx: The axis along which to filter.
+        xp: Array API namespace.
+
+    Returns:
+        (filtered_data, new_zi) tuple.
+    """
+    M = zi.shape[axis_idx]  # filter order (num taps - 1)
+
+    if M == 0:
+        # Zero-order FIR: just scale
+        return data * b, zi
+
+    N = data.shape[axis_idx]
+
+    # Prepend state (last M input samples from previous chunk)
+    extended = xp.concat([zi, data], axis=axis_idx)
+
+    # FFT convolution
+    fft_len = N + 2 * M
+    B = xp.fft.rfft(b, n=fft_len, axis=axis_idx)
+    X = xp.fft.rfft(extended, n=fft_len, axis=axis_idx)
+    full = xp.fft.irfft(B * X, n=fft_len, axis=axis_idx)
+
+    # Extract valid output: length N starting at offset M
+    out = slice_along_axis(full, slice(M, M + N), axis_idx)
+
+    # Update state: last M samples of extended input
+    new_zi = slice_along_axis(extended, slice(N, N + M), axis_idx)
+
+    return out, new_zi
+
+
+def _fir_filt_conv(b_1d, data, zi, axis_idx, xp):
+    """FIR filtering via direct convolution using xp.conv_general.
+
+    Args:
+        b_1d: 1D FIR filter taps, shape (M+1,).
+        data: Input array.
+        zi: State array holding the last M input samples along axis_idx.
+        axis_idx: The axis along which to filter.
+        xp: Array API namespace (must have conv_general).
+
+    Returns:
+        (filtered_data, new_zi) tuple.
+    """
+    M = zi.shape[axis_idx]  # filter order (num taps - 1)
+
+    if M == 0:
+        return data * b_1d[0], zi
+
+    N = data.shape[axis_idx]
+
+    # Prepend state (last M input samples from previous chunk)
+    extended = xp.concat([zi, data], axis=axis_idx)
+
+    # Reshape N-D data into (batch, length, channels) for conv_general
+    shape = extended.shape
+    batch_size = 1
+    for i in range(axis_idx):
+        batch_size *= shape[i]
+    chan_size = 1
+    for i in range(axis_idx + 1, len(shape)):
+        chan_size *= shape[i]
+    L = shape[axis_idx]  # M + N
+
+    input_3d = xp.reshape(extended, (batch_size, L, chan_size))
+
+    # conv_general expects weight shape (out_channels, kernel_size, in_channels/groups)
+    # With groups=chan_size, each channel is convolved independently.
+    # We want each output channel to use the same kernel b_1d.
+    # Weight shape: (chan_size, M+1, 1)
+    kernel = xp.reshape(b_1d, (1, M + 1, 1))
+    weight = xp.broadcast_to(kernel, (chan_size, M + 1, 1))
+
+    # conv_general with flip=True gives correlation->convolution
+    # padding=0 (default "VALID"), groups=chan_size for per-channel conv
+    # Input: (batch_size, M+N, chan_size), Weight: (chan_size, M+1, 1)
+    # Output: (batch_size, N, chan_size)
+    out_3d = xp.conv_general(input_3d, weight, groups=chan_size, flip=True)
+
+    # Reshape back to original data shape
+    out_shape = list(data.shape)
+    out_shape[axis_idx] = N
+    dat_out = xp.reshape(out_3d, tuple(out_shape))
+
+    # Update state: last M samples of extended input
+    new_zi = slice_along_axis(extended, slice(N, N + M), axis_idx)
+
+    return dat_out, new_zi
+
+
 class FilterBaseSettings(ez.Settings):
     axis: str | None = None
     """The name of the axis to operate on."""
@@ -65,6 +166,9 @@ class FilterSettings(FilterBaseSettings):
 @processor_state
 class FilterState:
     zi: npt.NDArray | None = None
+    fir_b: typing.Any | None = None  # reshaped taps for FFT path (broadcast shape)
+    fir_b_1d: typing.Any | None = None  # 1D taps for conv path
+    fir_method: str | None = None  # 'conv', 'fft', or None (scipy)
 
 
 class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisArray, FilterState]):
@@ -94,11 +198,31 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
 
         if self.settings.coef_type == "ba":
             b, a = coefs
-            if len(a) == 1 or np.allclose(a[1:], 0):
-                # For FIR filters, use lfiltic with zero initial conditions
+            is_fir = len(a) == 1 or np.allclose(a[1:], 0)
+
+            if is_fir and not is_numpy_array(message.data):
+                # FIR + non-numpy: use conv_general if available, else FFT
+                xp = get_namespace(message.data)
+                dev = array_device(message.data)
+                M = len(b) - 1  # filter order
+                zi_shape = list(message.data.shape)
+                zi_shape[axis_idx] = M
+                self.state.zi = xp_create(xp.zeros, tuple(zi_shape), dtype=message.data.dtype, device=dev)
+                # 1D taps for conv path
+                self.state.fir_b_1d = xp_asarray(xp, b, dtype=message.data.dtype, device=dev)
+                # Reshape b to broadcast: (1, ..., M+1, ..., 1) for FFT path
+                b_shape = [1] * message.data.ndim
+                b_shape[axis_idx] = len(b)
+                self.state.fir_b = xp.reshape(self.state.fir_b_1d, tuple(b_shape))
+                # Choose method
+                self.state.fir_method = "conv" if hasattr(xp, "conv_general") else "fft"
+                return
+
+            if is_fir:
+                # FIR + numpy: use lfiltic with zero initial conditions
                 zi = scipy.signal.lfiltic(b, a, [])
             else:
-                # For IIR filters...
+                # IIR filters...
                 zi = scipy.signal.lfilter_zi(b, a)
         else:
             # For second-order sections (SOS) filters, use sosfilt_zi
@@ -112,6 +236,9 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
             n_tile = (1,) + n_tile
 
         self.state.zi = np.tile(zi[zi_expand], n_tile)
+        self.state.fir_method = None
+        self.state.fir_b = None
+        self.state.fir_b_1d = None
 
     def update_coefficients(
         self,
@@ -161,9 +288,16 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
         if message.data.size > 0:
             axis = message.dims[0] if self.settings.axis is None else self.settings.axis
             axis_idx = message.get_axis_idx(axis)
-            _, coefs = _normalize_coefs(self.settings.coefs)
-            filt_func = {"ba": scipy.signal.lfilter, "sos": scipy.signal.sosfilt}[self.settings.coef_type]
-            dat_out, self.state.zi = filt_func(*coefs, message.data, axis=axis_idx, zi=self.state.zi)
+            if self.state.fir_method == "conv":
+                xp = get_namespace(message.data)
+                dat_out, self.state.zi = _fir_filt_conv(self.state.fir_b_1d, message.data, self.state.zi, axis_idx, xp)
+            elif self.state.fir_method == "fft":
+                xp = get_namespace(message.data)
+                dat_out, self.state.zi = _fir_filt_fft(self.state.fir_b, message.data, self.state.zi, axis_idx, xp)
+            else:
+                _, coefs = _normalize_coefs(self.settings.coefs)
+                filt_func = {"ba": scipy.signal.lfilter, "sos": scipy.signal.sosfilt}[self.settings.coef_type]
+                dat_out, self.state.zi = filt_func(*coefs, message.data, axis=axis_idx, zi=self.state.zi)
         else:
             dat_out = message.data
 

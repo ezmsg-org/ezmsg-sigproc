@@ -1,3 +1,6 @@
+import platform
+import time
+
 import numpy as np
 import pytest
 import scipy.signal
@@ -10,6 +13,11 @@ from ezmsg.sigproc.firfilter import (
     firwin_design_fun,
 )
 from tests.helpers.empty_time import check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
+
+requires_apple_silicon = pytest.mark.skipif(
+    platform.machine() != "arm64" or platform.system() != "Darwin",
+    reason="Requires Apple Silicon for MLX",
+)
 
 
 @pytest.mark.parametrize(
@@ -307,3 +315,183 @@ def test_fir_empty_first():
     result = proc(empty)
     check_empty_result(result)
     check_state_not_corrupted(proc, normal)
+
+
+@requires_apple_silicon
+@pytest.mark.parametrize(
+    "cutoff, pass_zero",
+    [
+        (30.0, True),  # lowpass
+        (30.0, False),  # highpass
+        ([30.0, 45.0], "bandpass"),  # bandpass
+        ([30.0, 45.0], "bandstop"),  # bandstop
+    ],
+)
+@pytest.mark.parametrize("order", [11, 21])
+@pytest.mark.parametrize("n_dims, time_ax", [(1, 0), (3, 0), (3, 1), (3, 2)])
+def test_firfilter_mlx(cutoff, pass_zero, order, n_dims, time_ax):
+    """Test FIR filter with MLX arrays: correctness vs numpy and output type."""
+    import mlx.core as mx
+
+    fs = 200.0
+    dur = 2.0
+    n_freqs = 5
+    n_chans = 3
+    n_splits = 4
+
+    n_times = int(dur * fs)
+    if n_dims == 1:
+        dat_shape = [n_times]
+        dat_dims = ["time"]
+        other_axes = {}
+    else:
+        dat_shape = [n_freqs, n_chans]
+        dat_shape.insert(time_ax, n_times)
+        dat_dims = ["freq", "ch"]
+        dat_dims.insert(time_ax, "time")
+        other_axes = {
+            "freq": AxisArray.LinearAxis(unit="Hz", offset=0.0, gain=1.0),
+            "ch": AxisArray.CoordinateAxis(data=np.arange(n_chans).astype(str), dims=["ch"]),
+        }
+    in_dat = np.arange(np.prod(dat_shape), dtype=np.float32).reshape(*dat_shape)
+
+    # --- Numpy reference ---
+    np_settings = FIRFilterSettings(
+        axis="time" if time_ax != 0 else None,
+        order=order,
+        cutoff=cutoff,
+        window="hamming",
+        pass_zero=pass_zero,
+        scale=True,
+        wn_hz=True,
+        coef_type="ba",
+    )
+    np_xformer = FIRFilterTransformer(settings=np_settings)
+
+    n_seen = 0
+    np_results = []
+    for split_dat in np.array_split(in_dat, n_splits, axis=time_ax):
+        _time_axis = AxisArray.TimeAxis(fs=fs, offset=n_seen / fs)
+        msg = AxisArray(
+            split_dat,
+            dims=dat_dims,
+            axes=frozendict({**other_axes, "time": _time_axis}),
+            key="test_fir_mlx",
+        )
+        np_results.append(np_xformer(msg).data)
+        n_seen += split_dat.shape[time_ax]
+    np_result = np.concatenate(np_results, axis=time_ax)
+
+    # --- MLX path ---
+    xp_settings = FIRFilterSettings(
+        axis="time" if time_ax != 0 else None,
+        order=order,
+        cutoff=cutoff,
+        window="hamming",
+        pass_zero=pass_zero,
+        scale=True,
+        wn_hz=True,
+        coef_type="ba",
+    )
+    xp_xformer = FIRFilterTransformer(settings=xp_settings)
+
+    n_seen = 0
+    mx_results = []
+    for split_dat in np.array_split(in_dat, n_splits, axis=time_ax):
+        _time_axis = AxisArray.TimeAxis(fs=fs, offset=n_seen / fs)
+        mx_dat = mx.array(split_dat)
+        msg = AxisArray(
+            mx_dat,
+            dims=dat_dims,
+            axes=frozendict({**other_axes, "time": _time_axis}),
+            key="test_fir_mlx",
+        )
+        out = xp_xformer(msg)
+        mx_results.append(out.data)
+        n_seen += split_dat.shape[time_ax]
+
+    # Verify output is MLX array
+    assert isinstance(mx_results[0], mx.array), "Output should be mx.array, not numpy"
+
+    mx_result = mx.concatenate(mx_results, axis=time_ax)
+    mx_result_np = np.array(mx_result)
+
+    # Correctness: FFT convolution should match scipy lfilter
+    # Tolerances account for float32 FFT rounding vs scipy's float64 lfilter.
+    np.testing.assert_allclose(mx_result_np, np_result, rtol=5e-3, atol=5e-3)
+
+
+@requires_apple_silicon
+def test_firfilter_mlx_benchmark():
+    """Benchmark FIR filter: numpy (scipy lfilter) vs MLX (FFT convolution)."""
+    import mlx.core as mx
+
+    fs = 1000.0
+    chunk_samples = 256
+    n_channels = 32
+    n_chunks = 100
+    order = 51
+
+    np_settings = FIRFilterSettings(
+        axis="time",
+        order=order,
+        cutoff=100.0,
+        window="hamming",
+        pass_zero=True,
+        scale=True,
+        wn_hz=True,
+        coef_type="ba",
+    )
+
+    # Build chunks
+    rng = np.random.default_rng(42)
+    np_chunks = []
+    mx_chunks = []
+    for i in range(n_chunks):
+        d = rng.standard_normal((chunk_samples, n_channels)).astype(np.float32)
+        _time_axis = AxisArray.TimeAxis(fs=fs, offset=i * chunk_samples / fs)
+        axes = frozendict(
+            {
+                "time": _time_axis,
+                "ch": AxisArray.CoordinateAxis(data=np.arange(n_channels).astype(str), dims=["ch"]),
+            }
+        )
+        np_chunks.append(AxisArray(d, dims=["time", "ch"], axes=axes, key="bench"))
+        mx_chunks.append(AxisArray(mx.array(d), dims=["time", "ch"], axes=axes, key="bench"))
+
+    # Warm up both transformers
+    np_xformer = FIRFilterTransformer(settings=np_settings)
+    mx_xformer = FIRFilterTransformer(settings=np_settings)
+    _ = np_xformer(np_chunks[0])
+    _ = mx_xformer(mx_chunks[0])
+    mx.eval(mx_xformer(mx_chunks[0]).data)  # force MLX compile
+
+    # Numpy timing
+    np_xformer = FIRFilterTransformer(settings=np_settings)
+    _ = np_xformer(np_chunks[0])
+    t0 = time.perf_counter()
+    np_outputs = [np_xformer(chunk) for chunk in np_chunks[1:]]
+    t_numpy = time.perf_counter() - t0
+
+    # MLX timing
+    mx_xformer = FIRFilterTransformer(settings=np_settings)
+    _ = mx_xformer(mx_chunks[0])
+    t0 = time.perf_counter()
+    mx_outputs = [mx_xformer(chunk) for chunk in mx_chunks[1:]]
+    mx.eval(mx_outputs[-1].data)  # force evaluation
+    t_mlx = time.perf_counter() - t0
+
+    # Correctness check
+    for np_out, mx_out in zip(np_outputs, mx_outputs):
+        if np_out.data.size > 0:
+            np.testing.assert_allclose(np.array(mx_out.data), np_out.data, rtol=1e-4, atol=1e-4)
+
+    # Verify MLX output type
+    assert isinstance(mx_outputs[0].data, mx.array), "MLX output should remain mx.array"
+
+    print(
+        f"\n  FIR filter benchmark ({n_chunks} chunks, {chunk_samples}x{n_channels}, order={order}):"
+        f"\n    numpy (scipy lfilter): {t_numpy:.4f}s ({t_numpy / n_chunks * 1000:.2f} ms/chunk)"
+        f"\n    mlx   (FFT convolve):  {t_mlx:.4f}s ({t_mlx / n_chunks * 1000:.2f} ms/chunk)"
+        f"\n    ratio (mlx/numpy):     {t_mlx / t_numpy:.2f}x"
+    )
