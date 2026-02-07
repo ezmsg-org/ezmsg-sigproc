@@ -1,6 +1,9 @@
 import copy
+import platform
+import time
 
 import numpy as np
+import pytest
 from ezmsg.util.messages.axisarray import AxisArray
 
 from ezmsg.sigproc.bandpower import (
@@ -72,3 +75,84 @@ def test_bandpower():
         mags.append(result.data[ix, 2, 0])
     # The sorting of the measured magnitudes should match the sorting of the parameter magnitudes.
     assert np.array_equal(np.argsort(mags), np.argsort([_["a"] for _ in sin_params]))
+
+
+requires_apple_silicon = pytest.mark.skipif(
+    platform.machine() != "arm64" or platform.system() != "Darwin",
+    reason="Requires Apple Silicon for MLX",
+)
+
+
+@requires_apple_silicon
+def test_bandpower_mlx_benchmark():
+    """Benchmark BandPowerTransformer end-to-end: numpy vs MLX input."""
+    import mlx.core as mx
+
+    fs = 1000.0
+    n_channels = 256
+    chunk_samples = 500
+    n_chunks = 200
+    win_dur = 0.5
+    win_shift = 0.1
+    bands = [(8, 13), (13, 30), (30, 70), (70, 150)]
+
+    settings = BandPowerSettings(
+        spectrogram_settings=SpectrogramSettings(
+            window_dur=win_dur,
+            window_shift=win_shift,
+        ),
+        bands=bands,
+        aggregation=AggregationFunction.MEAN,
+    )
+
+    # Pre-generate chunk messages as numpy
+    rng = np.random.default_rng(42)
+    np_chunks = []
+    for i in range(n_chunks + 1):  # +1 for warmup
+        data = rng.standard_normal((chunk_samples, n_channels)).astype(np.float32)
+        np_chunks.append(
+            AxisArray(
+                data,
+                dims=["time", "ch"],
+                axes={"time": AxisArray.LinearAxis(gain=1.0 / fs, offset=i * chunk_samples / fs)},
+            )
+        )
+
+    # MLX versions of the same chunks
+    mx_chunks = [AxisArray(data=mx.array(chunk.data), dims=chunk.dims, axes=chunk.axes) for chunk in np_chunks]
+
+    # --- Numpy ---
+    xformer_np = BandPowerTransformer(settings)
+    xformer_np(np_chunks[0])  # Warmup
+
+    t0 = time.perf_counter()
+    np_outputs = [xformer_np(chunk) for chunk in np_chunks[1:]]
+    t_numpy = time.perf_counter() - t0
+
+    # --- MLX (_post_process calls mx.eval, so no manual eval needed) ---
+    xformer_mx = BandPowerTransformer(settings)
+    xformer_mx(mx_chunks[0])  # Warmup
+
+    t0 = time.perf_counter()
+    mx_outputs = [xformer_mx(chunk) for chunk in mx_chunks[1:]]
+    t_mlx = time.perf_counter() - t0
+
+    # Correctness: compare non-empty outputs
+    for np_out, mx_out in zip(np_outputs, mx_outputs):
+        np_data = np_out.data
+        mx_data = np.asarray(mx_out.data)
+        if np_data.size > 0 and mx_data.size > 0:
+            finite = np.isfinite(mx_data) & np.isfinite(np_data)
+            if finite.sum() > 0:
+                np.testing.assert_allclose(mx_data[finite], np_data[finite], rtol=5e-3, atol=1e-5)
+
+    # Verify output is MLX array
+    last_mx = next(o for o in reversed(mx_outputs) if np.asarray(o.data).size > 0)
+    assert isinstance(last_mx.data, mx.array), f"Expected mx.array, got {type(last_mx.data)}"
+
+    print(
+        f"\n  BandPower benchmark ({n_chunks} chunks, {chunk_samples}×{n_channels}, {len(bands)} bands):"
+        f"\n    numpy: {t_numpy:.4f}s ({t_numpy / n_chunks * 1000:.2f} ms/chunk)"
+        f"\n    mlx:   {t_mlx:.4f}s ({t_mlx / n_chunks * 1000:.2f} ms/chunk)"
+        f"\n    ratio (mlx/numpy): {t_mlx / t_numpy:.2f}x"
+    )
