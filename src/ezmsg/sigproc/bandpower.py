@@ -52,6 +52,17 @@ class BandPowerTransformer(CompositeProcessor[BandPowerSettings, AxisArray, Axis
             ),
         }
 
+    def _post_process(self, result: AxisArray | None) -> AxisArray | None:
+        if result is not None:
+            try:
+                import mlx.core as mx
+
+                if isinstance(result.data, mx.array):
+                    mx.eval(result.data)
+            except ImportError:
+                pass
+        return result
+
 
 class BandPower(BaseTransformerUnit[BandPowerSettings, AxisArray, AxisArray, BandPowerTransformer]):
     SETTINGS = BandPowerSettings

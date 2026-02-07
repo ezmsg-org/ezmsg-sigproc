@@ -20,6 +20,7 @@ from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.modify import modify_axis
 
 from .aggregate import AggregateSettings, AggregateTransformer, AggregationFunction
+from .asarray import ArrayBackend, AsArraySettings, AsArrayTransformer
 from .butterworthfilter import ButterworthFilterSettings, ButterworthFilterTransformer
 from .downsample import DownsampleSettings, DownsampleTransformer
 from .math.pow import PowSettings, PowTransformer
@@ -34,6 +35,9 @@ class RMSBandPowerSettings(ez.Settings):
     )
     """Butterworth bandpass filter settings. Set ``cuton`` and ``cutoff`` to define the band."""
 
+    backend: ArrayBackend = ArrayBackend.numpy
+    """Array backend to convert to after bandpass filtering (before squaring)."""
+
     bin_duration: float = 0.05
     """Duration of each non-overlapping bin in seconds."""
 
@@ -45,7 +49,7 @@ class RMSBandPowerTransformer(CompositeProcessor[RMSBandPowerSettings, AxisArray
     """
     RMS band power estimation.
 
-    Pipeline: bandpass -> square -> window(bins) -> mean(time) -> rename bin->time -> [sqrt]
+    Pipeline: bandpass -> asarray -> square -> window(bins) -> mean(time) -> rename bin->time -> [sqrt]
     """
 
     @staticmethod
@@ -54,6 +58,7 @@ class RMSBandPowerTransformer(CompositeProcessor[RMSBandPowerSettings, AxisArray
     ) -> dict[str, BaseProcessor | BaseStatefulProcessor]:
         procs: dict[str, BaseProcessor | BaseStatefulProcessor] = {
             "bandpass": ButterworthFilterTransformer(settings.bandpass),
+            "asarray": AsArrayTransformer(AsArraySettings(backend=settings.backend)),
             "square": PowTransformer(PowSettings(exponent=2.0)),
             "window": WindowTransformer(
                 axis="time",
@@ -68,6 +73,17 @@ class RMSBandPowerTransformer(CompositeProcessor[RMSBandPowerSettings, AxisArray
         if settings.apply_sqrt:
             procs["sqrt"] = PowTransformer(PowSettings(exponent=0.5))
         return procs
+
+    def _post_process(self, result: AxisArray | None) -> AxisArray | None:
+        if result is not None:
+            try:
+                import mlx.core as mx
+
+                if isinstance(result.data, mx.array):
+                    mx.eval(result.data)
+            except ImportError:
+                pass
+        return result
 
 
 class RMSBandPower(BaseTransformerUnit[RMSBandPowerSettings, AxisArray, AxisArray, RMSBandPowerTransformer]):

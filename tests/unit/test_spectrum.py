@@ -1,4 +1,6 @@
 import copy
+import platform
+import time
 
 import numpy as np
 import pytest
@@ -239,3 +241,132 @@ def test_spectrum_empty_first():
     result2 = proc(normal)
     assert result2.data.shape[0] == 5
     assert np.all(np.isfinite(result2.data))
+
+
+requires_apple_silicon = pytest.mark.skipif(
+    platform.machine() != "arm64" or platform.system() != "Darwin",
+    reason="Requires Apple Silicon for MLX",
+)
+
+
+@requires_apple_silicon
+@pytest.mark.parametrize("transform", [SpectralTransform.REL_DB, SpectralTransform.REL_POWER])
+@pytest.mark.parametrize("output", [SpectralOutput.POSITIVE, SpectralOutput.NEGATIVE, SpectralOutput.FULL])
+def test_spectrum_mlx(transform: SpectralTransform, output: SpectralOutput):
+    """SpectrumTransformer on MLX arrays should produce correct spectral peaks."""
+    import mlx.core as mx
+
+    win_dur = 1.0
+    fs = 1000.0
+    sin_params = [
+        {"a": 1.0, "f": 10.0, "p": 0.0, "dur": 5.0},
+        {"a": 0.5, "f": 20.0, "p": np.pi / 7, "dur": 5.0},
+        {"a": 0.2, "f": 200.0, "p": np.pi / 11, "dur": 5.0},
+    ]
+    win_len = int(win_dur * fs)
+    messages_np = create_messages_with_periodic_signal(sin_params=sin_params, fs=fs, msg_dur=win_dur, win_step_dur=None)
+    msg_np_orig = messages_np[0]
+
+    # Build an MLX message
+    msg_mx = AxisArray(
+        data=mx.array(msg_np_orig.data.astype(np.float32)),
+        dims=msg_np_orig.dims,
+        axes=msg_np_orig.axes,
+    )
+
+    settings = SpectrumSettings(axis="time", window=WindowFunction.HAMMING, transform=transform, output=output)
+
+    proc_mx = SpectrumTransformer(settings)
+    result = proc_mx(msg_mx)
+
+    assert isinstance(result.data, mx.array), f"Expected mx.array, got {type(result.data)}"
+    assert "freq" in result.dims
+    assert "freq" in result.axes
+    assert result.axes["freq"].gain == 1 / win_dur
+
+    # Check correct spectral shape
+    fax_ix = result.get_axis_idx("freq")
+    f_len = win_len if output == SpectralOutput.FULL else (win_len // 2 + 1 - (win_len % 2))
+    assert result.data.shape[fax_ix] == f_len
+
+    # Verify peaks are at the expected frequencies
+    result_np = np.asarray(result.data)
+    f_vec = result.axes["freq"].value(np.arange(f_len))
+    if output == SpectralOutput.NEGATIVE:
+        f_vec = np.abs(f_vec)
+    for s_p in sin_params:
+        f_ix = np.argmin(np.abs(f_vec - s_p["f"]))
+        peak_inds = np.argmax(
+            slice_along_axis(result_np, slice(f_ix - 3, f_ix + 3), axis=fax_ix),
+            axis=fax_ix,
+        )
+        assert np.all(peak_inds == 3), f"Peak not at expected freq {s_p['f']} Hz"
+
+
+@requires_apple_silicon
+def test_spectrum_mlx_benchmark():
+    """Benchmark SpectrumTransformer: numpy vs MLX on multi-window input."""
+    import mlx.core as mx
+
+    fs = 1000.0
+    win_dur = 1.0
+    n_windows = 200
+    n_channels = 256
+    win_samples = int(win_dur * fs)
+
+    rng = np.random.default_rng(42)
+    np_data = rng.standard_normal((n_windows, win_samples, n_channels)).astype(np.float32)
+
+    settings = SpectrumSettings(axis="time", window=WindowFunction.HAMMING, transform=SpectralTransform.REL_DB)
+
+    msg_np = AxisArray(
+        data=np_data,
+        dims=["win", "time", "ch"],
+        axes={
+            "win": AxisArray.LinearAxis(gain=win_dur, offset=0.0),
+            "time": AxisArray.TimeAxis(fs=fs),
+        },
+    )
+    msg_mx = AxisArray(
+        data=mx.array(np_data),
+        dims=["win", "time", "ch"],
+        axes=msg_np.axes,
+    )
+
+    # --- Numpy ---
+    proc_np = SpectrumTransformer(settings)
+    proc_np(msg_np)  # Warmup
+
+    t0 = time.perf_counter()
+    _ = proc_np(msg_np)
+    t_numpy = time.perf_counter() - t0
+
+    # --- MLX ---
+    proc_mx = SpectrumTransformer(settings)
+    warmup = proc_mx(msg_mx)
+    mx.eval(warmup.data)  # Force compilation
+
+    t0 = time.perf_counter()
+    result_mx = proc_mx(msg_mx)
+    mx.eval(result_mx.data)
+    t_mlx = time.perf_counter() - t0
+
+    # Correctness — compare REL_POWER on float32 to avoid dB noise-floor amplification
+    proc_np_pow = SpectrumTransformer(
+        SpectrumSettings(axis="time", window=WindowFunction.HAMMING, transform=SpectralTransform.REL_POWER)
+    )
+    proc_mx_pow = SpectrumTransformer(
+        SpectrumSettings(axis="time", window=WindowFunction.HAMMING, transform=SpectralTransform.REL_POWER)
+    )
+    rp_np = proc_np_pow(msg_np)
+    rp_mx = proc_mx_pow(msg_mx)
+    np.testing.assert_allclose(np.asarray(rp_mx.data), rp_np.data.astype(np.float32), rtol=5e-3, atol=1e-10)
+
+    assert isinstance(result_mx.data, mx.array)
+
+    print(
+        f"\n  Spectrum benchmark ({n_windows} windows, {win_samples} samples × {n_channels} ch):"
+        f"\n    numpy: {t_numpy:.4f}s"
+        f"\n    mlx:   {t_mlx:.4f}s"
+        f"\n    ratio (mlx/numpy): {t_mlx / t_numpy:.2f}x"
+    )
