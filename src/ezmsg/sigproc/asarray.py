@@ -32,11 +32,20 @@ def _build_backend_members():
 
 
 _StrEnum = getattr(enum, "StrEnum", None)
-if _StrEnum is not None:
-    ArrayBackend = _StrEnum("ArrayBackend", _build_backend_members())
-else:
-    # Python 3.10: str mixin gives str(member) == member.value
-    ArrayBackend = enum.Enum("ArrayBackend", _build_backend_members(), type=str)
+if _StrEnum is None:
+    # Python 3.10 backport: _generate_next_value_ makes the functional API
+    # assign name-equal-to-value, and __str__ returns the value (3.11 changed
+    # mixed-in Enum __str__ to use the data type's __str__, but 3.10 didn't).
+    class _StrEnum(str, enum.Enum):
+        @staticmethod
+        def _generate_next_value_(name, start, count, last_values):
+            return name
+
+        def __str__(self):
+            return self.value
+
+
+ArrayBackend = _StrEnum("ArrayBackend", _build_backend_members())
 
 
 _BACKEND_MODULE_MAP = {
