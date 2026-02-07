@@ -31,7 +31,12 @@ def _build_backend_members():
     return members
 
 
-ArrayBackend = enum.StrEnum("ArrayBackend", _build_backend_members())
+_StrEnum = getattr(enum, "StrEnum", None)
+if _StrEnum is not None:
+    ArrayBackend = _StrEnum("ArrayBackend", _build_backend_members())
+else:
+    # Python 3.10: str mixin gives str(member) == member.value
+    ArrayBackend = enum.Enum("ArrayBackend", _build_backend_members(), type=str)
 
 
 _BACKEND_MODULE_MAP = {
