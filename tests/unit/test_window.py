@@ -9,7 +9,7 @@ from frozendict import frozendict
 
 from ezmsg.sigproc.window import WindowTransformer
 from tests.helpers.empty_time import check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
-from tests.helpers.util import assert_messages_equal, calculate_expected_windows
+from tests.helpers.util import assert_messages_equal, calculate_expected_windows, requires_mlx
 
 
 def test_window_gen_nodur():
@@ -272,3 +272,57 @@ def test_window_empty_with_shift():
     result = proc(empty)
     assert result.data.size >= 0  # Just check no crash
     check_state_not_corrupted(proc, normal, time_dim="time")
+
+
+@requires_mlx
+@pytest.mark.benchmark(group="window")
+@pytest.mark.parametrize("n_channels", [32, 256, 1024])
+@pytest.mark.parametrize("backend", ["mlx", "numpy"])
+def test_window_benchmark(backend, n_channels, benchmark):
+    """Benchmark WindowTransformer: numpy vs MLX input."""
+    fs = 1000.0
+    chunk_samples = 256
+    n_chunks = 20
+    window_dur = 0.5
+    window_shift = 0.1
+
+    rng = np.random.default_rng(42)
+    chunks = []
+    for i in range(n_chunks):
+        d = rng.standard_normal((chunk_samples, n_channels)).astype(np.float32)
+        _time_axis = AxisArray.TimeAxis(fs=fs, offset=i * chunk_samples / fs)
+        axes = frozendict(
+            {
+                "time": _time_axis,
+                "ch": AxisArray.CoordinateAxis(data=np.arange(n_channels).astype(str), dims=["ch"]),
+            }
+        )
+        if backend == "mlx":
+            import mlx.core as mx
+
+            chunks.append(AxisArray(mx.array(d), dims=["time", "ch"], axes=axes, key="bench"))
+        else:
+            chunks.append(AxisArray(d, dims=["time", "ch"], axes=axes, key="bench"))
+
+    xformer = WindowTransformer(
+        axis="time",
+        newaxis="win",
+        window_dur=window_dur,
+        window_shift=window_shift,
+        zero_pad_until="none",
+    )
+
+    # Warmup
+    warmup = xformer(chunks[0])
+    if backend == "mlx":
+        import mlx.core as mx
+
+        mx.eval(warmup.data)
+
+    def process_all_chunks():
+        outputs = [xformer(chunk) for chunk in chunks[1:]]
+        if backend == "mlx":
+            mx.eval(outputs[-1].data)
+        return outputs
+
+    benchmark(process_all_chunks)

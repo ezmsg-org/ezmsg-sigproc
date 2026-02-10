@@ -6,6 +6,7 @@ from frozendict import frozendict
 
 from ezmsg.sigproc.butterworthfilter import ButterworthFilterSettings, ButterworthFilterTransformer
 from tests.helpers.empty_time import check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
+from tests.helpers.util import requires_mlx
 
 
 @pytest.mark.parametrize(
@@ -298,3 +299,58 @@ def test_butterworth_empty_first():
     result = proc(empty)
     check_empty_result(result)
     check_state_not_corrupted(proc, normal)
+
+
+@requires_mlx
+@pytest.mark.benchmark(group="butterworth")
+@pytest.mark.parametrize("n_channels", [32, 256, 1024])
+@pytest.mark.parametrize("backend", ["mlx", "numpy"])
+def test_butterworth_benchmark(backend, n_channels, benchmark):
+    """Benchmark Butterworth filter: numpy vs MLX input."""
+    fs = 1000.0
+    chunk_samples = 256
+    n_chunks = 20
+    order = 4
+
+    settings = ButterworthFilterSettings(
+        axis="time",
+        order=order,
+        cuton=30.0,
+        cutoff=100.0,
+        coef_type="sos",
+    )
+
+    # Build chunks
+    rng = np.random.default_rng(42)
+    chunks = []
+    for i in range(n_chunks):
+        d = rng.standard_normal((chunk_samples, n_channels)).astype(np.float32)
+        _time_axis = AxisArray.TimeAxis(fs=fs, offset=i * chunk_samples / fs)
+        axes = frozendict(
+            {
+                "time": _time_axis,
+                "ch": AxisArray.CoordinateAxis(data=np.arange(n_channels).astype(str), dims=["ch"]),
+            }
+        )
+        if backend == "mlx":
+            import mlx.core as mx
+
+            chunks.append(AxisArray(mx.array(d), dims=["time", "ch"], axes=axes, key="bench"))
+        else:
+            chunks.append(AxisArray(d, dims=["time", "ch"], axes=axes, key="bench"))
+
+    # Warmup
+    xformer = ButterworthFilterTransformer(settings)
+    warmup = xformer(chunks[0])
+    if backend == "mlx":
+        import mlx.core as mx
+
+        mx.eval(warmup.data)
+
+    def process_all_chunks():
+        outputs = [xformer(chunk) for chunk in chunks[1:]]
+        if backend == "mlx":
+            mx.eval(outputs[-1].data)
+        return outputs
+
+    benchmark(process_all_chunks)

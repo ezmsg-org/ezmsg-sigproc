@@ -1,5 +1,4 @@
 import copy
-import time
 
 import numpy as np
 import pytest
@@ -298,14 +297,14 @@ def test_spectrum_mlx(transform: SpectralTransform, output: SpectralOutput):
 
 
 @requires_mlx
-def test_spectrum_mlx_benchmark():
+@pytest.mark.benchmark(group="spectrum")
+@pytest.mark.parametrize("n_channels", [32, 256, 1024])
+@pytest.mark.parametrize("backend", ["numpy", "mlx"])
+def test_spectrum_benchmark(backend, n_channels, benchmark):
     """Benchmark SpectrumTransformer: numpy vs MLX on multi-window input."""
-    import mlx.core as mx
-
     fs = 1000.0
     win_dur = 1.0
-    n_windows = 200
-    n_channels = 256
+    n_windows = 50
     win_samples = int(win_dur * fs)
 
     rng = np.random.default_rng(42)
@@ -313,54 +312,43 @@ def test_spectrum_mlx_benchmark():
 
     settings = SpectrumSettings(axis="time", window=WindowFunction.HAMMING, transform=SpectralTransform.REL_DB)
 
-    msg_np = AxisArray(
-        data=np_data,
-        dims=["win", "time", "ch"],
-        axes={
-            "win": AxisArray.LinearAxis(gain=win_dur, offset=0.0),
-            "time": AxisArray.TimeAxis(fs=fs),
-        },
-    )
-    msg_mx = AxisArray(
-        data=mx.array(np_data),
-        dims=["win", "time", "ch"],
-        axes=msg_np.axes,
-    )
+    if backend == "mlx":
+        import mlx.core as mx
 
-    # --- Numpy ---
-    proc_np = SpectrumTransformer(settings)
-    proc_np(msg_np)  # Warmup
+        msg = AxisArray(
+            data=mx.array(np_data),
+            dims=["win", "time", "ch"],
+            axes={
+                "win": AxisArray.LinearAxis(gain=win_dur, offset=0.0),
+                "time": AxisArray.TimeAxis(fs=fs),
+            },
+        )
+    else:
+        msg = AxisArray(
+            data=np_data,
+            dims=["win", "time", "ch"],
+            axes={
+                "win": AxisArray.LinearAxis(gain=win_dur, offset=0.0),
+                "time": AxisArray.TimeAxis(fs=fs),
+            },
+        )
 
-    t0 = time.perf_counter()
-    _ = proc_np(msg_np)
-    t_numpy = time.perf_counter() - t0
+    proc = SpectrumTransformer(settings)
 
-    # --- MLX ---
-    proc_mx = SpectrumTransformer(settings)
-    warmup = proc_mx(msg_mx)
-    mx.eval(warmup.data)  # Force compilation
+    # Warmup
+    warmup = proc(msg)
+    if backend == "mlx":
+        mx.eval(warmup.data)
 
-    t0 = time.perf_counter()
-    result_mx = proc_mx(msg_mx)
-    mx.eval(result_mx.data)
-    t_mlx = time.perf_counter() - t0
+    def run():
+        result = proc(msg)
+        if backend == "mlx":
+            mx.eval(result.data)
+        return result
 
-    # Correctness — compare REL_POWER on float32 to avoid dB noise-floor amplification
-    proc_np_pow = SpectrumTransformer(
-        SpectrumSettings(axis="time", window=WindowFunction.HAMMING, transform=SpectralTransform.REL_POWER)
-    )
-    proc_mx_pow = SpectrumTransformer(
-        SpectrumSettings(axis="time", window=WindowFunction.HAMMING, transform=SpectralTransform.REL_POWER)
-    )
-    rp_np = proc_np_pow(msg_np)
-    rp_mx = proc_mx_pow(msg_mx)
-    np.testing.assert_allclose(np.asarray(rp_mx.data), rp_np.data.astype(np.float32), rtol=5e-3, atol=1e-10)
+    result = benchmark(run)
 
-    assert isinstance(result_mx.data, mx.array)
+    if backend == "mlx":
+        import mlx.core as mx
 
-    print(
-        f"\n  Spectrum benchmark ({n_windows} windows, {win_samples} samples × {n_channels} ch):"
-        f"\n    numpy: {t_numpy:.4f}s"
-        f"\n    mlx:   {t_mlx:.4f}s"
-        f"\n    ratio (mlx/numpy): {t_mlx / t_numpy:.2f}x"
-    )
+        assert isinstance(result.data, mx.array)

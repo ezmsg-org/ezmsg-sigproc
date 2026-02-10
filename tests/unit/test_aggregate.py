@@ -1,5 +1,4 @@
 import copy
-import time
 from functools import partial
 
 import numpy as np
@@ -487,17 +486,17 @@ def test_ranged_aggregate_mlx_trapezoid():
 
 
 @requires_mlx
-def test_ranged_aggregate_mlx_benchmark():
+@pytest.mark.benchmark(group="ranged-aggregate")
+@pytest.mark.parametrize("n_channels", [32, 256, 1024])
+@pytest.mark.parametrize("backend", ["numpy", "mlx"])
+def test_ranged_aggregate_benchmark(backend, n_channels, benchmark):
     """Benchmark RangedAggregateTransformer: numpy vs MLX."""
-    import mlx.core as mx
-
     bands = [(5.0, 50.0), (50.0, 100.0), (100.0, 200.0), (200.0, 400.0)]
-    n_times = 500
-    n_chans = 256
+    n_times = 125
     n_freqs = 501  # Typical positive-freq output for 1000-sample FFT
 
     rng = np.random.default_rng(42)
-    np_data = rng.standard_normal((n_times, n_chans, n_freqs)).astype(np.float32)
+    np_data = rng.standard_normal((n_times, n_channels, n_freqs)).astype(np.float32)
     axes = frozendict(
         {
             "time": AxisArray.LinearAxis(gain=0.5, offset=0.0),
@@ -506,36 +505,30 @@ def test_ranged_aggregate_mlx_benchmark():
     )
     dims = ["time", "ch", "freq"]
 
-    msg_np = AxisArray(data=np_data, dims=dims, axes=axes)
-    msg_mx = AxisArray(data=mx.array(np_data), dims=dims, axes=axes)
+    if backend == "mlx":
+        import mlx.core as mx
+
+        msg = AxisArray(data=mx.array(np_data), dims=dims, axes=axes)
+    else:
+        msg = AxisArray(data=np_data, dims=dims, axes=axes)
 
     settings = RangedAggregateSettings(axis="freq", bands=bands, operation=AggregationFunction.MEAN)
+    xformer = RangedAggregateTransformer(settings)
 
-    # --- Numpy ---
-    xformer_np = RangedAggregateTransformer(settings)
-    xformer_np(msg_np)  # Warmup
+    # Warmup
+    warmup = xformer(msg)
+    if backend == "mlx":
+        mx.eval(warmup.data)
 
-    t0 = time.perf_counter()
-    result_np = xformer_np(msg_np)
-    t_numpy = time.perf_counter() - t0
+    def run():
+        result = xformer(msg)
+        if backend == "mlx":
+            mx.eval(result.data)
+        return result
 
-    # --- MLX ---
-    xformer_mx = RangedAggregateTransformer(settings)
-    warmup = xformer_mx(msg_mx)
-    mx.eval(warmup.data)
+    result = benchmark(run)
 
-    t0 = time.perf_counter()
-    result_mx = xformer_mx(msg_mx)
-    mx.eval(result_mx.data)
-    t_mlx = time.perf_counter() - t0
+    if backend == "mlx":
+        import mlx.core as mx
 
-    # Correctness
-    np.testing.assert_allclose(np.asarray(result_mx.data), result_np.data.astype(np.float32), rtol=1e-5, atol=1e-5)
-    assert isinstance(result_mx.data, mx.array)
-
-    print(
-        f"\n  RangedAggregate benchmark ({n_times}×{n_chans}×{n_freqs}, {len(bands)} bands):"
-        f"\n    numpy: {t_numpy:.4f}s"
-        f"\n    mlx:   {t_mlx:.4f}s"
-        f"\n    ratio (mlx/numpy): {t_mlx / t_numpy:.2f}x"
-    )
+        assert isinstance(result.data, mx.array)

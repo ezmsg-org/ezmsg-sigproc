@@ -1,5 +1,3 @@
-import time
-
 import numpy as np
 import pytest
 import scipy.signal
@@ -417,17 +415,17 @@ def test_firfilter_mlx(cutoff, pass_zero, order, n_dims, time_ax):
 
 
 @requires_mlx
-def test_firfilter_mlx_benchmark():
+@pytest.mark.benchmark(group="firfilter")
+@pytest.mark.parametrize("n_channels", [32, 256, 1024])
+@pytest.mark.parametrize("backend", ["numpy", "mlx"])
+def test_firfilter_benchmark(backend, n_channels, benchmark):
     """Benchmark FIR filter: numpy (scipy lfilter) vs MLX (FFT convolution)."""
-    import mlx.core as mx
-
     fs = 1000.0
     chunk_samples = 256
-    n_channels = 32
-    n_chunks = 100
+    n_chunks = 20
     order = 51
 
-    np_settings = FIRFilterSettings(
+    settings = FIRFilterSettings(
         axis="time",
         order=order,
         cutoff=100.0,
@@ -440,8 +438,7 @@ def test_firfilter_mlx_benchmark():
 
     # Build chunks
     rng = np.random.default_rng(42)
-    np_chunks = []
-    mx_chunks = []
+    chunks = []
     for i in range(n_chunks):
         d = rng.standard_normal((chunk_samples, n_channels)).astype(np.float32)
         _time_axis = AxisArray.TimeAxis(fs=fs, offset=i * chunk_samples / fs)
@@ -451,42 +448,30 @@ def test_firfilter_mlx_benchmark():
                 "ch": AxisArray.CoordinateAxis(data=np.arange(n_channels).astype(str), dims=["ch"]),
             }
         )
-        np_chunks.append(AxisArray(d, dims=["time", "ch"], axes=axes, key="bench"))
-        mx_chunks.append(AxisArray(mx.array(d), dims=["time", "ch"], axes=axes, key="bench"))
+        if backend == "mlx":
+            import mlx.core as mx
 
-    # Warm up both transformers
-    np_xformer = FIRFilterTransformer(settings=np_settings)
-    mx_xformer = FIRFilterTransformer(settings=np_settings)
-    _ = np_xformer(np_chunks[0])
-    _ = mx_xformer(mx_chunks[0])
-    mx.eval(mx_xformer(mx_chunks[0]).data)  # force MLX compile
+            chunks.append(AxisArray(mx.array(d), dims=["time", "ch"], axes=axes, key="bench"))
+        else:
+            chunks.append(AxisArray(d, dims=["time", "ch"], axes=axes, key="bench"))
 
-    # Numpy timing
-    np_xformer = FIRFilterTransformer(settings=np_settings)
-    _ = np_xformer(np_chunks[0])
-    t0 = time.perf_counter()
-    np_outputs = [np_xformer(chunk) for chunk in np_chunks[1:]]
-    t_numpy = time.perf_counter() - t0
+    # Warmup
+    xformer = FIRFilterTransformer(settings=settings)
+    warmup = xformer(chunks[0])
+    if backend == "mlx":
+        import mlx.core as mx
 
-    # MLX timing
-    mx_xformer = FIRFilterTransformer(settings=np_settings)
-    _ = mx_xformer(mx_chunks[0])
-    t0 = time.perf_counter()
-    mx_outputs = [mx_xformer(chunk) for chunk in mx_chunks[1:]]
-    mx.eval(mx_outputs[-1].data)  # force evaluation
-    t_mlx = time.perf_counter() - t0
+        mx.eval(warmup.data)
 
-    # Correctness check
-    for np_out, mx_out in zip(np_outputs, mx_outputs):
-        if np_out.data.size > 0:
-            np.testing.assert_allclose(np.array(mx_out.data), np_out.data, rtol=1e-4, atol=1e-4)
+    def process_all_chunks():
+        outputs = [xformer(chunk) for chunk in chunks[1:]]
+        if backend == "mlx":
+            mx.eval(outputs[-1].data)
+        return outputs
 
-    # Verify MLX output type
-    assert isinstance(mx_outputs[0].data, mx.array), "MLX output should remain mx.array"
+    outputs = benchmark(process_all_chunks)
 
-    print(
-        f"\n  FIR filter benchmark ({n_chunks} chunks, {chunk_samples}x{n_channels}, order={order}):"
-        f"\n    numpy (scipy lfilter): {t_numpy:.4f}s ({t_numpy / n_chunks * 1000:.2f} ms/chunk)"
-        f"\n    mlx   (FFT convolve):  {t_mlx:.4f}s ({t_mlx / n_chunks * 1000:.2f} ms/chunk)"
-        f"\n    ratio (mlx/numpy):     {t_mlx / t_numpy:.2f}x"
-    )
+    if backend == "mlx":
+        import mlx.core as mx
+
+        assert isinstance(outputs[0].data, mx.array), "MLX output should remain mx.array"

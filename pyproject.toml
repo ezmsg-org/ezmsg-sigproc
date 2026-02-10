@@ -29,6 +29,7 @@ dev = [
   "pre-commit>=4.2.0",
   "jupyter>=1.1.1",
   "scipy-stubs>=1.15.3.0",
+  "matplotlib>=3.10.8",
   {include-group = "lint"},
   {include-group = "test"},
   {include-group = "docs"},
@@ -39,6 +40,7 @@ lint = [
 test = [
   "frozendict>=2.4.4",
   "pytest-asyncio>=0.24.0",
+  "pytest-benchmark>=5.2.3",
   "pytest-cov>=5.0.0",
   "pytest>=8.3.3",
 ]
@@ -70,7 +72,7 @@ packages = ["src/ezmsg"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 norecursedirs = "tests/helpers"
-addopts = "-p no:warnings"
+addopts = "-p no:warnings --benchmark-group-by=group,param:n_channels"
 
 [tool.ruff]
 line-length = 120
@@ -88,3 +90,5 @@ known-third-party = ["ezmsg", "ezmsg.baseproc"]
 [tool.uv.sources]
 # Uncomment to use development version of ezmsg from git
 #ezmsg = { git = "https://github.com/ezmsg-org/ezmsg.git", branch = "dev" }
+ezmsg-baseproc = { path = "../ezmsg-baseproc", editable = true }
+ezmsg = { path = "../ezmsg", editable = true }
