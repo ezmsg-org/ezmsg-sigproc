@@ -17,7 +17,7 @@ from ezmsg.baseproc import (
     CompositeProcessor,
 )
 from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.util.messages.modify import modify_axis
+from ezmsg.util.messages.modify import ModifyAxisSettings, ModifyAxisTransformer
 
 from .aggregate import AggregateSettings, AggregateTransformer, AggregationFunction
 from .butterworthfilter import ButterworthFilterSettings, ButterworthFilterTransformer
@@ -63,7 +63,7 @@ class RMSBandPowerTransformer(CompositeProcessor[RMSBandPowerSettings, AxisArray
                 zero_pad_until="none",
             ),
             "aggregate": AggregateTransformer(AggregateSettings(axis="time", operation=AggregationFunction.MEAN)),
-            "rename": modify_axis(name_map={"bin": "time"}),
+            "rename": ModifyAxisTransformer(settings=ModifyAxisSettings(name_map={"bin": "time"})),
         }
         if settings.apply_sqrt:
             procs["sqrt"] = PowTransformer(PowSettings(exponent=0.5))
