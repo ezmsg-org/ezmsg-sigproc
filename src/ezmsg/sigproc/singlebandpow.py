@@ -20,7 +20,6 @@ from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.modify import modify_axis
 
 from .aggregate import AggregateSettings, AggregateTransformer, AggregationFunction
-from .asarray import ArrayBackend, AsArraySettings, AsArrayTransformer
 from .butterworthfilter import ButterworthFilterSettings, ButterworthFilterTransformer
 from .downsample import DownsampleSettings, DownsampleTransformer
 from .math.pow import PowSettings, PowTransformer
@@ -35,9 +34,6 @@ class RMSBandPowerSettings(ez.Settings):
     )
     """Butterworth bandpass filter settings. Set ``cuton`` and ``cutoff`` to define the band."""
 
-    backend: ArrayBackend = ArrayBackend.numpy
-    """Array backend to convert to after bandpass filtering (before squaring)."""
-
     bin_duration: float = 0.05
     """Duration of each non-overlapping bin in seconds."""
 
@@ -49,7 +45,7 @@ class RMSBandPowerTransformer(CompositeProcessor[RMSBandPowerSettings, AxisArray
     """
     RMS band power estimation.
 
-    Pipeline: bandpass -> asarray -> square -> window(bins) -> mean(time) -> rename bin->time -> [sqrt]
+    Pipeline: bandpass -> square -> window(bins) -> mean(time) -> rename bin->time -> [sqrt]
     """
 
     @staticmethod
@@ -58,7 +54,6 @@ class RMSBandPowerTransformer(CompositeProcessor[RMSBandPowerSettings, AxisArray
     ) -> dict[str, BaseProcessor | BaseStatefulProcessor]:
         procs: dict[str, BaseProcessor | BaseStatefulProcessor] = {
             "bandpass": ButterworthFilterTransformer(settings.bandpass),
-            "asarray": AsArrayTransformer(AsArraySettings(backend=settings.backend)),
             "square": PowTransformer(PowSettings(exponent=2.0)),
             "window": WindowTransformer(
                 axis="time",
