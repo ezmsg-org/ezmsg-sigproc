@@ -235,7 +235,11 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
             zi_expand = (slice(None),) + zi_expand
             n_tile = (1,) + n_tile
 
-        self.state.zi = np.tile(zi[zi_expand], n_tile)
+        zi_tiled = np.tile(zi[zi_expand], n_tile)
+        if not is_numpy_array(message.data):
+            xp = get_namespace(message.data)
+            zi_tiled = xp_asarray(xp, zi_tiled)
+        self.state.zi = zi_tiled
         self.state.fir_method = None
         self.state.fir_b = None
         self.state.fir_b_1d = None
@@ -297,7 +301,19 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
             else:
                 _, coefs = _normalize_coefs(self.settings.coefs)
                 filt_func = {"ba": scipy.signal.lfilter, "sos": scipy.signal.sosfilt}[self.settings.coef_type]
+                input_xp = None if is_numpy_array(message.data) else get_namespace(message.data)
+                if input_xp is not None:
+                    # Convert coefs and zi to the input namespace so scipy's
+                    # array_namespace sees a single backend and converts back.
+                    # NOTE: scipy 1.17 bundles an array_api_compat that does
+                    # not recognize MLX, so we also convert the output below.
+                    # When scipy's bundled copy gains MLX support, the manual
+                    # conversion will become a no-op.
+                    coefs = tuple(xp_asarray(input_xp, c) for c in coefs)
                 dat_out, self.state.zi = filt_func(*coefs, message.data, axis=axis_idx, zi=self.state.zi)
+                if input_xp is not None:
+                    dat_out = xp_asarray(input_xp, dat_out)
+                    self.state.zi = xp_asarray(input_xp, self.state.zi)
         else:
             dat_out = message.data
 
