@@ -72,7 +72,10 @@ packages = ["src/ezmsg"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 norecursedirs = "tests/helpers"
-addopts = "-p no:warnings --benchmark-group-by=group,param:n_channels"
+addopts = "-p no:warnings --benchmark-group-by=group,param:n_channels -m 'not sosfilt'"
+markers = [
+  "sosfilt: marks sosfilt development benchmarks (deselected by default, run with: -m sosfilt)",
+]
 
 [tool.ruff]
 line-length = 120
