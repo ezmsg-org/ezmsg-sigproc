@@ -1,4 +1,3 @@
-import platform
 import time
 
 import numpy as np
@@ -13,11 +12,7 @@ from ezmsg.sigproc.firfilter import (
     firwin_design_fun,
 )
 from tests.helpers.empty_time import check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
-
-requires_apple_silicon = pytest.mark.skipif(
-    platform.machine() != "arm64" or platform.system() != "Darwin",
-    reason="Requires Apple Silicon for MLX",
-)
+from tests.helpers.util import requires_mlx
 
 
 @pytest.mark.parametrize(
@@ -317,7 +312,7 @@ def test_fir_empty_first():
     check_state_not_corrupted(proc, normal)
 
 
-@requires_apple_silicon
+@requires_mlx
 @pytest.mark.parametrize(
     "cutoff, pass_zero",
     [
@@ -421,7 +416,7 @@ def test_firfilter_mlx(cutoff, pass_zero, order, n_dims, time_ax):
     np.testing.assert_allclose(mx_result_np, np_result, rtol=5e-3, atol=5e-3)
 
 
-@requires_apple_silicon
+@requires_mlx
 def test_firfilter_mlx_benchmark():
     """Benchmark FIR filter: numpy (scipy lfilter) vs MLX (FFT convolution)."""
     import mlx.core as mx

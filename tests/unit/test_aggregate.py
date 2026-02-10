@@ -1,5 +1,4 @@
 import copy
-import platform
 import time
 from functools import partial
 
@@ -16,7 +15,7 @@ from ezmsg.sigproc.aggregate import (
     RangedAggregateTransformer,
 )
 from tests.helpers.empty_time import check_empty_result, make_empty_msg
-from tests.helpers.util import assert_messages_equal
+from tests.helpers.util import assert_messages_equal, requires_mlx
 
 
 def get_msg_gen(n_chans=20, n_freqs=100, data_dur=30.0, fs=1024.0, key=""):
@@ -411,14 +410,7 @@ def test_ranged_aggregate_empty_passthrough():
 
 
 # ============== MLX Tests ==============
-
-requires_apple_silicon = pytest.mark.skipif(
-    platform.machine() != "arm64" or platform.system() != "Darwin",
-    reason="Requires Apple Silicon for MLX",
-)
-
-
-@requires_apple_silicon
+@requires_mlx
 @pytest.mark.parametrize(
     "operation",
     [
@@ -461,7 +453,7 @@ def test_ranged_aggregate_mlx(operation: AggregationFunction):
     np.testing.assert_allclose(np.asarray(result_mx.data), result_np.data.astype(np.float32), rtol=1e-5, atol=1e-5)
 
 
-@requires_apple_silicon
+@requires_mlx
 def test_ranged_aggregate_mlx_trapezoid():
     """Trapezoid falls back to numpy but should still work with MLX input."""
     import mlx.core as mx
@@ -494,7 +486,7 @@ def test_ranged_aggregate_mlx_trapezoid():
     np.testing.assert_allclose(np.asarray(result_mx.data), result_np.data.astype(np.float32), rtol=1e-5, atol=1e-5)
 
 
-@requires_apple_silicon
+@requires_mlx
 def test_ranged_aggregate_mlx_benchmark():
     """Benchmark RangedAggregateTransformer: numpy vs MLX."""
     import mlx.core as mx

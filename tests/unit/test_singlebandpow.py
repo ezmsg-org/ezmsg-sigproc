@@ -1,8 +1,6 @@
-import platform
 import time
 
 import numpy as np
-import pytest
 from ezmsg.util.messages.axisarray import AxisArray
 
 from ezmsg.sigproc.butterworthfilter import ButterworthFilterSettings
@@ -13,6 +11,7 @@ from ezmsg.sigproc.singlebandpow import (
     SquareLawBandPowerSettings,
     SquareLawBandPowerTransformer,
 )
+from tests.helpers.util import requires_mlx
 
 
 def _make_sinusoid(
@@ -184,13 +183,7 @@ def test_squarelaw_bandpower():
     ), f"Expected power ~{expected_ms:.3f}, got {mean_power:.3f}"
 
 
-requires_apple_silicon = pytest.mark.skipif(
-    platform.machine() != "arm64" or platform.system() != "Darwin",
-    reason="Requires Apple Silicon for MLX",
-)
-
-
-@requires_apple_silicon
+@requires_mlx
 def test_rms_bandpower_mlx_benchmark():
     """
     Benchmark RMSBandPowerTransformer with numpy vs MLX backends.

@@ -1,9 +1,7 @@
 import copy
-import platform
 import time
 
 import numpy as np
-import pytest
 from ezmsg.util.messages.axisarray import AxisArray
 
 from ezmsg.sigproc.bandpower import (
@@ -12,10 +10,7 @@ from ezmsg.sigproc.bandpower import (
     BandPowerTransformer,
     SpectrogramSettings,
 )
-from tests.helpers.util import (
-    assert_messages_equal,
-    create_messages_with_periodic_signal,
-)
+from tests.helpers.util import assert_messages_equal, create_messages_with_periodic_signal, requires_mlx
 
 
 def _debug_plot(result):
@@ -77,13 +72,7 @@ def test_bandpower():
     assert np.array_equal(np.argsort(mags), np.argsort([_["a"] for _ in sin_params]))
 
 
-requires_apple_silicon = pytest.mark.skipif(
-    platform.machine() != "arm64" or platform.system() != "Darwin",
-    reason="Requires Apple Silicon for MLX",
-)
-
-
-@requires_apple_silicon
+@requires_mlx
 def test_bandpower_mlx_benchmark():
     """Benchmark BandPowerTransformer end-to-end: numpy vs MLX input."""
     import mlx.core as mx

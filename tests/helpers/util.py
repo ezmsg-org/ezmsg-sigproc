@@ -1,8 +1,11 @@
+import importlib
 import os
+import platform
 import tempfile
 from pathlib import Path
 
 import numpy as np
+import pytest
 from ezmsg.util.messages.axisarray import AxisArray
 from frozendict import frozendict
 from numpy.lib.stride_tricks import sliding_window_view
@@ -176,3 +179,10 @@ def make_chirp(t, t0, a):
     frequency = (a * (t + t0)) ** 2
     chirp = np.sin(2 * np.pi * frequency * t)
     return chirp, frequency
+
+
+_has_mlx = importlib.util.find_spec("mlx") is not None
+requires_mlx = pytest.mark.skipif(
+    not _has_mlx or platform.machine() != "arm64" or platform.system() != "Darwin",
+    reason="Requires MLX on Apple Silicon",
+)

@@ -1,5 +1,4 @@
 import copy
-import platform
 import time
 
 import numpy as np
@@ -19,6 +18,7 @@ from tests.helpers.empty_time import FS, N_CH
 from tests.helpers.util import (
     assert_messages_equal,
     create_messages_with_periodic_signal,
+    requires_mlx,
 )
 
 
@@ -243,13 +243,7 @@ def test_spectrum_empty_first():
     assert np.all(np.isfinite(result2.data))
 
 
-requires_apple_silicon = pytest.mark.skipif(
-    platform.machine() != "arm64" or platform.system() != "Darwin",
-    reason="Requires Apple Silicon for MLX",
-)
-
-
-@requires_apple_silicon
+@requires_mlx
 @pytest.mark.parametrize("transform", [SpectralTransform.REL_DB, SpectralTransform.REL_POWER])
 @pytest.mark.parametrize("output", [SpectralOutput.POSITIVE, SpectralOutput.NEGATIVE, SpectralOutput.FULL])
 def test_spectrum_mlx(transform: SpectralTransform, output: SpectralOutput):
@@ -303,7 +297,7 @@ def test_spectrum_mlx(transform: SpectralTransform, output: SpectralOutput):
         assert np.all(peak_inds == 3), f"Peak not at expected freq {s_p['f']} Hz"
 
 
-@requires_apple_silicon
+@requires_mlx
 def test_spectrum_mlx_benchmark():
     """Benchmark SpectrumTransformer: numpy vs MLX on multi-window input."""
     import mlx.core as mx
