@@ -466,7 +466,7 @@ def test_firfilter_benchmark(backend, n_channels, benchmark):
     def process_all_chunks():
         outputs = [xformer(chunk) for chunk in chunks[1:]]
         if backend == "mlx":
-            mx.eval(outputs[-1].data)
+            mx.eval(*[o.data for o in outputs])
         return outputs
 
     outputs = benchmark(process_all_chunks)

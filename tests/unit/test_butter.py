@@ -350,13 +350,14 @@ def test_butterworth_benchmark(backend, n_channels, benchmark):
     def process_all_chunks():
         outputs = [xformer(chunk) for chunk in chunks[1:]]
         if backend == "mlx":
-            mx.eval(outputs[-1].data)
+            mx.eval(*[o.data for o in outputs])
         return outputs
 
     benchmark(process_all_chunks)
 
 
 @requires_mlx
+@pytest.mark.sosfilt
 @pytest.mark.benchmark(group="sosfilt")
 @pytest.mark.parametrize("n_channels", [32, 256, 1024])
 @pytest.mark.parametrize("backend", ["mlx", "numpy"])

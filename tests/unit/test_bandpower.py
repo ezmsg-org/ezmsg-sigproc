@@ -118,12 +118,15 @@ def test_bandpower_benchmark(backend, n_channels, benchmark):
     xformer(chunks[0])  # Warmup
 
     def process_all_chunks():
-        return [xformer(chunk) for chunk in chunks[1:]]
+        outputs = [xformer(chunk) for chunk in chunks[1:]]
+        if backend == "mlx":
+            mx.eval(*[o.data for o in outputs])
+        return outputs
 
-    outputs = benchmark(process_all_chunks)
+    results = benchmark(process_all_chunks)
 
     if backend == "mlx":
         import mlx.core as mx
 
-        last_mx = next(o for o in reversed(outputs) if np.asarray(o.data).size > 0)
+        last_mx = next(o for o in reversed(results) if np.asarray(o.data).size > 0)
         assert isinstance(last_mx.data, mx.array), f"Expected mx.array, got {type(last_mx.data)}"

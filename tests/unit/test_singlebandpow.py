@@ -224,9 +224,7 @@ def test_rms_bandpower_benchmark(backend, n_channels, benchmark):
     def process_all_chunks():
         outputs = [xformer(chunk) for chunk in chunks[1:]]
         if backend == "mlx":
-            for o in outputs:
-                if o.data.size > 0:
-                    mx.eval(o.data)
+            mx.eval(*[o.data for o in outputs if o.data.size > 0])
         return outputs
 
     benchmark(process_all_chunks)
