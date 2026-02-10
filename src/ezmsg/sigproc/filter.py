@@ -50,6 +50,103 @@ def _normalize_coefs(
     return coef_type, coefs
 
 
+def _sosfilt_xp(sos, x, axis_idx, zi, xp):
+    """SOS filtering via parallel prefix scan (direct-form II transposed).
+
+    Solves the IIR linear recurrence z[n+1] = A @ z[n] + B * x[n] using a
+    Hillis-Steele inclusive prefix scan in O(log N) sequential steps instead
+    of O(N), minimizing Python-level loop overhead for lazy-evaluation
+    backends like MLX.
+
+    Args:
+        sos: (n_sections, 6) SOS coefficient array. Each row is [b0, b1, b2, a0, a1, a2].
+            a0 is assumed to be 1.0 (standard for scipy.signal.butter output).
+        x: Input data array.
+        axis_idx: The axis along which to filter.
+        zi: Initial conditions, shape (n_sections, *x.shape[:axis_idx], 2, *x.shape[axis_idx+1:]).
+        xp: Array API namespace.
+
+    Returns:
+        (y, zf) tuple — filtered output and final filter state.
+    """
+    n_sections = sos.shape[0]
+    N = x.shape[axis_idx]
+
+    # Move time to axis 0 for uniform batch handling.
+    x = xp.moveaxis(x, axis_idx, 0)  # (N, *batch)
+    zi = xp.moveaxis(zi, axis_idx + 1, 1)  # (n_sections, 2, *batch)
+
+    # Flatten batch dims into one.
+    batch_shape = x.shape[1:]
+    batch_size = 1
+    for s in batch_shape:
+        batch_size *= s
+    x = xp.reshape(x, (N, batch_size))  # (N, B)
+    zi = xp.reshape(zi, (n_sections, 2, batch_size))  # (S, 2, B)
+
+    # Pre-allocate output zi.
+    zi_out = xp.zeros((n_sections, 2, batch_size), dtype=x.dtype)
+
+    for s in range(n_sections):
+        _b0 = float(sos[s, 0])
+        _b1 = float(sos[s, 1])
+        _b2 = float(sos[s, 2])
+        _a1 = float(sos[s, 4])
+        _a2 = float(sos[s, 5])
+
+        z_init = zi[s]  # (2, B)
+
+        # State recurrence: z[n+1] = A @ z[n] + B_vec * x[n]
+        #   A = [[-a1, 1], [-a2, 0]]
+        #   B_vec = [b1 - a1*b0, b2 - a2*b0]
+        # Output: y[n] = b0 * x[n] + z[n][0]
+        A_mat = xp_asarray(xp, np.array([[-_a1, 1.0], [-_a2, 0.0]]))  # (2, 2)
+        B_vec = xp_asarray(xp, np.array([_b1 - _a1 * _b0, _b2 - _a2 * _b0]))  # (2,)
+
+        # Initialize scan elements:
+        #   A_scan[n] = A for all n
+        #   c_scan[n] = B_vec * x[n]
+        A_scan = xp.zeros((N, 2, 2), dtype=A_mat.dtype)
+        A_scan[:] = A_mat  # broadcast A_mat into every row
+        c_scan = B_vec[None, :, None] * x[:, None, :]  # (N, 2, B)
+
+        # Hillis-Steele inclusive prefix scan.
+        # Operator: (A_r, c_r) ∘ (A_l, c_l) = (A_r @ A_l, A_r @ c_l + c_r)
+        # After the scan, A_scan[n] = A^(n+1) and
+        # c_scan[n] = Σ_{k=0..n} A^(n-k) @ B_vec * x[k].
+        stride = 1
+        while stride < N:
+            right_A = A_scan[stride:]  # (N-stride, 2, 2)
+            left_A = A_scan[:-stride]  # (N-stride, 2, 2)
+            right_c = c_scan[stride:]  # (N-stride, 2, B)
+            left_c = c_scan[:-stride]  # (N-stride, 2, B)
+
+            A_scan[stride:] = right_A @ left_A
+            c_scan[stride:] = right_A @ left_c + right_c
+            stride *= 2
+
+        # Recover all states: z[n+1] = A_scan[n] @ z_init + c_scan[n]
+        z_from_scan = A_scan @ z_init[None, :, :] + c_scan  # (N, 2, B)
+
+        # z[0..N-1] for output: prepend z_init, drop z[N].
+        z_needed = xp.zeros((N, 2, batch_size), dtype=x.dtype)
+        z_needed[0] = z_init
+        z_needed[1:] = z_from_scan[:-1]
+
+        # y[n] = b0 * x[n] + z[n][0]; output becomes input for the next section.
+        x = _b0 * x + z_needed[:, 0, :]  # (N, B)
+
+        # Final state for this section: z[N]
+        zi_out[s] = z_from_scan[-1]
+
+    # Restore shapes.
+    x = xp.reshape(x, (N,) + batch_shape)
+    zi_out = xp.reshape(zi_out, (n_sections, 2) + batch_shape)
+    x = xp.moveaxis(x, 0, axis_idx)
+    zi_out = xp.moveaxis(zi_out, 1, axis_idx + 1)
+    return x, zi_out
+
+
 def _fir_filt_fft(b, data, zi, axis_idx, xp):
     """FIR filtering via FFT convolution with streaming state.
 

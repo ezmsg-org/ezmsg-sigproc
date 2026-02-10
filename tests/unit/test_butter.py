@@ -354,3 +354,62 @@ def test_butterworth_benchmark(backend, n_channels, benchmark):
         return outputs
 
     benchmark(process_all_chunks)
+
+
+@requires_mlx
+@pytest.mark.benchmark(group="sosfilt")
+@pytest.mark.parametrize("n_channels", [32, 256, 1024])
+@pytest.mark.parametrize("backend", ["mlx", "numpy"])
+def test_sosfilt_benchmark(backend, n_channels, benchmark):
+    """Benchmark _sosfilt_xp (MLX) vs scipy.signal.sosfilt (numpy) directly."""
+    from ezmsg.sigproc.filter import _sosfilt_xp
+
+    fs = 1000.0
+    chunk_samples = 256
+    n_chunks = 20
+    order = 4
+
+    # Design filter
+    sos_np = scipy.signal.butter(order, [30.0, 100.0], btype="bandpass", output="sos", fs=fs)
+    zi_template = scipy.signal.sosfilt_zi(sos_np)  # (n_sections, 2)
+
+    # Build chunks and per-chunk zi (tiled to channel count)
+    rng = np.random.default_rng(42)
+    chunks = []
+    for i in range(n_chunks):
+        chunks.append(rng.standard_normal((chunk_samples, n_channels)).astype(np.float32))
+
+    # Tile zi: (n_sections, 2) → (n_sections, 2, n_channels)
+    zi_np = np.tile(zi_template[:, :, None], (1, 1, n_channels))  # axis_idx=0, so 2 is at position 1
+
+    if backend == "mlx":
+        import mlx.core as mx
+
+        xp = mx
+        chunks_xp = [mx.array(c) for c in chunks]
+        sos_xp = mx.array(sos_np.astype(np.float32))
+        zi_state = mx.array(zi_np.astype(np.float32))
+
+        # Warmup
+        _, zi_state = _sosfilt_xp(sos_xp, chunks_xp[0], axis_idx=0, zi=zi_state, xp=xp)
+        mx.eval(zi_state)
+
+        def run():
+            zi = zi_state
+            for chunk in chunks_xp[1:]:
+                out, zi = _sosfilt_xp(sos_xp, chunk, axis_idx=0, zi=zi, xp=xp)
+            mx.eval(out)
+            return out
+    else:
+        zi_state = zi_np.copy()
+
+        # Warmup
+        _, zi_state = scipy.signal.sosfilt(sos_np, chunks[0], axis=0, zi=zi_state)
+
+        def run():
+            zi = zi_state
+            for chunk in chunks[1:]:
+                out, zi = scipy.signal.sosfilt(sos_np, chunk, axis=0, zi=zi)
+            return out
+
+    benchmark(run)
