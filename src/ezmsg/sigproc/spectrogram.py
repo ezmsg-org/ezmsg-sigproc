@@ -7,7 +7,7 @@ from ezmsg.baseproc import (
     CompositeProcessor,
 )
 from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.util.messages.modify import modify_axis
+from ezmsg.util.messages.modify import ModifyAxisSettings, ModifyAxisTransformer
 
 from .spectrum import (
     SpectralOutput,
@@ -62,7 +62,7 @@ class SpectrogramTransformer(CompositeProcessor[SpectrogramSettings, AxisArray, 
                 transform=settings.transform,
                 output=settings.output,
             ),
-            "modify_axis": modify_axis(name_map={"win": "time"}),
+            "modify_axis": ModifyAxisTransformer(settings=ModifyAxisSettings(name_map={"win": "time"})),
         }
 
 
