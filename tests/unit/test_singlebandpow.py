@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 from ezmsg.util.messages.axisarray import AxisArray
 
 from ezmsg.sigproc.butterworthfilter import ButterworthFilterSettings
@@ -9,6 +10,7 @@ from ezmsg.sigproc.singlebandpow import (
     SquareLawBandPowerSettings,
     SquareLawBandPowerTransformer,
 )
+from tests.helpers.util import requires_mlx
 
 
 def _make_sinusoid(
@@ -178,3 +180,51 @@ def test_squarelaw_bandpower():
     assert (
         abs(mean_power - expected_ms) < 0.25 * expected_ms
     ), f"Expected power ~{expected_ms:.3f}, got {mean_power:.3f}"
+
+
+@requires_mlx
+@pytest.mark.benchmark(group="rms-bandpower")
+@pytest.mark.parametrize("n_channels", [32, 256, 1024])
+@pytest.mark.parametrize("backend", ["numpy", "mlx"])
+def test_rms_bandpower_benchmark(backend, n_channels, benchmark):
+    """Benchmark RMSBandPowerTransformer with numpy vs MLX backends."""
+    freq, amplitude, fs = 50.0, 2.0, 30_000.0
+    bin_duration = 0.05
+    chunk_samples = int(0.005 * fs)  # 50 samples — one bin per chunk
+    n_chunks = 20
+
+    bandpass = ButterworthFilterSettings(order=4, coef_type="sos", cuton=30.0, cutoff=70.0)
+
+    settings = RMSBandPowerSettings(
+        bandpass=bandpass,
+        bin_duration=bin_duration,
+        apply_sqrt=True,
+    )
+
+    # Pre-generate all chunk messages
+    chunks = []
+    for i in range(n_chunks + 1):  # +1 for warmup
+        t = (np.arange(chunk_samples) + i * chunk_samples) / fs
+        data = amplitude * np.sin(2 * np.pi * freq * t[:, None] * np.ones((1, n_channels)))
+        axes = {"time": AxisArray.LinearAxis(gain=1.0 / fs, offset=i * chunk_samples / fs)}
+        if backend == "mlx":
+            import mlx.core as mx
+
+            data = mx.array(data.astype(np.float32))
+        chunks.append(AxisArray(data, dims=["time", "ch"], axes=axes))
+
+    xformer = RMSBandPowerTransformer(settings)
+    warmup = xformer(chunks[0])
+    if backend == "mlx":
+        import mlx.core as mx
+
+        if warmup is not None and hasattr(warmup.data, "__array__"):
+            mx.eval(warmup.data)
+
+    def process_all_chunks():
+        outputs = [xformer(chunk) for chunk in chunks[1:]]
+        if backend == "mlx":
+            mx.eval(*[o.data for o in outputs if o.data.size > 0])
+        return outputs
+
+    benchmark(process_all_chunks)

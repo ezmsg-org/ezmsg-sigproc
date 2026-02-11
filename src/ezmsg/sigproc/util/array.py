@@ -46,6 +46,13 @@ def xp_create(fn, *args, dtype=None, device=None, **extra):
     return fn(*args, **kwargs)
 
 
+def is_complex_dtype(dtype) -> bool:
+    """Check whether *dtype* is a complex type, portably across backends."""
+    if hasattr(dtype, "kind"):
+        return dtype.kind == "c"
+    return "complex" in str(dtype).lower()
+
+
 def is_float_dtype(xp, dtype) -> bool:
     """Check whether *dtype* is a real floating-point type, portably."""
     try:

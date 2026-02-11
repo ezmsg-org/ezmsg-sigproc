@@ -6,6 +6,7 @@ from frozendict import frozendict
 
 from ezmsg.sigproc.butterworthfilter import ButterworthFilterSettings, ButterworthFilterTransformer
 from tests.helpers.empty_time import check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
+from tests.helpers.util import requires_mlx
 
 
 @pytest.mark.parametrize(
@@ -298,3 +299,118 @@ def test_butterworth_empty_first():
     result = proc(empty)
     check_empty_result(result)
     check_state_not_corrupted(proc, normal)
+
+
+@requires_mlx
+@pytest.mark.benchmark(group="butterworth")
+@pytest.mark.parametrize("n_channels", [32, 256, 1024])
+@pytest.mark.parametrize("backend", ["mlx", "numpy"])
+def test_butterworth_benchmark(backend, n_channels, benchmark):
+    """Benchmark Butterworth filter: numpy vs MLX input."""
+    fs = 1000.0
+    chunk_samples = 256
+    n_chunks = 20
+    order = 4
+
+    settings = ButterworthFilterSettings(
+        axis="time",
+        order=order,
+        cuton=30.0,
+        cutoff=100.0,
+        coef_type="sos",
+    )
+
+    # Build chunks
+    rng = np.random.default_rng(42)
+    chunks = []
+    for i in range(n_chunks):
+        d = rng.standard_normal((chunk_samples, n_channels)).astype(np.float32)
+        _time_axis = AxisArray.TimeAxis(fs=fs, offset=i * chunk_samples / fs)
+        axes = frozendict(
+            {
+                "time": _time_axis,
+                "ch": AxisArray.CoordinateAxis(data=np.arange(n_channels).astype(str), dims=["ch"]),
+            }
+        )
+        if backend == "mlx":
+            import mlx.core as mx
+
+            chunks.append(AxisArray(mx.array(d), dims=["time", "ch"], axes=axes, key="bench"))
+        else:
+            chunks.append(AxisArray(d, dims=["time", "ch"], axes=axes, key="bench"))
+
+    # Warmup
+    xformer = ButterworthFilterTransformer(settings)
+    warmup = xformer(chunks[0])
+    if backend == "mlx":
+        import mlx.core as mx
+
+        mx.eval(warmup.data)
+
+    def process_all_chunks():
+        outputs = [xformer(chunk) for chunk in chunks[1:]]
+        if backend == "mlx":
+            mx.eval(*[o.data for o in outputs])
+        return outputs
+
+    benchmark(process_all_chunks)
+
+
+@requires_mlx
+@pytest.mark.sosfilt
+@pytest.mark.benchmark(group="sosfilt")
+@pytest.mark.parametrize("n_channels", [32, 256, 1024])
+@pytest.mark.parametrize("backend", ["mlx", "numpy"])
+def test_sosfilt_benchmark(backend, n_channels, benchmark):
+    """Benchmark _sosfilt_xp (MLX) vs scipy.signal.sosfilt (numpy) directly."""
+    from ezmsg.sigproc.filter import _sosfilt_xp
+
+    fs = 1000.0
+    chunk_samples = 256
+    n_chunks = 20
+    order = 4
+
+    # Design filter
+    sos_np = scipy.signal.butter(order, [30.0, 100.0], btype="bandpass", output="sos", fs=fs)
+    zi_template = scipy.signal.sosfilt_zi(sos_np)  # (n_sections, 2)
+
+    # Build chunks and per-chunk zi (tiled to channel count)
+    rng = np.random.default_rng(42)
+    chunks = []
+    for i in range(n_chunks):
+        chunks.append(rng.standard_normal((chunk_samples, n_channels)).astype(np.float32))
+
+    # Tile zi: (n_sections, 2) → (n_sections, 2, n_channels)
+    zi_np = np.tile(zi_template[:, :, None], (1, 1, n_channels))  # axis_idx=0, so 2 is at position 1
+
+    if backend == "mlx":
+        import mlx.core as mx
+
+        xp = mx
+        chunks_xp = [mx.array(c) for c in chunks]
+        sos_xp = mx.array(sos_np.astype(np.float32))
+        zi_state = mx.array(zi_np.astype(np.float32))
+
+        # Warmup
+        _, zi_state = _sosfilt_xp(sos_xp, chunks_xp[0], axis_idx=0, zi=zi_state, xp=xp)
+        mx.eval(zi_state)
+
+        def run():
+            zi = zi_state
+            for chunk in chunks_xp[1:]:
+                out, zi = _sosfilt_xp(sos_xp, chunk, axis_idx=0, zi=zi, xp=xp)
+            mx.eval(out)
+            return out
+    else:
+        zi_state = zi_np.copy()
+
+        # Warmup
+        _, zi_state = scipy.signal.sosfilt(sos_np, chunks[0], axis=0, zi=zi_state)
+
+        def run():
+            zi = zi_state
+            for chunk in chunks[1:]:
+                out, zi = scipy.signal.sosfilt(sos_np, chunk, axis=0, zi=zi)
+            return out
+
+    benchmark(run)

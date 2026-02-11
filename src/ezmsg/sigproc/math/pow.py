@@ -7,7 +7,6 @@ Element-wise power of the data.
 """
 
 import ezmsg.core as ez
-from array_api_compat import get_namespace
 from ezmsg.baseproc import BaseTransformer, BaseTransformerUnit
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
@@ -20,8 +19,7 @@ class PowSettings(ez.Settings):
 
 class PowTransformer(BaseTransformer[PowSettings, AxisArray, AxisArray]):
     def _process(self, message: AxisArray) -> AxisArray:
-        xp = get_namespace(message.data)
-        return replace(message, data=xp.pow(message.data, self.settings.exponent))
+        return replace(message, data=message.data**self.settings.exponent)
 
 
 class Pow(BaseTransformerUnit[PowSettings, AxisArray, AxisArray, PowTransformer]):

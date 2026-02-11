@@ -2,9 +2,11 @@
 Aggregation operations over arrays.
 
 .. note::
-    :obj:`AggregateTransformer` supports the :doc:`Array API standard </guides/explanations/array_api>`,
-    enabling use with NumPy, CuPy, PyTorch, and other compatible array libraries.
-    :obj:`RangedAggregateTransformer` currently requires NumPy arrays.
+    :obj:`AggregateTransformer` and :obj:`RangedAggregateTransformer` support the
+    :doc:`Array API standard </guides/explanations/array_api>`, enabling use with
+    NumPy, CuPy, PyTorch, and other compatible array libraries.
+    Operations not available on a given backend (nan-variants, trapezoid) fall back
+    to NumPy automatically.
 """
 
 import typing
@@ -131,7 +133,7 @@ class RangedAggregateTransformer(
         slices = []
         for start, stop in self.settings.bands:
             inds = np.where(np.logical_and(self._state.ax_vec >= start, self._state.ax_vec <= stop))[0]
-            slices.append(np.s_[inds[0] : inds[-1] + 1])
+            slices.append(slice(int(inds[0]), int(inds[-1]) + 1))
             if hasattr(target_axis, "data"):
                 if self._state.ax_vec.dtype.type is np.str_:
                     sl_dat = f"{self._state.ax_vec[start]} - {self._state.ax_vec[stop]}"
@@ -151,40 +153,59 @@ class RangedAggregateTransformer(
     def _process(self, message: AxisArray) -> AxisArray:
         axis = self.settings.axis or message.dims[0]
         ax_idx = message.get_axis_idx(axis)
-        agg_func = AGGREGATORS[self.settings.operation]
+        xp = get_namespace(message.data)
+        op = self.settings.operation
 
-        if self.settings.operation in [
-            AggregationFunction.TRAPEZOID,
-        ]:
-            # Special handling for methods that require x-coordinates.
+        if op == AggregationFunction.TRAPEZOID:
+            # Trapezoid requires x-coordinates and has no Array API equivalent;
+            # fall back to numpy.
+            np_data = np.asarray(message.data)
             out_data = [
-                agg_func(
-                    slice_along_axis(message.data, sl, axis=ax_idx),
+                np.trapezoid(
+                    slice_along_axis(np_data, sl, axis=ax_idx),
                     x=self._state.ax_vec[sl],
                     axis=ax_idx,
                 )
                 for sl in self._state.slices
             ]
+            stacked = np.stack(out_data, axis=ax_idx)
+            # Convert back to original backend if needed
+            if xp is not np:
+                stacked = xp.asarray(stacked)
         else:
-            out_data = [
-                agg_func(slice_along_axis(message.data, sl, axis=ax_idx), axis=ax_idx) for sl in self._state.slices
-            ]
+            # Use Array API function when available, fall back to numpy AGGREGATORS
+            func_name = op.value
+            if hasattr(xp, func_name):
+                agg_func = getattr(xp, func_name)
+                out_data = [
+                    agg_func(slice_along_axis(message.data, sl, axis=ax_idx), axis=ax_idx) for sl in self._state.slices
+                ]
+                stacked = xp.stack(out_data, axis=ax_idx)
+            else:
+                # nan-variants etc. — fall back to numpy
+                np_agg = AGGREGATORS[op]
+                np_data = np.asarray(message.data)
+                out_data = [
+                    np_agg(slice_along_axis(np_data, sl, axis=ax_idx), axis=ax_idx) for sl in self._state.slices
+                ]
+                stacked = np.stack(out_data, axis=ax_idx)
+                if xp is not np:
+                    stacked = xp.asarray(stacked)
 
         msg_out = replace(
             message,
-            data=np.stack(out_data, axis=ax_idx),
+            data=stacked,
             axes={**message.axes, axis: self._state.out_axis},
         )
 
-        if self.settings.operation in [
-            AggregationFunction.ARGMIN,
-            AggregationFunction.ARGMAX,
-        ]:
+        if op in (AggregationFunction.ARGMIN, AggregationFunction.ARGMAX):
+            # Post-process: convert indices to axis coordinate values.
+            # ax_vec is always numpy; offsets must be numpy for fancy indexing.
             out_data = []
             for sl_ix, sl in enumerate(self._state.slices):
-                offsets = np.take(msg_out.data, [sl_ix], axis=ax_idx)
+                offsets = np.asarray(slice_along_axis(msg_out.data, sl_ix, axis=ax_idx))
                 out_data.append(self._state.ax_vec[sl][offsets])
-            msg_out.data = np.concatenate(out_data, axis=ax_idx)
+            msg_out.data = np.stack(out_data, axis=ax_idx)
 
         return msg_out
 

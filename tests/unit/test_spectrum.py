@@ -17,6 +17,7 @@ from tests.helpers.empty_time import FS, N_CH
 from tests.helpers.util import (
     assert_messages_equal,
     create_messages_with_periodic_signal,
+    requires_mlx,
 )
 
 
@@ -239,3 +240,115 @@ def test_spectrum_empty_first():
     result2 = proc(normal)
     assert result2.data.shape[0] == 5
     assert np.all(np.isfinite(result2.data))
+
+
+@requires_mlx
+@pytest.mark.parametrize("transform", [SpectralTransform.REL_DB, SpectralTransform.REL_POWER])
+@pytest.mark.parametrize("output", [SpectralOutput.POSITIVE, SpectralOutput.NEGATIVE, SpectralOutput.FULL])
+def test_spectrum_mlx(transform: SpectralTransform, output: SpectralOutput):
+    """SpectrumTransformer on MLX arrays should produce correct spectral peaks."""
+    import mlx.core as mx
+
+    win_dur = 1.0
+    fs = 1000.0
+    sin_params = [
+        {"a": 1.0, "f": 10.0, "p": 0.0, "dur": 5.0},
+        {"a": 0.5, "f": 20.0, "p": np.pi / 7, "dur": 5.0},
+        {"a": 0.2, "f": 200.0, "p": np.pi / 11, "dur": 5.0},
+    ]
+    win_len = int(win_dur * fs)
+    messages_np = create_messages_with_periodic_signal(sin_params=sin_params, fs=fs, msg_dur=win_dur, win_step_dur=None)
+    msg_np_orig = messages_np[0]
+
+    # Build an MLX message
+    msg_mx = AxisArray(
+        data=mx.array(msg_np_orig.data.astype(np.float32)),
+        dims=msg_np_orig.dims,
+        axes=msg_np_orig.axes,
+    )
+
+    settings = SpectrumSettings(axis="time", window=WindowFunction.HAMMING, transform=transform, output=output)
+
+    proc_mx = SpectrumTransformer(settings)
+    result = proc_mx(msg_mx)
+
+    assert isinstance(result.data, mx.array), f"Expected mx.array, got {type(result.data)}"
+    assert "freq" in result.dims
+    assert "freq" in result.axes
+    assert result.axes["freq"].gain == 1 / win_dur
+
+    # Check correct spectral shape
+    fax_ix = result.get_axis_idx("freq")
+    f_len = win_len if output == SpectralOutput.FULL else (win_len // 2 + 1 - (win_len % 2))
+    assert result.data.shape[fax_ix] == f_len
+
+    # Verify peaks are at the expected frequencies
+    result_np = np.asarray(result.data)
+    f_vec = result.axes["freq"].value(np.arange(f_len))
+    if output == SpectralOutput.NEGATIVE:
+        f_vec = np.abs(f_vec)
+    for s_p in sin_params:
+        f_ix = np.argmin(np.abs(f_vec - s_p["f"]))
+        peak_inds = np.argmax(
+            slice_along_axis(result_np, slice(f_ix - 3, f_ix + 3), axis=fax_ix),
+            axis=fax_ix,
+        )
+        assert np.all(peak_inds == 3), f"Peak not at expected freq {s_p['f']} Hz"
+
+
+@requires_mlx
+@pytest.mark.benchmark(group="spectrum")
+@pytest.mark.parametrize("n_channels", [32, 256, 1024])
+@pytest.mark.parametrize("backend", ["numpy", "mlx"])
+def test_spectrum_benchmark(backend, n_channels, benchmark):
+    """Benchmark SpectrumTransformer: numpy vs MLX on multi-window input."""
+    fs = 1000.0
+    win_dur = 1.0
+    n_windows = 50
+    win_samples = int(win_dur * fs)
+
+    rng = np.random.default_rng(42)
+    np_data = rng.standard_normal((n_windows, win_samples, n_channels)).astype(np.float32)
+
+    settings = SpectrumSettings(axis="time", window=WindowFunction.HAMMING, transform=SpectralTransform.REL_DB)
+
+    if backend == "mlx":
+        import mlx.core as mx
+
+        msg = AxisArray(
+            data=mx.array(np_data),
+            dims=["win", "time", "ch"],
+            axes={
+                "win": AxisArray.LinearAxis(gain=win_dur, offset=0.0),
+                "time": AxisArray.TimeAxis(fs=fs),
+            },
+        )
+    else:
+        msg = AxisArray(
+            data=np_data,
+            dims=["win", "time", "ch"],
+            axes={
+                "win": AxisArray.LinearAxis(gain=win_dur, offset=0.0),
+                "time": AxisArray.TimeAxis(fs=fs),
+            },
+        )
+
+    proc = SpectrumTransformer(settings)
+
+    # Warmup
+    warmup = proc(msg)
+    if backend == "mlx":
+        mx.eval(warmup.data)
+
+    def run():
+        result = proc(msg)
+        if backend == "mlx":
+            mx.eval(result.data)
+        return result
+
+    result = benchmark(run)
+
+    if backend == "mlx":
+        import mlx.core as mx
+
+        assert isinstance(result.data, mx.array)
