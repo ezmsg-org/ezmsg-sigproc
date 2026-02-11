@@ -1,5 +1,7 @@
 """Inject synthetic sinusoidal signals into a data stream."""
 
+import typing
+
 import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
@@ -60,7 +62,7 @@ class SignalInjectorTransformer(
 
 class SignalInjector(BaseTransformerUnit[SignalInjectorSettings, AxisArray, AxisArray, SignalInjectorTransformer]):
     SETTINGS = SignalInjectorSettings
-    INPUT_FREQUENCY = ez.InputStream(float | None)
+    INPUT_FREQUENCY = ez.InputStream(typing.Optional[float])
     INPUT_AMPLITUDE = ez.InputStream(float)
 
     @ez.subscriber(INPUT_FREQUENCY)
