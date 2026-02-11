@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import typing
 
 import ezmsg.core as ez
@@ -165,7 +166,7 @@ class MergeProcessor(BaseStatefulTransformer[MergeSettings, AxisArray, AxisArray
 
         # Gain compatibility check.
         b_gain = self._extract_gain(message)
-        if self._state.gain is not None and b_gain != self._state.gain:
+        if self._state.gain is not None and not math.isclose(b_gain, self._state.gain):
             self._full_reset(align_axis)
             # Set the base-class hash so the next compatible A goes straight
             # to _process instead of triggering another full reset.
