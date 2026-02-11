@@ -10,8 +10,9 @@ Signal processing primitives for the [ezmsg](https://www.ezmsg.org) message-pass
 * **Windowing** - Sliding windows and buffering utilities
 * **Math operations** - Arithmetic, log, abs, difference, and more
 * **Signal generation** - Synthetic signal generators
+* More! Brows the API documentation for more details.
 
-All modules use `AxisArray` as the primary data structure for passing signals between components.
+All modules use [`AxisArray`](https://www.ezmsg.org/ezmsg/reference/API/axisarray.html) as the primary data structure for passing signals between components. The default data backend is NumPy, but other backends are supported via the Array API such as CuPy and MLX.
 
 ## Installation
 

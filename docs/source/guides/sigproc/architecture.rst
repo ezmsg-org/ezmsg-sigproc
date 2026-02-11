@@ -33,9 +33,10 @@ Key Modules
 Where to Learn Next
 -------------------
 
-* Study the :doc:`base` page to master the processor architecture.
+* Read the :doc:`../explanations/sigproc` explainer to master the processor architecture.
+* Follow the :doc:`../tutorials/signalprocessing` to build a processor and Unit from scratch.
+* See the `ezmsg-baseproc documentation <https://www.ezmsg.org/ezmsg-baseproc/>`_ for the base class API and implementation details.
 * Explore unit tests in the repository for hands-on examples of composing processors and Units.
 * Review the `ezmsg framework <https://www.ezmsg.org>`_ to understand the surrounding ecosystem.
-* Experiment with the code—try running processors standalone and then integrate them into a small pipeline to observe the trade-offs firsthand.
 
 This approach equips newcomers to choose the right level of abstraction—raw processor, Unit wrapper, or full pipeline—based on the demands of their analysis or streaming application.
