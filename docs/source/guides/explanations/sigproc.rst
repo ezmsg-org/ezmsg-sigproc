@@ -9,7 +9,7 @@ It also comes with a collection of pre-built signal processing classes and relev
 A list of available signal processors and ezmsg Units can be found in the (TBD) `ezmsg-sigproc reference <http://sigproc.ezmsg.org>`_.
 
 
-|ezmsg_logo_small| Rationale For Implementation
+Rationale For Implementation
 ********************************************************
 
 Providing a flexible and extensible framework for signal processing tasks makes it
@@ -20,7 +20,7 @@ Providing a flexible and extensible framework for signal processing tasks makes 
 - allows standalone use outside of an ezmsg context
 
 
-|ezmsg_logo_small| How to decide which processor template to use?
+How to decide which processor template to use?
 ******************************************************************
 
 We use the term "processor" to refer to any class that processes signals. We then separate processors into types based on whether or not they receive input messages (typically signal data), send output messages, or both:
@@ -94,7 +94,7 @@ The decision tree for this classification is as follows:
 
 The leaf nodes in yellow are abstract base classes provided in `ezmsg.sigproc.base` for implementing standalone processors. The table below summarizes these base classes.
 
-|ezmsg_logo_small| Abstract implementations (Base Classes) for standalone processors
+Abstract implementations (Base Classes) for standalone processors
 ***************************************************************************************
 
 
@@ -242,7 +242,7 @@ NOTES:
 do not inherit from ``BaseStatefulProcessor`` and ``BaseStatefulProducer``. They accomplish statefulness by inheriting from the mixin abstract base class ``CompositeStateful``, which implements the state related methods: ``get_state_type``, ``state.setter``, ``state.getter``, ``_hash_message``, ``_reset_state``, and ``stateful_op`` (as well as composite processor chain related methods). However, ``BaseStatefulProcessor``, ``BaseStatefulProducer`` implement ``stateful_op`` method for a single processor in an incompatible way to what is required for composite chains of processors.
 
 
-|ezmsg_logo_small| Implementing a custom standalone processor
+Implementing a custom standalone processor
 ****************************************************************
 
 1. Create a new settings dataclass: ``class MySettings(ez.Settings):``
@@ -268,7 +268,7 @@ do not inherit from ``BaseStatefulProcessor`` and ``BaseStatefulProducer``. They
     * ``ClockProducer`` overrides ``__call__`` in order to provide a synchronous call bypassing the default async behaviour.
 
 
-|ezmsg_logo_small| Abstract implementations (Base Classes) for ezmsg Units using processors
+Abstract implementations (Base Classes) for ezmsg Units using processors
 **********************************************************************************************
 
 Generic TypeVars for ezmsg Units
@@ -314,7 +314,7 @@ Base Classes for ezmsg processor Units:
 
 Note, it is strongly recommended to use `BaseConsumerUnit`, `BaseTransformerUnit`, or `BaseAdaptiveTransformerUnit` for implementing concrete subclasses rather than `BaseProcessorUnit`.
 
-|ezmsg_logo_small| How to implement a custom ezmsg Unit from a standalone processor
+How to implement a custom ezmsg Unit from a standalone processor
 =====================================================================================
 
 1. Create and test custom standalone processor as above.
@@ -353,13 +353,9 @@ Often, all that is required is the following (e.g., for a custom transformer):
 
 .. note:: The type of ProcessorUnit is based on the internal processor and not the input or output of the unit. Input streams are allowed in ProducerUnits and output streams in ConsumerUnits. For an example of such a use case, see ``BaseCounterFirstProducerUnit`` and its subclasses. ``BaseCounterFirstProducerUnit`` has an input stream that receives a flag signal from a clock that triggers a call to the internal producer.
 
-|ezmsg_logo_small| See Also
+See Also
 ********************************
 
 1. `Signal Processor Documentation <sigproc_processor_documentation>`_
 #. `Signal Processing Tutorial <../../tutorials/signalprocessing.html>`_
 #. `Signal Processing HOW TOs <../../how-tos/signalprocessing/main.html>`_
-
-.. |ezmsg_logo_small| image:: ../_static/_images/ezmsg_logo.png
-  :width: 40
-  :alt: ezmsg logo

@@ -8,7 +8,7 @@ We will explore how to do this by recreating the `Downsample` signal processor u
 .. tip:: Downsampling is a common signal processing operation that reduces the sampling rate of a signal by keeping only every nth sample. This is useful for reducing the amount of data to be processed, especially in real-time applications.
 
 
-|ezmsg_logo_small| Choosing your signal processing class
+Choosing your signal processing class
 **********************************************************
 
 We make use of the following decision tree to choose the appropriate signal processing class:
@@ -112,7 +112,7 @@ First, we need to install the `ezmsg-sigproc` package if we haven't already. Thi
     pip install "ezmsg-sigproc"
 
 
-|ezmsg_logo_small| Creating the `Downsample` signal processor
+Creating the `Downsample` signal processor
 *************************************************************
 
 We begin by identifying the components needed to create the `Downsample` signal processor. This includes defining the settings, state, and the main processing class itself.
@@ -199,7 +199,7 @@ Again, our class seems to be missing an ``__init__`` method, but this is because
 
 .. note:: Finally, our transformer is **not async first** as we do not need to prioritise asynchronous processing, which is usually more relevant for processors that interface with IO operations whose timing is unpredictable.
 
-|ezmsg_logo_small| DownsampleTransformer Class
+DownsampleTransformer Class
 *******************************************************
 
 We have already identified that we will be using a stateful transformer, so we will inherit from the ``BaseStatefulTransformer`` class. Create the class definition as follows:
@@ -307,7 +307,7 @@ Finally, we reset the index of the next message's first sample to 0.
 
 .. _processing_data_tutorial:
 
-|ezmsg_logo_small| Processing the Data
+Processing the Data
 ***********************************************
 
 To finish the `DownsampleTransformer` class, we need to actually process the data by downsampling. 
@@ -442,7 +442,7 @@ The final implementation of the ``_process`` method looks like this:
         return msg_out
 
 
-|ezmsg_logo_small| Final DownsampleTransformer Class
+Final DownsampleTransformer Class
 *******************************************************
 
 Confirm that your final `DownsampleTransformer` class looks like this:
@@ -515,7 +515,7 @@ Confirm that your final `DownsampleTransformer` class looks like this:
             return msg_out
 
 
-|ezmsg_logo_small| Using the DownsampleTransformer
+Using the DownsampleTransformer
 **********************************************************
 
 The `Downsample` class is now fully implemented and ready for use in signal processing pipelines. 
@@ -558,7 +558,7 @@ Doing the above is very handy for unit testing your processor as well as for off
 Of course, the real power of `ezmsg` comes from integrating your processor into an `ezmsg` Unit and using it in a processing pipeline. We will see how to do this next.
 
 
-|ezmsg_logo_small| Creating the `Downsample ezmsg` Unit
+Creating the `Downsample ezmsg` Unit
 ***********************************************************
 
 `ezmsg-sigproc` provides convenient ezmsg `Unit` wrappers for all the signal processor base classes. To do this inherit from the appropriate `ezmsg-sigproc` unit class. These are:
@@ -584,13 +584,9 @@ A lot of the behind-the-scenes work is done for you by the `BaseTransformerUnit`
 Connecting it to other `Component`\ s and initialising the transformer are accomplished in the same way that we did in the `Pipeline Tutorial <https://www.ezmsg.org/tutorials/pipeline.html>`_
 
 
-|ezmsg_logo_small| See Also
+See Also
 ************************************
 
 - `Further examples <https://github.com/ezmsg-org/ezmsg/tree/master/examples>`_ can be found in the examples directory in `ezmsg`. These are examples of creating and using `ezmsg` Units and pipelines.
 - `ezmsg-sigproc` has a large number of already implemented signal processors. More information can be found at the :doc:`ezmsg-sigproc reference <../sigproc/content-sigproc>`.
 - :doc:`Downsample class reference <../../api/generated/ezmsg.sigproc.downsample>`
-
-.. |ezmsg_logo_small| image:: ../_static/_images/ezmsg_logo.png
-  :width: 40
-  :alt: ezmsg logo

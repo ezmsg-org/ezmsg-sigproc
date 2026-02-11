@@ -7,8 +7,10 @@ They use :class:`ezmsg.util.messages.axisarray.AxisArray` as the primary data st
 The message's data are typically NumPy arrays, though many transformers support the
 :doc:`Array API standard <../explanations/array_api>` for use with CuPy, PyTorch, and other backends.
 
-.. note:: Some generators might yield valid :class:`AxisArray` messages with ``.data`` size of 0.
-This may occur when the generator receives inadequate data to produce a valid output, such as when windowing or buffering.
+.. note::
+
+   Some generators might yield valid :class:`AxisArray` messages with ``.data`` size of 0.
+   This may occur when the generator receives inadequate data to produce a valid output, such as when windowing or buffering.
 
 `ezmsg-sigproc` contains two types of modules:
 

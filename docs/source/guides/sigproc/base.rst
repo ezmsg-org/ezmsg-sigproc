@@ -11,9 +11,5 @@ For detailed documentation on the base processor architecture, see the `ezmsg-ba
 API Reference
 -------------
 
-The following classes are re-exported from ``ezmsg.baseproc``:
-
-.. automodule:: ezmsg.sigproc.base
-   :members:
-   :show-inheritance:
-   :imported-members:
+The following classes are re-exported from ``ezmsg.baseproc``.
+See the :doc:`ezmsg.sigproc.base API page </api/generated/ezmsg.sigproc.base>` for the full reference.

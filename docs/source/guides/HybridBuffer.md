@@ -1,10 +1,10 @@
-## HybridBuffer
+# HybridBuffer
 
 The HybridBuffer is a stateful, FIFO buffer that combines a deque for fast appends with a contiguous circular buffer for efficient, advancing reads. The synchronization between the deque and the circular buffer can be immediate, upon threshold reaching, or on demand, allowing for flexible data management strategies.
 
 This buffer is designed to be agnostic to the array library used (e.g., NumPy, CuPy, PyTorch) via the Python Array API standard.
 
-### Basic Reading and Writing Behaviour
+## Basic Reading and Writing Behaviour
 
 The following diagram illustrates the states of the HybridBuffer across data writes and reads when `update_strategy="on_demand"`:
 
@@ -39,7 +39,7 @@ H. We then `read(4)` again. This time, a `flush()` is not triggered because we h
 
 Note: `peek(n)` and `seek(n)`, where `n` > `n_available` will raise an error. However, `peek(None)` will return all available samples without error, and `seek(None)` will advance the tail to the end of the available data.
 
-### Overflow Behaviour
+## Overflow Behaviour
 
 The criteria to trigger an overflow are as follows:
 * the deque has more data than there is space in the circular buffer, where space is the combination of previously read samples and unwritten samples in the circular buffer.
@@ -70,7 +70,7 @@ There are a few mitigations to defer flushing to help prevent overflows:
   * Be cautious relying on repeated calls to `peek_at(k, allow_flush=False)` as it scans over the items in the deque which can be slow.
 * When calling `read(n)`, if a flush is necessary, and it will cause an overflow, and the overflow could be prevented with a pre-emptive read up to `n`, then it will do the read in 2 parts. First it will call `peek(n_unread_in_buffer)` and `seek(n_unread_in_buffer)` to read the unread samples in the circular buffer. Second, it will call `peek(n_remaining)` and `seek(n_remaining)` to trigger a flush -- which should no longer cause an overflow -- then read the remaining requested samples and stitch them together.
 
-### Advanced Pointer Manipulation
+## Advanced Pointer Manipulation
 
 The previous section describes how `read`, `peek`, `seek`, and `peek_at` function in normal use cases. It is also possible to call `seek` with a negative value, which will attempt to move the tail pointer backwards over previously-read (or previously sought-over) data by that many samples. `seek` returns the number of samples that were actually moved, which may be less than the requested value if there was insufficient room. Negative seeks can only rewind into previously read data, and positive seeks can only advance into unread data, possibly including data that gets flushed from the deque.
 
