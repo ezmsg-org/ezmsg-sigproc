@@ -1,3 +1,5 @@
+"""Continuous wavelet transform (CWT) for streaming time-frequency analysis."""
+
 import typing
 
 import ezmsg.core as ez
@@ -170,7 +172,7 @@ def cwt(
         scales: The scales to use. If None, the scales will be calculated from the frequencies.
           Note: Scales will be sorted from largest to smallest.
           Note: Use of scales is deprecated in favor of frequencies. Convert scales to frequencies using
-            `pywt.scale2frequency(wavelet, scales, precision=10) * fs` where fs is the sampling frequency.
+          ``pywt.scale2frequency(wavelet, scales, precision=10) * fs`` where fs is the sampling frequency.
 
     Returns:
         A primed Generator object that expects an :obj:`AxisArray` via `.send(axis_array)` of continuous data

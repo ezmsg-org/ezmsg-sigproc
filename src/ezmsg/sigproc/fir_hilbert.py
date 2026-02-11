@@ -1,3 +1,5 @@
+"""FIR Hilbert transform filter for analytic signal and envelope extraction."""
+
 import functools
 import typing
 
@@ -243,17 +245,15 @@ class FIRHilbertEnvelopeTransformer(
         Optional normalization frequency in Hz for gain normalization.
         If None, no normalization is applied.
 
-    Example:
-    -----------------------------
-    ```python
-    processor = FIRHilbertEnvelopeTransformer(
-        settings=FIRHilbertFilterSettings(
-            order=170,
-            f_lo=1.0,
-            f_hi=50.0,
+    Example::
+
+        processor = FIRHilbertEnvelopeTransformer(
+            settings=FIRHilbertFilterSettings(
+                order=170,
+                f_lo=1.0,
+                f_hi=50.0,
+            )
         )
-    )
-    ```
 
     """
 
@@ -320,17 +320,16 @@ class FIRHilbertEnvelopeUnit(
     This unit provides a plug-and-play interface for calculating the envelope using the FIR Hilbert transform on a
     signal in an ezmsg graph-based system. It takes in `AxisArray` inputs and outputs processed data in the same format.
 
-    Example:
-    --------
-    ```python
-    unit = FIRHilbertEnvelopeUnit(
-        settings=FIRHilbertFilterSettings(
-            order=170,
-            f_lo=1.0,
-            f_hi=50.0,
+    Example::
+
+        unit = FIRHilbertEnvelopeUnit(
+            settings=FIRHilbertFilterSettings(
+                order=170,
+                f_lo=1.0,
+                f_hi=50.0,
+            )
         )
-    )
-    ```
+
     """
 
     SETTINGS = FIRHilbertFilterSettings

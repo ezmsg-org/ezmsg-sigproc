@@ -1,3 +1,5 @@
+"""Activation functions (ReLU, sigmoid, logit, etc.) applied element-wise."""
+
 import ezmsg.core as ez
 import scipy.special
 from ezmsg.baseproc import BaseTransformer, BaseTransformerUnit

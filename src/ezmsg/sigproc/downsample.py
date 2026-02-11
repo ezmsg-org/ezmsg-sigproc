@@ -1,3 +1,5 @@
+"""Integer downsampling by selecting every Nth sample along an axis."""
+
 import ezmsg.core as ez
 import numpy as np
 from ezmsg.baseproc import (

@@ -1,3 +1,5 @@
+"""Spectral band power estimation via windowed FFT and aggregation."""
+
 from dataclasses import field
 
 import ezmsg.core as ez

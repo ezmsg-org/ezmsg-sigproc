@@ -1,3 +1,5 @@
+"""Parks-McClellan (Remez) optimal equiripple FIR filter design and application."""
+
 import functools
 import typing
 

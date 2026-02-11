@@ -1,3 +1,5 @@
+"""Extract a named axis from an AxisArray as a standalone array."""
+
 import ezmsg.core as ez
 import numpy as np
 from ezmsg.baseproc import BaseTransformer, BaseTransformerUnit

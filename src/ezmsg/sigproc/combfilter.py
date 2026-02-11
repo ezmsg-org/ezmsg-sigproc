@@ -1,3 +1,5 @@
+"""Comb filter for suppressing a fundamental frequency and its harmonics."""
+
 import functools
 import typing
 

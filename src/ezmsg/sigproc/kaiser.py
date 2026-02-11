@@ -1,3 +1,5 @@
+"""Kaiser window FIR filter design and application."""
+
 import functools
 import typing
 

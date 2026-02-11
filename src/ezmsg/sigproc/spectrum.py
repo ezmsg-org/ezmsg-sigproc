@@ -1,3 +1,5 @@
+"""FFT-based power spectrum estimation with configurable window functions."""
+
 import enum
 import math
 import typing

@@ -1,3 +1,5 @@
+"""Remove linear or constant trends from data along an axis."""
+
 import ezmsg.core as ez
 import scipy.signal as sps
 from ezmsg.baseproc import BaseTransformerUnit

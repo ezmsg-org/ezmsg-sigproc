@@ -1,3 +1,5 @@
+"""Gaussian kernel smoothing filter."""
+
 import warnings
 from typing import Callable
 

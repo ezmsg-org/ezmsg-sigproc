@@ -184,9 +184,9 @@ class HybridBuffer:
             n_samples: The number of samples to retrieve. If None, returns all
                 unread samples.
             out: Optionally, a destination array to store the samples.
-                If provided, must have shape (n_samples, *other_shape) where
+                If provided, must have shape ``(n_samples, *other_shape)`` where
                 other_shape matches the shape of the samples in the buffer.
-                If `out` is provided then the data will always be copied into it,
+                If ``out`` is provided then the data will always be copied into it,
                 even if they are contiguous in the buffer.
 
         Returns:
@@ -303,8 +303,9 @@ class HybridBuffer:
     def flush(self):
         """
         Transfers all data from the deque to the circular buffer.
+
         Note: This may overwrite data depending on the overflow strategy,
-            which will invalidate previous state variables.
+        which will invalidate previous state variables.
         """
         if not self._deque:
             return

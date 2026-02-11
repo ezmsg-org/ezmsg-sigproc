@@ -1,3 +1,5 @@
+"""Core IIR/FIR filtering infrastructure with BA and SOS coefficient support."""
+
 import typing
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field

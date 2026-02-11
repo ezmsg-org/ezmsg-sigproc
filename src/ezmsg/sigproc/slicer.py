@@ -1,3 +1,5 @@
+"""Select a subset of data along a named axis using slice notation."""
+
 import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt

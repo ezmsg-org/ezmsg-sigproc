@@ -1,3 +1,5 @@
+"""Backwards-compatible re-exports from :mod:`.spectrum`."""
+
 from .spectrum import OptionsEnum as OptionsEnum
 from .spectrum import SpectralOutput as SpectralOutput
 from .spectrum import SpectralTransform as SpectralTransform

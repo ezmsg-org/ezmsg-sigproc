@@ -1,3 +1,5 @@
+"""Adaptive standard scaling using exponentially weighted moving statistics."""
+
 import typing
 
 import ezmsg.core as ez

@@ -1,3 +1,5 @@
+"""Resample signals to a target rate using interpolation."""
+
 import asyncio
 import math
 import time

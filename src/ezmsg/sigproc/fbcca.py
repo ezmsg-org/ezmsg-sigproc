@@ -1,3 +1,5 @@
+"""Filter-bank canonical correlation analysis (FBCCA) for frequency detection."""
+
 import math
 import typing
 from dataclasses import field

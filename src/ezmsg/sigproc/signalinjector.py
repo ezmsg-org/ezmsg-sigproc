@@ -1,3 +1,5 @@
+"""Inject synthetic sinusoidal signals into a data stream."""
+
 import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
