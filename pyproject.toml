@@ -9,12 +9,12 @@ authors = [
 ]
 license = "MIT"
 readme = "README.md"
-requires-python = ">=3.10.15"
+requires-python = ">=3.10"
 dynamic = ["version"]
 dependencies = [
   "array-api-compat>=1.11.1",
-  "ezmsg-baseproc>=1.3.0",
-  "ezmsg>=3.6.0",
+  "ezmsg[axisarray]>=3.7.2",
+  "ezmsg-baseproc>=1.5.0",
   "mlx>=0.18.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
   "numba>=0.61.0",
   "numpy>=1.26.0",
@@ -93,5 +93,3 @@ known-third-party = ["ezmsg", "ezmsg.baseproc"]
 [tool.uv.sources]
 # Uncomment to use development version of ezmsg from git
 #ezmsg = { git = "https://github.com/ezmsg-org/ezmsg.git", branch = "dev" }
-ezmsg-baseproc = { path = "../ezmsg-baseproc", editable = true }
-ezmsg = { path = "../ezmsg", editable = true }
