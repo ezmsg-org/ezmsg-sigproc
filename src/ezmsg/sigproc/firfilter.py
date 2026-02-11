@@ -1,3 +1,5 @@
+"""FIR filter design and application using scipy.signal.firwin."""
+
 import functools
 import typing
 
@@ -54,10 +56,11 @@ class FIRFilterSettings(FilterBaseSettings):
     """
     Set to True to scale the coefficients so that the frequency response is exactly unity at a certain
     frequency. That frequency is either:
+
     * 0 (DC) if the first passband starts at 0 (i.e. pass_zero is True)
     * fs/2 (the Nyquist frequency) if the first passband ends at fs/2
-        (i.e the filter is a single band highpass filter);
-        center of first passband otherwise
+      (i.e the filter is a single band highpass filter);
+      center of first passband otherwise
     """
 
     wn_hz: bool = True

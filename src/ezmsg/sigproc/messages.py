@@ -1,3 +1,5 @@
+"""Deprecated message types; use :class:`ezmsg.util.messages.axisarray.AxisArray` instead."""
+
 import time
 import warnings
 

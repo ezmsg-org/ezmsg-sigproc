@@ -1,3 +1,5 @@
+"""Chebyshev Type I IIR filter design and application."""
+
 import functools
 import typing
 

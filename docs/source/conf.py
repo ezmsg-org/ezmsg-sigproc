@@ -30,6 +30,7 @@ extensions = [
     "sphinx.ext.intersphinx",
     "sphinx.ext.viewcode",
     "sphinx.ext.duration",
+    "sphinx.ext.graphviz",
     # "sphinx_autodoc_typehints",  # Disabled due to compatibility issue
     "sphinx_copybutton",
     "myst_parser",  # For markdown files
@@ -70,7 +71,7 @@ add_module_names = False
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3/", None),
     "numpy": ("https://numpy.org/doc/stable/", None),
-    "scipy": ("https://scipy.org/doc/scipy/", None),
+    "scipy": ("https://docs.scipy.org/doc/scipy/", None),
     "ezmsg": ("https://www.ezmsg.org/ezmsg/", None),
     "ezmsg.baseproc": ("https://www.ezmsg.org/ezmsg-baseproc/", None),
     "ezmsg.learn": ("https://www.ezmsg.org/ezmsg-learn/", None),

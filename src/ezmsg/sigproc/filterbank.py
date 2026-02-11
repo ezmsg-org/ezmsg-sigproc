@@ -1,3 +1,5 @@
+"""Parallel filterbank processing with convolution, FFT, or automatic mode selection."""
+
 import functools
 import math
 import typing

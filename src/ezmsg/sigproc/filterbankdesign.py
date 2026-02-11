@@ -1,3 +1,5 @@
+"""Kaiser-window filterbank design with configurable bands and processing mode."""
+
 import typing
 
 import ezmsg.core as ez

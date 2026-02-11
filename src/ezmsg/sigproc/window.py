@@ -1,3 +1,5 @@
+"""Sliding and tumbling window segmentation of streaming data."""
+
 import enum
 import traceback
 import typing

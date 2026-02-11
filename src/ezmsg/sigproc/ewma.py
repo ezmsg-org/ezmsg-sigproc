@@ -1,3 +1,5 @@
+"""Exponentially weighted moving average (EWMA) utilities and parameter conversion."""
+
 import functools
 from dataclasses import field
 

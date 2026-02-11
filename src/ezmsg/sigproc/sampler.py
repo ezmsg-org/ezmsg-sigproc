@@ -1,3 +1,5 @@
+"""Triggered windowed sampling from a buffered signal stream."""
+
 import asyncio
 import copy
 import traceback
@@ -54,9 +56,9 @@ class SamplerSettings(ez.Settings):
     estimate_alignment: bool = True
     """
     If true, use message timestamp fields and reported sampling rate to estimate
-     sample-accurate alignment for samples.
-    If false, sampling will be limited to incoming message rate -- "Block timing"
-    NOTE: For faster-than-realtime playback --  Incoming timestamps must reflect
+    sample-accurate alignment for samples.
+    If false, sampling will be limited to incoming message rate -- "Block timing".
+    NOTE: For faster-than-realtime playback -- Incoming timestamps must reflect
     "realtime" operation for estimate_alignment to operate correctly.
     """
 

@@ -35,9 +35,8 @@ def sliding_win_oneaxis(s: sparse.SparseArray, nwin: int, axis: int, step: int =
 
     - Accepts a single `nwin` and a single `axis`.
     - Inserts a new 'win' axis immediately BEFORE the original target axis.
-      Output shape:
-        s.shape[:axis] + (W,) + (nwin,) + s.shape[axis+1:]
-      where W = s.shape[axis] - (nwin - 1).
+      Output shape: ``s.shape[:axis] + (W,) + (nwin,) + s.shape[axis+1:]``
+      where ``W = s.shape[axis] - (nwin - 1)``.
     - If `step > 1`, stepping is applied by slicing along the new windows axis (same observable behavior
       as doing `slice_along_axis(result, slice(None, None, step), axis)` in the dense version).
 

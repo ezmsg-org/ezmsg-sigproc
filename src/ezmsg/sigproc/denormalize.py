@@ -1,3 +1,5 @@
+"""Denormalize signals by applying random gains and offsets."""
+
 import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt

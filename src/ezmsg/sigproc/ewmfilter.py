@@ -1,3 +1,5 @@
+"""Exponentially weighted moving average filter for streaming normalization."""
+
 import asyncio
 import typing
 

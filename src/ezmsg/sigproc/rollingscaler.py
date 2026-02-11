@@ -1,3 +1,5 @@
+"""Rolling z-score normalization using a sliding window of recent samples."""
+
 import math
 from collections import deque
 
@@ -91,15 +93,14 @@ class RollingScalerProcessor(BaseAdaptiveTransformer[RollingScalerSettings, Axis
     k_samples: int
         Number of previous samples to use for rolling statistics.
 
-    Example:
-    -----------------------------
-    ```python
-    processor = RollingScalerProcessor(
-        settings=RollingScalerSettings(
-            k_samples=20  # Number of previous samples to use for rolling statistics
+    Example::
+
+        processor = RollingScalerProcessor(
+            settings=RollingScalerSettings(
+                k_samples=20  # Number of previous samples to use for rolling statistics
+            )
         )
-    )
-    ```
+
     """
 
     def _hash_message(self, message: AxisArray) -> int:
@@ -224,15 +225,14 @@ class RollingScalerUnit(
     statistics (mean and variance) over the last `k_samples` samples received. When processing an `AxisArray` message,
     it normalizes the data using the current rolling statistics.
 
-    Example:
-    -----------------------------
-    ```python
-    unit = RollingScalerUnit(
-        settings=RollingScalerSettings(
-            k_samples=20  # Number of previous samples to use for rolling statistics
+    Example::
+
+        unit = RollingScalerUnit(
+            settings=RollingScalerSettings(
+                k_samples=20  # Number of previous samples to use for rolling statistics
+            )
         )
-    )
-    ```
+
     """
 
     SETTINGS = RollingScalerSettings

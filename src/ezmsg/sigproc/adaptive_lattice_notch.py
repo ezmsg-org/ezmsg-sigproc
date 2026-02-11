@@ -1,3 +1,5 @@
+"""Adaptive lattice notch filter for narrow-band interference removal."""
+
 import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt

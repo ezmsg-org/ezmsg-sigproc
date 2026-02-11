@@ -1,3 +1,5 @@
+"""Decimation (downsample with anti-alias filtering)."""
+
 import typing
 
 import ezmsg.core as ez

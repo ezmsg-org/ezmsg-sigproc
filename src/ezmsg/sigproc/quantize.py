@@ -1,3 +1,5 @@
+"""Quantize signal data to a fixed number of bits."""
+
 import ezmsg.core as ez
 from array_api_compat import get_namespace
 from ezmsg.baseproc import BaseTransformer, BaseTransformerUnit

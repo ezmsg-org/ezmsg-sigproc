@@ -1,3 +1,5 @@
+"""Time-frequency spectrogram via windowed short-time Fourier transform."""
+
 from typing import Generator
 
 import ezmsg.core as ez
