@@ -57,7 +57,7 @@ class FBCCASettings(ez.Settings):
     freqs: typing.List[float] = field(default_factory=list)
     """
     Frequencies (in hz) to evaluate the presence of within the input signal.
-    [] (default): an empty list; frequencies will be found within the input SampleMessages.
+    [] (default): an empty list; frequencies will be found within the input's trigger attributes.
     AxisArrays have no good place to put this metadata, so specify frequencies here if only AxisArrays
     will be passed as input to the generator.  If the input has a `trigger` attr of type :obj:`SampleTriggerMessage`,
     the processor looks for the `freqs` attribute within that trigger for a list of frequencies to evaluate.
