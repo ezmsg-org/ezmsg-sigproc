@@ -33,7 +33,7 @@ class Counter(ez.Unit):
     async def initialize(self) -> None:
         self._counter = 0
         self._n_sent = 0
-        self._t0 = time.time()
+        self._t0 = time.monotonic()
 
     @ez.publisher(OUTPUT_SIGNAL)
     async def produce(self) -> typing.AsyncGenerator:
@@ -42,7 +42,7 @@ class Counter(ez.Unit):
             if self.SETTINGS.dispatch_rate is not None:
                 n_disp = 1 + self._n_sent / self.SETTINGS.n_time
                 t_next = self._t0 + n_disp / self.SETTINGS.dispatch_rate
-                sleep_time = t_next - time.time()
+                sleep_time = t_next - time.monotonic()
                 if sleep_time > 0:
                     await asyncio.sleep(sleep_time)
 
@@ -87,7 +87,7 @@ class WhiteNoise(ez.Unit):
 
     async def initialize(self) -> None:
         self._n_sent = 0
-        self._t0 = time.time()
+        self._t0 = time.monotonic()
 
     @ez.publisher(OUTPUT_SIGNAL)
     async def produce(self) -> typing.AsyncGenerator:
@@ -96,7 +96,7 @@ class WhiteNoise(ez.Unit):
             if self.SETTINGS.dispatch_rate is not None:
                 n_disp = 1 + self._n_sent / self.SETTINGS.n_time
                 t_next = self._t0 + n_disp / self.SETTINGS.dispatch_rate
-                sleep_time = t_next - time.time()
+                sleep_time = t_next - time.monotonic()
                 if sleep_time > 0:
                     await asyncio.sleep(sleep_time)
 
@@ -145,7 +145,7 @@ class Oscillator(ez.Unit):
 
     async def initialize(self) -> None:
         self._n_sent = 0
-        self._t0 = time.time()
+        self._t0 = time.monotonic()
 
         # Calculate synchronized frequency if requested
         self._freq = self.SETTINGS.freq
@@ -162,7 +162,7 @@ class Oscillator(ez.Unit):
                 # Realtime mode: sleep until wall-clock time matches sample time
                 n_next = self._n_sent + self.SETTINGS.n_time
                 t_next = self._t0 + n_next / self.SETTINGS.fs
-                sleep_time = t_next - time.time()
+                sleep_time = t_next - time.monotonic()
                 if sleep_time > 0:
                     await asyncio.sleep(sleep_time)
                 offset = t_next - self.SETTINGS.n_time / self.SETTINGS.fs
@@ -170,7 +170,7 @@ class Oscillator(ez.Unit):
                 # Manual dispatch rate mode
                 n_disp = 1 + self._n_sent / self.SETTINGS.n_time
                 t_next = self._t0 + n_disp / self.SETTINGS.dispatch_rate
-                sleep_time = t_next - time.time()
+                sleep_time = t_next - time.monotonic()
                 if sleep_time > 0:
                     await asyncio.sleep(sleep_time)
                 offset = self._n_sent / self.SETTINGS.fs
@@ -218,7 +218,7 @@ class Clock(ez.Unit):
     SETTINGS: ez.Settings
 
     async def initialize(self) -> None:
-        self._t0 = time.time()
+        self._t0 = time.monotonic()
         self._n_dispatch = 0
 
     @ez.publisher(OUTPUT_SIGNAL)
@@ -226,7 +226,7 @@ class Clock(ez.Unit):
         while True:
             if hasattr(self.SETTINGS, "dispatch_rate") and self.SETTINGS.dispatch_rate is not None:
                 target_time = self._t0 + (self._n_dispatch + 1) / self.SETTINGS.dispatch_rate
-                sleep_time = target_time - time.time()
+                sleep_time = target_time - time.monotonic()
                 if sleep_time > 0:
                     await asyncio.sleep(sleep_time)
 
