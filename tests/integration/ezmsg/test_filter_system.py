@@ -62,9 +62,16 @@ def test_filter_system(filter_type: str, coef_type: str, order: int):
     inputs = AxisArray.concatenate(*[_ for _ in message_log(test_filename_raw)], dim="time")
     outputs = AxisArray.concatenate(*messages, dim="time")
 
+    # Truncate to common length: the raw and filtered loggers are on separate
+    # pipeline paths, so a termination race can cause different message counts.
+    n_samples = min(inputs.data.shape[0], outputs.data.shape[0])
+    assert n_samples > 0
+    inputs_data = inputs.data[:n_samples]
+    outputs_data = outputs.data[:n_samples]
+
     if order == 0:
         # Passthrough
-        assert np.allclose(outputs.data, inputs.data)
+        assert np.allclose(outputs_data, inputs_data)
         return
 
     # Calculate expected
@@ -99,8 +106,8 @@ def test_filter_system(filter_type: str, coef_type: str, order: int):
         system = scipy.signal.dlti(*coefs)
         coefs = (system.num, system.den)
         zi = scipy.signal.lfilter_zi(*coefs)[:, None]
-        expected, _ = scipy.signal.lfilter(coefs[0], coefs[1], inputs.data, axis=inputs.get_axis_idx("time"), zi=zi)
+        expected, _ = scipy.signal.lfilter(coefs[0], coefs[1], inputs_data, axis=inputs.get_axis_idx("time"), zi=zi)
     else:  # coef_type == "sos":
         zi = scipy.signal.sosfilt_zi(coefs)[:, :, None] + np.zeros((1, 1, n_ch))
-        expected, _ = scipy.signal.sosfilt(coefs, inputs.data, axis=inputs.get_axis_idx("time"), zi=zi)
-    assert np.allclose(outputs.data, expected)
+        expected, _ = scipy.signal.sosfilt(coefs, inputs_data, axis=inputs.get_axis_idx("time"), zi=zi)
+    assert np.allclose(outputs_data, expected)
