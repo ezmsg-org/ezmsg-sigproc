@@ -14,7 +14,7 @@ dynamic = ["version"]
 dependencies = [
   "array-api-compat>=1.11.1",
   "ezmsg[axisarray]>=3.7.3",
-  "ezmsg-baseproc>=1.5.1",
+  "ezmsg-baseproc>=1.6.0",
   "mlx>=0.18.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
   "numba>=0.61.0",
   "numpy>=1.26.0",
