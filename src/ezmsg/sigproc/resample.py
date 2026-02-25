@@ -75,7 +75,7 @@ class ResampleState:
 
     last_write_time: float = -np.inf
     """
-    Wall clock time of the last write to the signal buffer.
+    Monotonic time of the last write to the signal buffer.
     This is used to determine if we need to extrapolate the reference axis
     if we have not received an update within max_chunk_delay.
     """
@@ -142,7 +142,7 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
             synth_ref_axis = LinearAxis(unit="s", gain=out_gain, offset=prev_t_end + out_gain)
             self.state.ref_axis_buffer.write(synth_ref_axis, n_samples=n_synth)
 
-        self.state.last_write_time = time.time()
+        self.state.last_write_time = time.monotonic()
 
     def __next__(self) -> AxisArray:
         if self.state.src_buffer is None or self.state.ref_axis_buffer is None:
@@ -176,7 +176,7 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
 
         # If we do not rely on an external reference, and we have not received new data in a while,
         #  then extrapolate our reference vector out beyond the delay limit.
-        b_project = self.settings.resample_rate is not None and time.time() > (
+        b_project = self.settings.resample_rate is not None and time.monotonic() > (
             self.state.last_write_time + self.settings.max_chunk_delay
         )
         if b_project:
