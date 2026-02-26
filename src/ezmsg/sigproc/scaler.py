@@ -162,6 +162,8 @@ class AdaptiveStandardScaler(
 ):
     SETTINGS = AdaptiveStandardScalerSettings
 
+    INPUT_ACCUMULATE = ez.InputStream(bool)
+
     @ez.subscriber(BaseTransformerUnit.INPUT_SETTINGS)
     async def on_settings(self, msg: AdaptiveStandardScalerSettings) -> None:
         """
@@ -182,6 +184,10 @@ class AdaptiveStandardScaler(
             self.processor.accumulate = msg.accumulate
             # Also update own settings reference
             self.processor.settings = msg
+
+    @ez.subscriber(INPUT_ACCUMULATE)
+    async def on_accumulate(self, accumulate: bool) -> None:
+        self.processor.accumulate = accumulate
 
 
 # Convenience functions to support deprecated generator API
