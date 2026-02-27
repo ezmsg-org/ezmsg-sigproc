@@ -9,6 +9,7 @@ which is more efficient as it avoids matrix multiplication.
 """
 
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 import ezmsg.core as ez
@@ -142,8 +143,9 @@ class AffineTransformSettings(ez.Settings):
     Settings for :obj:`AffineTransform`.
     """
 
-    weights: np.ndarray | str | Path
-    """An array of weights or a path to a file with weights compatible with np.loadtxt."""
+    weights: np.ndarray | str | Path | Callable[[int], np.ndarray]
+    """An array of weights, a path to a file with weights compatible with np.loadtxt,
+    or a callable that accepts ``n_in: int`` and returns an ndarray of shape ``(n_in, n_out)``."""
 
     axis: str | None = None
     """The name of the axis to apply the transformation to. Defaults to the leading (0th) axis in the array."""
@@ -204,10 +206,17 @@ class AffineTransformTransformer(
         return super().__call__(message)
 
     def _hash_message(self, message: AxisArray) -> int:
-        return hash(message.key)
+        axis = self.settings.axis or message.dims[-1]
+        axis_idx = message.get_axis_idx(axis)
+        return hash((message.key, message.data.shape[axis_idx]))
 
     def _reset_state(self, message: AxisArray) -> None:
         weights = self.settings.weights
+        if callable(weights):
+            axis = self.settings.axis or message.dims[-1]
+            axis_idx = message.get_axis_idx(axis)
+            n_in = message.data.shape[axis_idx]
+            weights = weights(n_in)
         if isinstance(weights, str):
             weights = Path(os.path.abspath(os.path.expanduser(weights)))
         if isinstance(weights, Path):
@@ -413,7 +422,7 @@ class AffineTransform(BaseTransformerUnit[AffineTransformSettings, AxisArray, Ax
 
 
 def affine_transform(
-    weights: np.ndarray | str | Path,
+    weights: np.ndarray | str | Path | Callable[[int], np.ndarray],
     axis: str | None = None,
     right_multiply: bool = True,
     channel_clusters: list[list[int]] | None = None,
@@ -423,7 +432,8 @@ def affine_transform(
     Perform affine transformations on streaming data.
 
     Args:
-        weights: An array of weights or a path to a file with weights compatible with np.loadtxt.
+        weights: An array of weights, a path to a file with weights compatible with np.loadtxt,
+            or a callable that accepts ``n_in`` and returns an ndarray of shape ``(n_in, n_out)``.
         axis: The name of the axis to apply the transformation to. Defaults to the leading (0th) axis in the array.
         right_multiply: Set False to transpose the weights before applying.
         channel_clusters: Optional explicit channel cluster specification. See

@@ -784,6 +784,96 @@ def test_nonsquare_non_last_axis():
     assert np.allclose(msg_out.data, expected)
 
 
+# --- Callable weights tests ---
+
+
+def test_affine_callable_weights():
+    """Test that a callable weights factory produces correct results."""
+    n_times = 13
+    n_chans = 8
+    n_out = 4
+    rng = np.random.default_rng(42)
+
+    # Pre-generate a fixed weight matrix so we can verify the result
+    fixed_weights = rng.standard_normal((n_chans, n_out))
+
+    def weight_factory(n_in: int) -> np.ndarray:
+        assert n_in == n_chans
+        return fixed_weights
+
+    in_dat = rng.standard_normal((n_times, n_chans))
+    msg_in = AxisArray(data=in_dat, dims=["time", "ch"])
+    expected = in_dat @ fixed_weights
+
+    xformer = AffineTransformTransformer(AffineTransformSettings(weights=weight_factory, axis="ch"))
+    msg_out = xformer(msg_in)
+
+    assert msg_out.data.shape == (n_times, n_out)
+    assert np.allclose(msg_out.data, expected)
+
+
+def test_affine_callable_weights_dimension_change():
+    """Test that changing the axis length triggers state reset and re-calls the callable."""
+    call_log = []
+
+    def weight_factory(n_in: int) -> np.ndarray:
+        call_log.append(n_in)
+        return np.eye(n_in)
+
+    xformer = AffineTransformTransformer(AffineTransformSettings(weights=weight_factory, axis="ch"))
+
+    # First message: 8 channels
+    msg_8 = AxisArray(data=np.ones((5, 8)), dims=["time", "ch"])
+    out_8 = xformer(msg_8)
+    assert out_8.data.shape == (5, 8)
+    assert np.allclose(out_8.data, msg_8.data)
+    assert call_log == [8]
+
+    # Second message: still 8 channels — should NOT re-call the factory
+    out_8b = xformer(msg_8)
+    assert np.allclose(out_8b.data, msg_8.data)
+    assert call_log == [8]
+
+    # Third message: 10 channels — dimension change triggers reset + re-call
+    msg_10 = AxisArray(data=np.ones((5, 10)), dims=["time", "ch"])
+    out_10 = xformer(msg_10)
+    assert out_10.data.shape == (5, 10)
+    assert np.allclose(out_10.data, msg_10.data)
+    assert call_log == [8, 10]
+
+
+def test_affine_callable_identity_factory():
+    """Test a simple identity-matrix factory across multiple streaming messages."""
+    xformer = AffineTransformTransformer(AffineTransformSettings(weights=lambda n: np.eye(n), axis="ch"))
+
+    rng = np.random.default_rng(42)
+    for _ in range(5):
+        in_dat = rng.standard_normal((10, 16))
+        msg_in = AxisArray(data=in_dat, dims=["time", "ch"])
+        msg_out = xformer(msg_in)
+        assert np.allclose(msg_out.data, in_dat)
+
+
+def test_affine_callable_with_right_multiply_false():
+    """Test callable weights with right_multiply=False."""
+    n_chans = 8
+    rng = np.random.default_rng(42)
+    # Factory returns (n_out, n_in) shaped weights; right_multiply=False transposes them
+    raw = rng.standard_normal((4, n_chans))
+
+    xformer = AffineTransformTransformer(
+        AffineTransformSettings(weights=lambda n: raw, axis="ch", right_multiply=False)
+    )
+
+    in_dat = rng.standard_normal((10, n_chans))
+    msg_in = AxisArray(data=in_dat, dims=["time", "ch"])
+    expected = in_dat @ raw.T
+
+    msg_out = xformer(msg_in)
+    assert msg_out.data.shape == expected.shape
+    assert np.allclose(msg_out.data, expected)
+
+
 def test_affine_empty_square():
     from ezmsg.sigproc.affinetransform import AffineTransformSettings, AffineTransformTransformer
 
