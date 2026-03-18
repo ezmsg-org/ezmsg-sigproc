@@ -319,7 +319,7 @@ class TestRelabelAxis:
             proc.push_b(msg_b)
 
         # The cached axis should have been built once and reused.
-        assert proc.state.merged_concat_axis is not None
+        assert proc.concat_state.merged_concat_axis is not None
 
 
 class TestNoRelabel:
