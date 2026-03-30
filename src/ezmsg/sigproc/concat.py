@@ -65,7 +65,10 @@ def _merge_struct_axes(
     union_fields: list[tuple[str, np.dtype]] = []
     seen: set[str] = set()
 
-    for src_names, src_dtype in [(data_a.dtype.names or (), data_a.dtype), (data_b.dtype.names or (), data_b.dtype)]:
+    for src_names, src_dtype in [
+        (data_a.dtype.names or (), data_a.dtype),
+        (data_b.dtype.names or (), data_b.dtype),
+    ]:
         for name in src_names:
             if name in seen:
                 continue
@@ -172,6 +175,9 @@ class ConcatSettings(ez.Settings):
     axis: str = "ch"
     """Axis along which to concatenate the two signals."""
 
+    align_axis: str | None = None
+    """Axis along which to validate alignment between the two signals."""
+
     relabel_axis: bool = True
     """Whether to relabel coordinate axis labels to ensure uniqueness."""
 
@@ -274,7 +280,7 @@ class ConcatProcessor:
             a,
             b,
             concat_dim,
-            align_dim=None,
+            align_dim=self.settings.align_axis,
             assert_flag=self.settings.assert_identical_shared_axes,
         )
 
@@ -304,7 +310,7 @@ class ConcatProcessor:
         self._state.cached_axes = _build_cached_axes(
             a,
             concat_dim,
-            align_dim=None,
+            align_dim=self.settings.align_axis,
             merged_concat_axis=self._state.merged_concat_axis,
         )
 

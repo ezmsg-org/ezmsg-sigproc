@@ -59,6 +59,7 @@ class MergeProcessor:
         self._concat = ConcatProcessor(
             settings=ConcatSettings(
                 axis=settings.axis,
+                align_axis=settings.align_axis,
                 relabel_axis=settings.relabel_axis,
                 label_a=settings.label_a,
                 label_b=settings.label_b,
@@ -121,6 +122,7 @@ class Merge(ez.Collection):
         self.CONCAT.apply_settings(
             ConcatSettings(
                 axis=self.SETTINGS.axis,
+                align_axis=self.SETTINGS.align_axis,
                 relabel_axis=self.SETTINGS.relabel_axis,
                 label_a=self.SETTINGS.label_a,
                 label_b=self.SETTINGS.label_b,
