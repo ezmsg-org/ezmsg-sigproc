@@ -524,8 +524,16 @@ class FilterByDesignTransformer(
 
         new_settings = FilterSettings(axis=axis, coef_type=self.settings.coef_type, coefs=coefs)
         self.state.filter = FilterTransformer(settings=new_settings)
+        self.state.needs_redesign = False
 
     def _process(self, message: AxisArray) -> AxisArray:
+        # The settings-change redesign logic in __call__ above is only reached
+        # by sync callers. Async callers (every BaseTransformerUnit) go
+        # through _aprocess → _process, so we honor needs_redesign here too,
+        # otherwise live setting updates never take effect on the filter
+        # coefficients.
+        if self.state.needs_redesign:
+            self._reset_state(message)
         return self.state.filter(message)
 
 

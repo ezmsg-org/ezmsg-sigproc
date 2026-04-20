@@ -1,5 +1,7 @@
 """Integer downsampling by selecting every Nth sample along an axis."""
 
+import typing
+
 import ezmsg.core as ez
 import numpy as np
 from ezmsg.baseproc import (
@@ -103,6 +105,20 @@ class DownsampleTransformer(BaseStatefulTransformer[DownsampleSettings, AxisArra
 
 class Downsample(BaseTransformerUnit[DownsampleSettings, AxisArray, AxisArray, DownsampleTransformer]):
     SETTINGS = DownsampleSettings
+
+    @ez.subscriber(BaseTransformerUnit.INPUT_SIGNAL)
+    @ez.publisher(BaseTransformerUnit.OUTPUT_SIGNAL)
+    async def on_signal(self, message: AxisArray) -> typing.AsyncGenerator:
+        """Skip the publish when no samples accumulated.
+
+        At ``factor > 1`` most input chunks span less than one downsample
+        period, so ``DownsampleTransformer._process`` returns a payload with
+        a zero-length axis. Suppressing the broadcast in that case avoids
+        shipping an empty AxisArray across SHM/socket every input chunk.
+        """
+        result = await self.processor.__acall__(message)
+        if result is not None and result.data.size > 0:
+            yield self.OUTPUT_SIGNAL, result
 
 
 def downsample(
