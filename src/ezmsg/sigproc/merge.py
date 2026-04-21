@@ -105,9 +105,9 @@ class Merge(ez.Collection):
 
     SETTINGS = MergeSettings
 
-    INPUT_SIGNAL_A = ez.InputStream(AxisArray)
-    INPUT_SIGNAL_B = ez.InputStream(AxisArray)
-    OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
+    INPUT_SIGNAL_A = ez.InputTopic(AxisArray)
+    INPUT_SIGNAL_B = ez.InputTopic(AxisArray)
+    OUTPUT_SIGNAL = ez.OutputTopic(AxisArray)
 
     ALIGN = AlignAlongAxis()
     CONCAT = Concat()

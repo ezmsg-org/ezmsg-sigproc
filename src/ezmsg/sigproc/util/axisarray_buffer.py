@@ -192,7 +192,7 @@ class HybridAxisBuffer:
             f_inds = (values - self._linear_axis.offset) / self._linear_axis.gain
             res = np.ceil(f_inds)
             if side == "right":
-                res[np.isclose(f_inds, res)] += 1
+                res[np.isclose(f_inds, res, rtol=0, atol=1e-9)] += 1
             return res.astype(int)
 
 

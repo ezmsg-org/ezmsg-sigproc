@@ -266,7 +266,7 @@ class ResampleUnit(BaseConsumerUnit[ResampleSettings, AxisArray, ResampleProcess
     INPUT_REFERENCE = ez.InputStream(AxisArray)
     OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
 
-    @ez.subscriber(INPUT_REFERENCE, zero_copy=True)
+    @ez.subscriber(INPUT_REFERENCE)
     async def on_reference(self, message: AxisArray):
         self.processor.push_reference(message)
 

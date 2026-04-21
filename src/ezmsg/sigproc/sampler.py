@@ -195,7 +195,7 @@ class Sampler(BaseTransformerUnit[SamplerSettings, AxisArray, AxisArray, Sampler
     async def on_trigger(self, msg: SampleTriggerMessage) -> None:
         _ = self.processor.push_trigger(msg)
 
-    @ez.subscriber(BaseConsumerUnit.INPUT_SIGNAL, zero_copy=True)
+    @ez.subscriber(BaseConsumerUnit.INPUT_SIGNAL)
     @ez.publisher(BaseTransformerUnit.OUTPUT_SIGNAL)
     @profile_subpub(trace_oldest=False)
     async def on_signal(self, message: AxisArray) -> typing.AsyncGenerator:
