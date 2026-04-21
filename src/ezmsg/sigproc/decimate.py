@@ -44,8 +44,8 @@ class Decimate(ez.Collection):
 
     SETTINGS = DownsampleSettings
 
-    INPUT_SIGNAL = ez.InputStream(AxisArray)
-    OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
+    INPUT_SIGNAL = ez.InputTopic(AxisArray)
+    OUTPUT_SIGNAL = ez.OutputTopic(AxisArray)
 
     FILTER = ChebyForDecimate()
     DOWNSAMPLE = Downsample()
