@@ -222,7 +222,7 @@ class AlignAlongAxis(ez.Unit):
     async def initialize(self) -> None:
         self.processor = AlignAlongAxisProcessor(settings=self.SETTINGS)
 
-    @ez.subscriber(INPUT_SIGNAL_A, zero_copy=True)
+    @ez.subscriber(INPUT_SIGNAL_A)
     @ez.publisher(OUTPUT_SIGNAL_A)
     @ez.publisher(OUTPUT_SIGNAL_B)
     async def on_a(self, msg: AxisArray) -> typing.AsyncGenerator:
@@ -231,7 +231,7 @@ class AlignAlongAxis(ez.Unit):
             yield self.OUTPUT_SIGNAL_A, pair[0]
             yield self.OUTPUT_SIGNAL_B, pair[1]
 
-    @ez.subscriber(INPUT_SIGNAL_B, zero_copy=True)
+    @ez.subscriber(INPUT_SIGNAL_B)
     @ez.publisher(OUTPUT_SIGNAL_A)
     @ez.publisher(OUTPUT_SIGNAL_B)
     async def on_b(self, msg: AxisArray) -> typing.AsyncGenerator:

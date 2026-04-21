@@ -271,7 +271,7 @@ class Window(BaseTransformerUnit[WindowSettings, AxisArray, AxisArray, WindowTra
     INPUT_SIGNAL = ez.InputStream(AxisArray)
     OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
 
-    @ez.subscriber(INPUT_SIGNAL, zero_copy=True)
+    @ez.subscriber(INPUT_SIGNAL)
     @ez.publisher(OUTPUT_SIGNAL)
     @profile_subpub(trace_oldest=False)
     async def on_signal(self, message: AxisArray) -> typing.AsyncGenerator:
