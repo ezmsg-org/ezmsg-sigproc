@@ -83,3 +83,45 @@ def test_spectrogram():
     # result = AxisArray.concatenate(*results, dim="time")
     # TODO: Check spectral peaks change over time. _debug_plot is useful if not automatic.
     # _debug_plot(result, sin_params=sin_params)
+
+
+def test_spectrogram_update_settings_preserves_same_type_children():
+    """Composite.update_settings should delegate to matching children via their own update_settings."""
+    from ezmsg.sigproc.spectrogram import SpectrogramSettings
+
+    messages = create_messages_with_periodic_signal(
+        sin_params=[{"f": 10.0, "dur": 1.0, "offset": 0.0}],
+        fs=1000.0,
+        msg_dur=0.4,
+        win_step_dur=None,
+    )
+
+    proc = SpectrogramTransformer(
+        window_dur=0.5,
+        window_shift=0.25,
+        window=WindowFunction.HANNING,
+        transform=SpectralTransform.REL_DB,
+        output=SpectralOutput.POSITIVE,
+    )
+    # Warm up to populate child state.
+    for msg in messages:
+        _ = proc(msg)
+
+    windowing_before = proc._procs["windowing"]
+    spectrum_before = proc._procs["spectrum"]
+
+    # Change fields that still yield same-type children; instances must survive.
+    proc.update_settings(
+        SpectrogramSettings(
+            window_dur=0.5,
+            window_shift=0.25,
+            window=WindowFunction.HAMMING,
+            transform=SpectralTransform.REL_DB,
+            output=SpectralOutput.POSITIVE,
+        )
+    )
+    assert proc._procs["windowing"] is windowing_before
+    assert proc._procs["spectrum"] is spectrum_before
+    # Pipeline still runnable after the update.
+    for msg in messages:
+        _ = proc(msg)
