@@ -56,6 +56,17 @@ def xp_empty(xp, shape, *, dtype=None):
     return fn(shape)
 
 
+def xp_flip(arr, axis):
+    """Reverse ``arr`` along ``axis``, portable across backends.
+
+    numpy/cupy/torch expose ``xp.flip``; MLX does not but supports negative-
+    step slicing, which we use as a universal fallback.
+    """
+    idx = [slice(None)] * arr.ndim
+    idx[axis] = slice(None, None, -1)
+    return arr[tuple(idx)]
+
+
 def xp_itemsize(dtype) -> int:
     """Bytes per element of ``dtype``, portable across backends.
 
