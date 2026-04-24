@@ -46,6 +46,29 @@ def xp_create(fn, *args, dtype=None, device=None, **extra):
     return fn(*args, **kwargs)
 
 
+def xp_empty(xp, shape, *, dtype=None):
+    """Portable ``xp.empty`` with a ``zeros`` fallback for backends (e.g. MLX)
+    that don't expose ``empty``. MLX is lazy so the extra zero init is near-free;
+    on eager backends ``empty`` is preferred when available."""
+    fn = getattr(xp, "empty", None) or xp.zeros
+    if dtype is not None:
+        return fn(shape, dtype=dtype)
+    return fn(shape)
+
+
+def xp_itemsize(dtype) -> int:
+    """Bytes per element of ``dtype``, portable across backends.
+
+    numpy/cupy/torch expose ``.itemsize``; MLX exposes ``.size``.
+    """
+    size = getattr(dtype, "itemsize", None)
+    if size is None:
+        size = getattr(dtype, "size", None)
+    if size is None:
+        raise TypeError(f"Cannot determine byte size of dtype {dtype!r}")
+    return size
+
+
 def is_complex_dtype(dtype) -> bool:
     """Check whether *dtype* is a complex type, portably across backends."""
     if hasattr(dtype, "kind"):
