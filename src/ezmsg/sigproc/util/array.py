@@ -3,9 +3,19 @@
 These utilities smooth over differences between Array API libraries
 (NumPy, PyTorch, MLX, CuPy, etc.) — in particular around ``device``
 placement and ``dtype`` introspection, which are not uniformly supported.
+
+Design rule for ``xp_*`` helpers: **prefer the native op only when it
+differs semantically from the fallback.** For pure stride/metadata
+tricks (reshape, transpose, slicing) every backend's implementation is
+equivalent in cost, so the simplest path wins. For ops that do real
+work (empty vs. zeros, compiled kernels) we route to the native op when
+available. When backends disagree on API — e.g. ``torch.flip(dims=...)``
+vs ``numpy.flip(axis=...)``, or torch's refusal of negative-step slicing
+— we absorb that here rather than leaking it to callers.
 """
 
 import numpy as np
+from array_api_compat import get_namespace
 
 
 def array_device(x):
@@ -59,9 +69,24 @@ def xp_empty(xp, shape, *, dtype=None):
 def xp_flip(arr, axis):
     """Reverse ``arr`` along ``axis``, portable across backends.
 
-    numpy/cupy/torch expose ``xp.flip``; MLX does not but supports negative-
-    step slicing, which we use as a universal fallback.
+    Dispatches: ``numpy.flip(axis=)`` / ``cupy.flip(axis=)`` / ``torch.flip(dims=)``
+    when the namespace exposes ``flip``, else negative-step slicing (MLX).
+    Torch is the reason we can't make slicing the universal path — it
+    rejects negative steps with ``ValueError``.
+
+    Note on cost: numpy/cupy return a strided view (O(1)); torch's flip
+    materializes a copy (no view equivalent exists there); MLX's slicing
+    returns a view.
     """
+    xp = get_namespace(arr)
+    flip = getattr(xp, "flip", None)
+    if flip is not None:
+        try:
+            return flip(arr, axis=axis)
+        except TypeError:
+            # torch.flip takes ``dims=[...]``, not ``axis=``.
+            return flip(arr, dims=[axis])
+    # MLX: no module-level flip; negative-step slicing works (view).
     idx = [slice(None)] * arr.ndim
     idx[axis] = slice(None, None, -1)
     return arr[tuple(idx)]
