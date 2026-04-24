@@ -3,9 +3,19 @@
 These utilities smooth over differences between Array API libraries
 (NumPy, PyTorch, MLX, CuPy, etc.) — in particular around ``device``
 placement and ``dtype`` introspection, which are not uniformly supported.
+
+Design rule for ``xp_*`` helpers: **prefer the native op only when it
+differs semantically from the fallback.** For pure stride/metadata
+tricks (reshape, transpose, slicing) every backend's implementation is
+equivalent in cost, so the simplest path wins. For ops that do real
+work (empty vs. zeros, compiled kernels) we route to the native op when
+available. When backends disagree on API — e.g. ``torch.flip(dims=...)``
+vs ``numpy.flip(axis=...)``, or torch's refusal of negative-step slicing
+— we absorb that here rather than leaking it to callers.
 """
 
 import numpy as np
+from array_api_compat import get_namespace
 
 
 def array_device(x):
@@ -56,17 +66,52 @@ def xp_empty(xp, shape, *, dtype=None):
     return fn(shape)
 
 
+def xp_flip(arr, axis):
+    """Reverse ``arr`` along ``axis``, portable across backends.
+
+    Dispatches: ``numpy.flip(axis=)`` / ``cupy.flip(axis=)`` / ``torch.flip(dims=)``
+    when the namespace exposes ``flip``, else negative-step slicing (MLX).
+    Torch is the reason we can't make slicing the universal path — it
+    rejects negative steps with ``ValueError``.
+
+    Note on cost: numpy/cupy return a strided view (O(1)); torch's flip
+    materializes a copy (no view equivalent exists there); MLX's slicing
+    returns a view.
+    """
+    xp = get_namespace(arr)
+    flip = getattr(xp, "flip", None)
+    if flip is not None:
+        try:
+            return flip(arr, axis=axis)
+        except TypeError:
+            # torch.flip takes ``dims=[...]``, not ``axis=``.
+            return flip(arr, dims=[axis])
+    # MLX: no module-level flip; negative-step slicing works (view).
+    idx = [slice(None)] * arr.ndim
+    idx[axis] = slice(None, None, -1)
+    return arr[tuple(idx)]
+
+
 def xp_itemsize(dtype) -> int:
     """Bytes per element of ``dtype``, portable across backends.
 
-    numpy/cupy/torch expose ``.itemsize``; MLX exposes ``.size``.
+    numpy/cupy dtype *instances* expose ``.itemsize`` as an int; torch
+    dtypes also expose ``.itemsize`` as an int; MLX dtypes expose ``.size``.
+    NumPy scalar *types* (e.g. ``np.float32`` the class) expose ``.itemsize``
+    as an attribute descriptor, not a concrete int — we detect that and
+    round-trip through ``np.dtype(...)`` to get the instance.
     """
     size = getattr(dtype, "itemsize", None)
-    if size is None:
-        size = getattr(dtype, "size", None)
-    if size is None:
-        raise TypeError(f"Cannot determine byte size of dtype {dtype!r}")
-    return size
+    if isinstance(size, int):
+        return size
+    size = getattr(dtype, "size", None)
+    if isinstance(size, int):
+        return size
+    try:
+        return int(np.dtype(dtype).itemsize)
+    except TypeError:
+        pass
+    raise TypeError(f"Cannot determine byte size of dtype {dtype!r}")
 
 
 def is_complex_dtype(dtype) -> bool:
@@ -82,6 +127,10 @@ def is_float_dtype(xp, dtype) -> bool:
         return xp.isdtype(dtype, "real floating")
     except AttributeError:
         pass
+    # torch dtypes advertise ``is_floating_point`` (excludes complex).
+    is_fp = getattr(dtype, "is_floating_point", None)
+    if isinstance(is_fp, bool):
+        return is_fp
     # Fallback for libraries without isdtype (e.g. MLX).
     try:
         return xp.issubdtype(dtype, xp.floating)

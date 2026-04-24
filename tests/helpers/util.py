@@ -186,3 +186,22 @@ requires_mlx = pytest.mark.skipif(
     not _has_mlx or platform.machine() != "arm64" or platform.system() != "Darwin",
     reason="Requires MLX on Apple Silicon",
 )
+
+
+def _torch_mps_available() -> bool:
+    if platform.system() != "Darwin":
+        return False
+    if importlib.util.find_spec("torch") is None:
+        return False
+    try:
+        import torch
+
+        return bool(torch.backends.mps.is_available())
+    except Exception:
+        return False
+
+
+requires_torch_mps = pytest.mark.skipif(
+    not _torch_mps_available(),
+    reason="Requires PyTorch with MPS backend on macOS",
+)
