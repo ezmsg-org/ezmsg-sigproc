@@ -13,6 +13,7 @@ import typing
 
 import numpy as np
 import scipy.signal
+from array_api_compat import get_namespace, is_numpy_array
 from ezmsg.baseproc import BaseTransformerUnit
 from ezmsg.baseproc.composite import CompositeProcessor
 from ezmsg.util.messages.axisarray import AxisArray
@@ -23,8 +24,20 @@ from .butterworthfilter import (
     ButterworthFilterTransformer,
     butter_design_fun,
 )
-from .filter import BACoeffs, FilterByDesignTransformer, SOSCoeffs
+from .filter import (
+    _HAS_MLX_METAL,
+    BACoeffs,
+    FilterByDesignTransformer,
+    SOSCoeffs,
+    _sosfilt_mlx_metal_xp,
+)
+from .util.array import xp_asarray, xp_empty, xp_flip
 from .util.axisarray_buffer import HybridAxisArrayBuffer
+
+if _HAS_MLX_METAL:
+    import mlx.core as _mx
+else:
+    _mx = None  # type: ignore
 
 
 class ButterworthZeroPhaseSettings(ButterworthFilterSettings):
@@ -73,7 +86,8 @@ class ButterworthBackwardFilterTransformer(FilterByDesignTransformer[Butterworth
     # Instance attributes (initialized in _reset_state)
     _buffer: HybridAxisArrayBuffer | None
     _coefs_cache: BACoeffs | SOSCoeffs | None
-    _zi_tiled: np.ndarray | None
+    _zi_tiled: typing.Any | None  # xp array in the namespace of the input data
+    _sos_mx: typing.Any | None  # cached mlx.core.array of SOS coefs (SOS + MLX path)
     _pad_length: int
 
     def get_design_function(
@@ -162,6 +176,7 @@ class ButterworthBackwardFilterTransformer(FilterByDesignTransformer[Butterworth
         """Reset filter state when stream changes."""
         self._coefs_cache = None
         self._zi_tiled = None
+        self._sos_mx = None
         self._buffer = None
         # Compute pad_length based on the message's sampling rate
         axis = message.dims[0] if self.settings.axis is None else self.settings.axis
@@ -169,11 +184,12 @@ class ButterworthBackwardFilterTransformer(FilterByDesignTransformer[Butterworth
         self._pad_length = self._compute_pad_length(fs)
         self.state.needs_redesign = True
 
-    def _compute_zi_tiled(self, data: np.ndarray, ax_idx: int) -> None:
+    def _compute_zi_tiled(self, data, ax_idx: int, xp) -> None:
         """Compute and cache the tiled zi for the given data shape.
 
         Called once per stream (or after filter redesign). The result is
         broadcast-ready for multiplication by the edge sample on each chunk.
+        Stored in the namespace of ``data`` (numpy or MLX).
         """
         if self.settings.coef_type == "ba":
             b, a = self._coefs_cache
@@ -190,13 +206,18 @@ class ButterworthBackwardFilterTransformer(FilterByDesignTransformer[Butterworth
             zi_expand = (slice(None),) + (None,) * ax_idx + (slice(None),) + (None,) * n_tail
             n_tile = (1,) + data.shape[:ax_idx] + (1,) + data.shape[ax_idx + 1 :]
 
-        self._zi_tiled = np.tile(zi_base[zi_expand], n_tile)
+        zi_tiled = np.tile(zi_base[zi_expand], n_tile)
+        if xp is not np:
+            zi_tiled = xp_asarray(xp, zi_tiled.astype(np.float32), dtype=data.dtype)
+        self._zi_tiled = zi_tiled
 
-    def _initialize_zi(self, data: np.ndarray, ax_idx: int) -> np.ndarray:
+    def _initialize_zi(self, data, ax_idx: int, xp):
         """Initialize filter state (zi) scaled by edge value."""
         if self._zi_tiled is None:
-            self._compute_zi_tiled(data, ax_idx)
-        first_sample = np.take(data, [0], axis=ax_idx)
+            self._compute_zi_tiled(data, ax_idx, xp)
+        # slice [0:1] along ax_idx — portable across numpy/MLX
+        first_idx = tuple(slice(0, 1) if i == ax_idx else slice(None) for i in range(data.ndim))
+        first_sample = data[first_idx]
         return self._zi_tiled * first_sample
 
     def _process(self, message: AxisArray) -> AxisArray:
@@ -209,6 +230,7 @@ class ButterworthBackwardFilterTransformer(FilterByDesignTransformer[Butterworth
             self._coefs_cache = self.get_design_function()(fs)
             self._pad_length = self._compute_pad_length(fs)
             self._zi_tiled = None  # Invalidate; recomputed on next use.
+            self._sos_mx = None
             self.state.needs_redesign = False
 
             # Initialize buffer with duration based on pad_length
@@ -225,11 +247,13 @@ class ButterworthBackwardFilterTransformer(FilterByDesignTransformer[Butterworth
         n_available = self._buffer.available()
         n_output = n_available - self._pad_length
 
+        xp = np if is_numpy_array(message.data) else get_namespace(message.data)
+
         # If we don't have enough data yet, return empty
         if n_output <= 0:
             new_shape = list(message.data.shape)
             new_shape[ax_idx] = 0
-            empty_data = np.empty(new_shape, dtype=message.data.dtype)
+            empty_data = xp_empty(xp, tuple(new_shape), dtype=message.data.dtype)
             return replace(message, data=empty_data)
 
         # Peek all available data from buffer
@@ -238,18 +262,30 @@ class ButterworthBackwardFilterTransformer(FilterByDesignTransformer[Butterworth
         combined = buffered.data
         buffer_ax_idx = 0  # Buffer always puts time axis at position 0
 
-        # Backward filter on reversed data
-        combined_rev = np.flip(combined, axis=buffer_ax_idx)
-        backward_zi = self._initialize_zi(combined_rev, buffer_ax_idx)
+        # Backward filter on reversed data — stay in the input's namespace.
+        combined_rev = xp_flip(combined, axis=buffer_ax_idx)
+        backward_zi = self._initialize_zi(combined_rev, buffer_ax_idx, xp)
 
-        if self.settings.coef_type == "ba":
+        is_mlx = xp is not np and xp.__name__ == "mlx.core"
+        use_mlx_metal = (
+            self.settings.coef_type == "sos"
+            and is_mlx
+            and getattr(self.settings, "use_mlx_metal", True)
+            and _HAS_MLX_METAL
+        )
+
+        if use_mlx_metal:
+            if self._sos_mx is None:
+                self._sos_mx = _mx.array(np.asarray(self._coefs_cache).astype(np.float32))
+            y_bwd_rev, _ = _sosfilt_mlx_metal_xp(self._sos_mx, combined_rev, buffer_ax_idx, backward_zi)
+        elif self.settings.coef_type == "ba":
             b, a = self._coefs_cache
             y_bwd_rev, _ = scipy.signal.lfilter(b, a, combined_rev, axis=buffer_ax_idx, zi=backward_zi)
-        else:  # sos
+        else:  # sos via scipy (non-MLX, or use_mlx_metal disabled)
             y_bwd_rev, _ = scipy.signal.sosfilt(self._coefs_cache, combined_rev, axis=buffer_ax_idx, zi=backward_zi)
 
         # Reverse back to get output in correct time order
-        y_bwd = np.flip(y_bwd_rev, axis=buffer_ax_idx)
+        y_bwd = xp_flip(y_bwd_rev, axis=buffer_ax_idx)
 
         # Output the settled portion (first n_output samples)
         y = y_bwd[:n_output]
@@ -263,7 +299,7 @@ class ButterworthBackwardFilterTransformer(FilterByDesignTransformer[Butterworth
 
         # Move axis back to original position if needed
         if ax_idx != 0:
-            y = np.moveaxis(y, 0, ax_idx)
+            y = xp.moveaxis(y, 0, ax_idx)
 
         return replace(
             message,

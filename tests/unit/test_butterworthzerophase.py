@@ -10,6 +10,7 @@ from ezmsg.sigproc.butterworthzerophase import (
     ButterworthZeroPhaseTransformer,
 )
 from tests.helpers.empty_time import check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
+from tests.helpers.util import requires_mlx
 
 
 def _compute_pad_length(
@@ -153,8 +154,16 @@ def test_max_pad_duration_no_effect_when_not_limiting():
     assert pad_natural == pad_with_cap
 
 
-def _make_message(data, dims, fs, time_axis_name="time"):
-    """Helper to create AxisArray messages with frozendict axes to detect mutation."""
+def _make_message(data, dims, fs, time_axis_name="time", backend="numpy"):
+    """Helper to create AxisArray messages with frozendict axes to detect mutation.
+
+    ``backend="mlx"`` wraps the data in an ``mlx.core.array`` before attaching
+    to the message.
+    """
+    if backend == "mlx":
+        import mlx.core as mx
+
+        data = mx.array(np.asarray(data, dtype=np.float32))
     axes = {}
     for i, dim in enumerate(dims):
         if dim == time_axis_name:
@@ -571,3 +580,219 @@ def test_bwzp_empty_first():
     result = proc(empty)
     check_empty_result(result)
     check_state_not_corrupted(proc, normal)
+
+
+# ---------------------------------------------------------------------------
+# MLX input coverage
+# ---------------------------------------------------------------------------
+#
+# These mirror the correctness tests above but feed ``mlx.core.array`` data
+# into the transformer. Today the backward stage internally falls back to
+# numpy (via ``np.flip``/``np.moveaxis``), so output values should still be
+# bit-close to the numpy path. These tests lock that behavior in so that a
+# future on-device port of the backward filter can preserve correctness.
+
+
+@requires_mlx
+@pytest.mark.parametrize(
+    "cutoff, cuton",
+    [
+        (500.0, None),  # lowpass
+        (7500.0, 300.0),  # bandpass
+    ],
+)
+@pytest.mark.parametrize("order", [4])
+@pytest.mark.parametrize("coef_type", ["ba", "sos"])
+def test_zerophase_single_chunk_mlx_matches_numpy(cutoff, cuton, order, coef_type):
+    """Feeding MLX data through ButterworthZeroPhase produces values that match
+    the numpy-input path (both should agree with scipy.filtfilt within tight
+    tolerance in the settled interior)."""
+    fs = 30000.0
+    n_times = int(2.0 * fs)
+    rng = np.random.default_rng(42)
+    x = rng.standard_normal((n_times, 3)).astype(np.float32)
+
+    settings = ButterworthZeroPhaseSettings(axis="time", order=order, cuton=cuton, cutoff=cutoff, coef_type=coef_type)
+
+    # Numpy reference path.
+    tf_np = ButterworthZeroPhaseTransformer(settings)
+    y_np = np.asarray(tf_np(_make_message(x, ["time", "ch"], fs)).data)
+
+    # MLX path.
+    tf_mlx = ButterworthZeroPhaseTransformer(settings)
+    y_mlx = np.asarray(tf_mlx(_make_message(x, ["time", "ch"], fs, backend="mlx")).data)
+
+    assert y_np.shape == y_mlx.shape
+    assert np.isfinite(y_mlx).all()
+
+    # Forward SOS on MLX uses the Metal kernel (~5e-4 absolute error, per
+    # kernel docs); BA goes through scipy on coerced numpy and picks up
+    # ~3e-4 float32 roundoff through the MLX round-trip. Correlation is the
+    # load-bearing check; the abs bound is a generous sanity cap.
+    tol = 5e-3
+    for ch in range(y_np.shape[1]):
+        r = np.corrcoef(y_np[:, ch], y_mlx[:, ch])[0, 1]
+        assert r > 0.9999, f"Correlation {r} too low for channel {ch}"
+    assert np.max(np.abs(y_np - y_mlx)) < tol * max(1.0, np.max(np.abs(y_np)))
+
+
+@requires_mlx
+@pytest.mark.parametrize("order", [2, 4])
+@pytest.mark.parametrize("coef_type", ["ba", "sos"])
+def test_zerophase_streaming_mlx_matches_numpy(order, coef_type):
+    """Chunked MLX input through ButterworthZeroPhase should track the chunked
+    numpy path — i.e. swapping backends must not change the output shape or
+    change values beyond float32 roundoff / Metal kernel tolerance."""
+    fs = 30000.0
+    cuton = 300.0
+    n_times = int(2.0 * fs)
+    chunk_size = 48
+    rng = np.random.default_rng(42)
+    x = rng.standard_normal((n_times, 3)).astype(np.float32)
+
+    def run(backend: str) -> np.ndarray:
+        tf = ButterworthZeroPhaseTransformer(
+            ButterworthZeroPhaseSettings(axis="time", order=order, cuton=cuton, cutoff=None, coef_type=coef_type)
+        )
+        outs = []
+        for i in range(0, n_times, chunk_size):
+            msg = _make_message(x[i : i + chunk_size], ["time", "ch"], fs, backend=backend)
+            r = tf(msg)
+            if r.data.size > 0:
+                outs.append(np.asarray(r.data))
+        return np.concatenate(outs, axis=0)
+
+    y_np = run("numpy")
+    y_mlx = run("mlx")
+
+    assert y_np.shape == y_mlx.shape
+    assert np.isfinite(y_mlx).all()
+
+    tol = 5e-3
+    for ch in range(y_np.shape[1]):
+        r = np.corrcoef(y_np[:, ch], y_mlx[:, ch])[0, 1]
+        assert r > 0.9999, f"Correlation {r} too low for channel {ch}"
+    assert np.max(np.abs(y_np - y_mlx)) < tol * max(1.0, np.max(np.abs(y_np)))
+
+
+@requires_mlx
+@pytest.mark.parametrize("coef_type", ["ba", "sos"])
+def test_backward_only_mlx_matches_numpy(coef_type):
+    """Isolate the backward stage: numpy vs MLX input through
+    ButterworthBackwardFilterTransformer should produce the same values."""
+    fs = 1000.0
+    n_times = 2000
+    order = 4
+    rng = np.random.default_rng(42)
+    x = rng.standard_normal((n_times, 2)).astype(np.float32)
+
+    settings = ButterworthZeroPhaseSettings(axis="time", order=order, cutoff=30.0, coef_type=coef_type)
+
+    import mlx.core as mx
+
+    tf_np = ButterworthBackwardFilterTransformer(settings)
+    y_np = np.asarray(tf_np(_make_message(x, ["time", "ch"], fs)).data)
+
+    tf_mlx = ButterworthBackwardFilterTransformer(settings)
+    mlx_out = tf_mlx(_make_message(x, ["time", "ch"], fs, backend="mlx")).data
+
+    # SOS + MLX now runs on-device via the Metal kernel; BA still goes
+    # through scipy (coerced numpy). Either way the output shape and
+    # numerical values should track the numpy reference.
+    if coef_type == "sos":
+        assert isinstance(mlx_out, mx.array), "SOS backward path should stay on MLX"
+    y_mlx = np.asarray(mlx_out)
+
+    assert y_np.shape == y_mlx.shape
+    assert np.isfinite(y_mlx).all()
+
+    # SOS path uses Metal kernel (~5e-4 absolute error). BA path is bit-close
+    # to scipy (float32 roundoff through MLX→numpy coercion).
+    atol = 5e-3 if coef_type == "sos" else 1e-5
+    assert np.allclose(y_np, y_mlx, rtol=1e-4, atol=atol)
+
+
+@requires_mlx
+@pytest.mark.parametrize("coef_type", ["ba", "sos"])
+def test_zerophase_warmup_returns_empty_mlx(coef_type):
+    """Warmup behavior (empty output for first few chunks) must hold for MLX
+    inputs too — the backward stage should not prematurely emit samples just
+    because the data came in as an MLX array."""
+    fs = 200.0
+    cutoff = 30.0
+    order = 2
+    pad_length = _compute_pad_length(order, coef_type, fs, cutoff=cutoff)
+
+    transformer = ButterworthZeroPhaseTransformer(
+        ButterworthZeroPhaseSettings(axis="time", order=order, cutoff=cutoff, coef_type=coef_type)
+    )
+    chunk_size = max(1, pad_length // 3)
+    rng = np.random.default_rng(42)
+    x = rng.standard_normal((chunk_size, 2)).astype(np.float32)
+
+    msg = _make_message(x, ["time", "ch"], fs, backend="mlx")
+    result1 = transformer(msg)
+    assert result1.data.shape[0] == 0
+    assert result1.data.shape[1] == 2
+
+
+@requires_mlx
+@pytest.mark.benchmark(group="butterworthzerophase")
+@pytest.mark.parametrize("n_channels", [32, 256, 1024])
+@pytest.mark.parametrize("backend", ["mlx", "numpy"])
+def test_butterworthzerophase_benchmark(backend, n_channels, benchmark):
+    """Benchmark ButterworthZeroPhase throughput: numpy vs MLX input (SOS).
+
+    After the recent on-device port of the backward stage, MLX input stays
+    on the GPU for both forward and backward filters; this benchmark tracks
+    the speedup vs the numpy/scipy path.
+    """
+    fs = 1000.0
+    chunk_samples = 256
+    n_chunks = 30
+    order = 4
+
+    settings = ButterworthZeroPhaseSettings(
+        axis="time",
+        order=order,
+        cuton=30.0,
+        cutoff=100.0,
+        coef_type="sos",
+    )
+
+    rng = np.random.default_rng(42)
+    chunks = []
+    for i in range(n_chunks):
+        d = rng.standard_normal((chunk_samples, n_channels)).astype(np.float32)
+        axes = frozendict(
+            {
+                "time": AxisArray.TimeAxis(fs=fs, offset=i * chunk_samples / fs),
+                "ch": AxisArray.CoordinateAxis(data=np.arange(n_channels).astype(str), dims=["ch"]),
+            }
+        )
+        if backend == "mlx":
+            import mlx.core as mx
+
+            chunks.append(AxisArray(mx.array(d), dims=["time", "ch"], axes=axes, key="bench"))
+        else:
+            chunks.append(AxisArray(d, dims=["time", "ch"], axes=axes, key="bench"))
+
+    # Warmup: first call triggers filter design + initial buffer fill, and
+    # primes the on-device Metal kernel cache.
+    xformer = ButterworthZeroPhaseTransformer(settings)
+    warmup = xformer(chunks[0])
+    if backend == "mlx":
+        import mlx.core as mx
+
+        if warmup.data.size > 0:
+            mx.eval(warmup.data)
+
+    def process_all_chunks():
+        outputs = [xformer(chunk) for chunk in chunks[1:]]
+        if backend == "mlx":
+            materialize = [o.data for o in outputs if o.data.size > 0]
+            if materialize:
+                mx.eval(*materialize)
+        return outputs
+
+    benchmark(process_all_chunks)
