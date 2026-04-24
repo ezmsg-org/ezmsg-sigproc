@@ -103,6 +103,18 @@ class AdaptiveStandardScalerTransformer(
         AdaptiveStandardScalerState,
     ]
 ):
+    # `accumulate` can be live-propagated into the child EWMAs (see
+    # `update_settings` below); `time_constant` and `axis` are baked into
+    # the children during `_reset_state`.
+    NONRESET_SETTINGS_FIELDS = frozenset({"accumulate"})
+
+    def update_settings(self, new_settings: AdaptiveStandardScalerSettings) -> None:
+        # Propagate accumulate into the existing child EWMAs before deferring
+        # to the base logic, which would otherwise leave them with stale flags.
+        if self._state.samps_ewma is not None and new_settings.accumulate != self.settings.accumulate:
+            self.accumulate = new_settings.accumulate
+        super().update_settings(new_settings)
+
     def _reset_state(self, message: AxisArray) -> None:
         self._state.samps_ewma = EWMATransformer(
             time_constant=self.settings.time_constant,
@@ -163,27 +175,6 @@ class AdaptiveStandardScaler(
     SETTINGS = AdaptiveStandardScalerSettings
 
     INPUT_ACCUMULATE = ez.InputStream(bool)
-
-    @ez.subscriber(BaseTransformerUnit.INPUT_SETTINGS)
-    async def on_settings(self, msg: AdaptiveStandardScalerSettings) -> None:
-        """
-        Handle settings updates with smart reset behavior.
-
-        Only resets state if `axis` changes (structural change).
-        Changes to `time_constant` or `accumulate` are applied without
-        resetting accumulated statistics.
-        """
-        old_axis = self.SETTINGS.axis
-        self.apply_settings(msg)
-
-        if msg.axis != old_axis:
-            # Axis changed - need full reset
-            self.create_processor()
-        else:
-            # Update accumulate on processor (propagates to child EWMAs)
-            self.processor.accumulate = msg.accumulate
-            # Also update own settings reference
-            self.processor.settings = msg
 
     @ez.subscriber(INPUT_ACCUMULATE)
     async def on_accumulate(self, accumulate: bool) -> None:

@@ -158,6 +158,10 @@ class EWMAState:
 
 
 class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray, EWMAState]):
+    # `accumulate` is read live in `_process` to gate state updates; other
+    # fields are cached into state (alpha, zi) during `_reset_state`.
+    NONRESET_SETTINGS_FIELDS = frozenset({"accumulate"})
+
     def __call__(self, message: AxisArray) -> AxisArray:
         if np.prod(message.data.shape) == 0:
             return message
@@ -206,22 +210,3 @@ class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray
 
 class EWMAUnit(BaseTransformerUnit[EWMASettings, AxisArray, AxisArray, EWMATransformer]):
     SETTINGS = EWMASettings
-
-    @ez.subscriber(BaseTransformerUnit.INPUT_SETTINGS)
-    async def on_settings(self, msg: EWMASettings) -> None:
-        """
-        Handle settings updates with smart reset behavior.
-
-        Only resets state if `axis` changes (structural change).
-        Changes to `time_constant` or `accumulate` are applied without
-        resetting accumulated state.
-        """
-        old_axis = self.SETTINGS.axis
-        self.apply_settings(msg)
-
-        if msg.axis != old_axis:
-            # Axis changed - need full reset
-            self.create_processor()
-        else:
-            # Only accumulate or time_constant changed - keep state
-            self.processor.settings = msg

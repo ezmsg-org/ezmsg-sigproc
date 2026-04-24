@@ -82,6 +82,10 @@ class ResampleState:
 
 
 class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisArray, ResampleState]):
+    # Both fields are read per-chunk inside `__next__` / `_process` only;
+    # `resample_rate` / `buffer_duration` / `axis` all size cached buffers.
+    NONRESET_SETTINGS_FIELDS = frozenset({"max_chunk_delay", "fill_value"})
+
     def _hash_message(self, message: AxisArray) -> int:
         ax_idx: int = message.get_axis_idx(self.settings.axis)
         sample_shape = message.data.shape[:ax_idx] + message.data.shape[ax_idx + 1 :]

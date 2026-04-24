@@ -66,6 +66,10 @@ class AdaptiveLatticeNotchFilterTransformer(
     It outputs the estimated frequency (in Hz) and the filtered sample.
     """
 
+    # Adaptive gains and the chunkwise flag are read each step inside
+    # `_process`; `axis` and `init_notch_freq` seed cached state and shape.
+    NONRESET_SETTINGS_FIELDS = frozenset({"gamma", "mu", "eta", "chunkwise"})
+
     def _hash_message(self, message: AxisArray) -> int:
         ax_idx = message.get_axis_idx(self.settings.axis)
         sample_shape = message.data.shape[:ax_idx] + message.data.shape[ax_idx + 1 :]
