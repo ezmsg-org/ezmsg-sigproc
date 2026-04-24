@@ -127,6 +127,10 @@ def is_float_dtype(xp, dtype) -> bool:
         return xp.isdtype(dtype, "real floating")
     except AttributeError:
         pass
+    # torch dtypes advertise ``is_floating_point`` (excludes complex).
+    is_fp = getattr(dtype, "is_floating_point", None)
+    if isinstance(is_fp, bool):
+        return is_fp
     # Fallback for libraries without isdtype (e.g. MLX).
     try:
         return xp.issubdtype(dtype, xp.floating)
