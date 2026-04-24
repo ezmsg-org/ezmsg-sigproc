@@ -95,14 +95,23 @@ def xp_flip(arr, axis):
 def xp_itemsize(dtype) -> int:
     """Bytes per element of ``dtype``, portable across backends.
 
-    numpy/cupy/torch expose ``.itemsize``; MLX exposes ``.size``.
+    numpy/cupy dtype *instances* expose ``.itemsize`` as an int; torch
+    dtypes also expose ``.itemsize`` as an int; MLX dtypes expose ``.size``.
+    NumPy scalar *types* (e.g. ``np.float32`` the class) expose ``.itemsize``
+    as an attribute descriptor, not a concrete int — we detect that and
+    round-trip through ``np.dtype(...)`` to get the instance.
     """
     size = getattr(dtype, "itemsize", None)
-    if size is None:
-        size = getattr(dtype, "size", None)
-    if size is None:
-        raise TypeError(f"Cannot determine byte size of dtype {dtype!r}")
-    return size
+    if isinstance(size, int):
+        return size
+    size = getattr(dtype, "size", None)
+    if isinstance(size, int):
+        return size
+    try:
+        return int(np.dtype(dtype).itemsize)
+    except TypeError:
+        pass
+    raise TypeError(f"Cannot determine byte size of dtype {dtype!r}")
 
 
 def is_complex_dtype(dtype) -> bool:
