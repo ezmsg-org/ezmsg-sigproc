@@ -362,9 +362,7 @@ def test_butterworth_benchmark(backend, n_channels, benchmark):
 @pytest.mark.parametrize("n_channels", [32, 256, 1024])
 @pytest.mark.parametrize("backend", ["mlx", "numpy"])
 def test_sosfilt_benchmark(backend, n_channels, benchmark):
-    """Benchmark _sosfilt_xp (MLX) vs scipy.signal.sosfilt (numpy) directly."""
-    from ezmsg.sigproc.filter import _sosfilt_xp
-
+    """Benchmark sosfilt_mlx_metal (MLX) vs scipy.signal.sosfilt (numpy) directly."""
     fs = 1000.0
     chunk_samples = 256
     n_chunks = 20
@@ -386,19 +384,23 @@ def test_sosfilt_benchmark(backend, n_channels, benchmark):
     if backend == "mlx":
         import mlx.core as mx
 
-        xp = mx
-        chunks_xp = [mx.array(c) for c in chunks]
+        from ezmsg.sigproc.util.sosfilt_mlx_metal import MAX_CHUNK_SIZE, sosfilt_mlx_metal
+
+        # Kernel wants time as the last axis → transpose once to (n_channels, chunk_samples).
+        chunks_xp = [mx.moveaxis(mx.array(c), 0, -1) for c in chunks]
         sos_xp = mx.array(sos_np.astype(np.float32))
-        zi_state = mx.array(zi_np.astype(np.float32))
+        # zi (n_sections, 2, n_channels) → kernel layout (n_sections, n_channels, 2).
+        zi_state = mx.moveaxis(mx.array(zi_np.astype(np.float32)), 1, -1)
+        cs = min(chunk_samples, MAX_CHUNK_SIZE)
 
         # Warmup
-        _, zi_state = _sosfilt_xp(sos_xp, chunks_xp[0], axis_idx=0, zi=zi_state, xp=xp)
+        _, zi_state = sosfilt_mlx_metal(sos_xp, chunks_xp[0], zi=zi_state, chunk_size=cs)
         mx.eval(zi_state)
 
         def run():
             zi = zi_state
             for chunk in chunks_xp[1:]:
-                out, zi = _sosfilt_xp(sos_xp, chunk, axis_idx=0, zi=zi, xp=xp)
+                out, zi = sosfilt_mlx_metal(sos_xp, chunk, zi=zi, chunk_size=cs)
             mx.eval(out)
             return out
     else:

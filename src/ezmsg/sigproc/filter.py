@@ -22,6 +22,16 @@ from ezmsg.util.messages.util import replace
 
 from .util.array import array_device, xp_asarray, xp_create
 
+try:
+    import mlx.core as _mx
+
+    from .util.sosfilt_mlx_metal import MAX_CHUNK_SIZE as _MLX_MAX_CHUNK_SIZE
+    from .util.sosfilt_mlx_metal import sosfilt_mlx_metal as _sosfilt_mlx_metal_fn
+
+    _HAS_MLX_METAL = True
+except ImportError:
+    _HAS_MLX_METAL = False
+
 
 @dataclass
 class FilterCoefficients:
@@ -149,6 +159,24 @@ def _sosfilt_xp(sos, x, axis_idx, zi, xp):
     return x, zi_out
 
 
+def _sosfilt_mlx_metal_xp(sos_mx, data, axis_idx, zi):
+    """Apply SOS filtering via the on-device Metal kernel.
+
+    The kernel requires time as the last axis of its input; ``zi`` is kept
+    in scipy layout ``(n_sections, ..., 2, ...)`` with the "2" at
+    ``axis_idx + 1`` so state shape is portable across backends. Both
+    tensors are moved to the kernel's ``(..., time-last)`` layout on the
+    way in and restored on the way out.
+    """
+    x_mx = _mx.moveaxis(data, axis_idx, -1) if axis_idx != data.ndim - 1 else data
+    zi_mx = _mx.moveaxis(zi, axis_idx + 1, -1) if axis_idx + 1 != zi.ndim - 1 else zi
+    cs = min(x_mx.shape[-1], _MLX_MAX_CHUNK_SIZE)
+    y_mx, zf_mx = _sosfilt_mlx_metal_fn(sos_mx, x_mx, zi=zi_mx, chunk_size=cs)
+    y = _mx.moveaxis(y_mx, -1, axis_idx) if axis_idx != data.ndim - 1 else y_mx
+    zf = _mx.moveaxis(zf_mx, -1, axis_idx + 1) if axis_idx + 1 != zi.ndim - 1 else zf_mx
+    return y, zf
+
+
 def _fir_filt_fft(b, data, zi, axis_idx, xp):
     """FIR filtering via FFT convolution with streaming state.
 
@@ -254,6 +282,12 @@ class FilterBaseSettings(ez.Settings):
     coef_type: str = "ba"
     """The type of filter coefficients. One of "ba" or "sos"."""
 
+    use_mlx_metal: bool = True
+    """If True (default), SOS filtering on MLX inputs runs on the GPU via the
+    bundled Metal kernel (``sosfilt_mlx_metal``) instead of round-tripping
+    through scipy. Set to False to fall back to the scipy path (bit-exact
+    with numpy at the cost of CPU round-trips and ~5-8x slowdown)."""
+
 
 class FilterSettings(FilterBaseSettings):
     coefs: FilterCoefficients | None = None
@@ -268,6 +302,8 @@ class FilterState:
     fir_b: typing.Any | None = None  # reshaped taps for FFT path (broadcast shape)
     fir_b_1d: typing.Any | None = None  # 1D taps for conv path
     fir_method: str | None = None  # 'conv', 'fft', or None (scipy)
+    sos_method: str | None = None  # 'mlx_metal' or None (scipy)
+    sos_mx: typing.Any | None = None  # cached mlx.core.array of SOS coefs
 
 
 class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisArray, FilterState]):
@@ -315,6 +351,8 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
                 self.state.fir_b = xp.reshape(self.state.fir_b_1d, tuple(b_shape))
                 # Choose method
                 self.state.fir_method = "conv" if hasattr(xp, "conv_general") else "fft"
+                self.state.sos_method = None
+                self.state.sos_mx = None
                 return
 
             if is_fir:
@@ -342,6 +380,20 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
         self.state.fir_method = None
         self.state.fir_b = None
         self.state.fir_b_1d = None
+
+        # Route SOS on MLX inputs through the on-device Metal kernel.
+        if (
+            self.settings.coef_type == "sos"
+            and self.settings.use_mlx_metal
+            and _HAS_MLX_METAL
+            and not is_numpy_array(message.data)
+            and get_namespace(message.data).__name__ == "mlx.core"
+        ):
+            self.state.sos_method = "mlx_metal"
+            self.state.sos_mx = _mx.array(np.asarray(coefs[0]).astype(np.float32))
+        else:
+            self.state.sos_method = None
+            self.state.sos_mx = None
 
     def update_coefficients(
         self,
@@ -387,6 +439,10 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
             if reset_needed:
                 self.state.zi = None  # This will trigger _reset_state on the next call
 
+        # Always invalidate cached MLX SOS coefs; _reset_state or _process
+        # will re-cache them from the new settings.coefs on the next call.
+        self.state.sos_mx = None
+
     def _process(self, message: AxisArray) -> AxisArray:
         if message.data.size > 0:
             axis = message.dims[0] if self.settings.axis is None else self.settings.axis
@@ -397,6 +453,11 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
             elif self.state.fir_method == "fft":
                 xp = get_namespace(message.data)
                 dat_out, self.state.zi = _fir_filt_fft(self.state.fir_b, message.data, self.state.zi, axis_idx, xp)
+            elif self.state.sos_method == "mlx_metal":
+                if self.state.sos_mx is None:
+                    _, coefs = _normalize_coefs(self.settings.coefs)
+                    self.state.sos_mx = _mx.array(np.asarray(coefs[0]).astype(np.float32))
+                dat_out, self.state.zi = _sosfilt_mlx_metal_xp(self.state.sos_mx, message.data, axis_idx, self.state.zi)
             else:
                 _, coefs = _normalize_coefs(self.settings.coefs)
                 filt_func = {"ba": scipy.signal.lfilter, "sos": scipy.signal.sosfilt}[self.settings.coef_type]
@@ -522,7 +583,12 @@ class FilterByDesignTransformer(
                 b, a = coefs
                 coefs = scipy.signal.tf2sos(b, a)
 
-        new_settings = FilterSettings(axis=axis, coef_type=self.settings.coef_type, coefs=coefs)
+        new_settings = FilterSettings(
+            axis=axis,
+            coef_type=self.settings.coef_type,
+            coefs=coefs,
+            use_mlx_metal=self.settings.use_mlx_metal,
+        )
         self.state.filter = FilterTransformer(settings=new_settings)
         self.state.needs_redesign = False
 
