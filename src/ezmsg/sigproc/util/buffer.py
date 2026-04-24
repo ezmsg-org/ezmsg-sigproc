@@ -7,6 +7,8 @@ import math
 import typing
 import warnings
 
+from .array import xp_empty, xp_itemsize
+
 Array = typing.TypeVar("Array")
 ArrayNamespace = typing.Any
 DType = typing.Any
@@ -61,7 +63,7 @@ class HybridBuffer:
         self._max_size = max_size
         self._warn_once = warn_once
 
-        self._buffer = self.xp.empty((capacity, *other_shape), dtype=dtype)
+        self._buffer = xp_empty(self.xp, (capacity, *other_shape), dtype=dtype)
         self._head = 0  # Write pointer
         self._tail = 0  # Read pointer
         self._buff_unread = 0  # Number of unread samples in the circular buffer
@@ -107,7 +109,7 @@ class HybridBuffer:
             raise OverflowError(
                 f"Buffer overflow: {new_len} samples awaiting in deque exceeds buffer capacity {self._capacity}."
             )
-        elif new_len * block.dtype.itemsize > self._max_size:
+        elif new_len * xp_itemsize(block.dtype) > self._max_size:
             raise OverflowError(
                 f"deque contents would exceed max_size ({self._max_size}) on subsequent flush."
                 "Are you reading samples frequently enough?"
@@ -161,7 +163,7 @@ class HybridBuffer:
             if (n_overflow - first_read) < self.capacity or (self._overflow_strategy == "drop"):
                 # We can prevent the overflow (or at least *some* if using "drop"
                 # strategy) by reading the samples in the buffer first to make room.
-                data = self.xp.empty((n_samples, *self._buffer.shape[1:]), dtype=self._buffer.dtype)
+                data = xp_empty(self.xp, (n_samples, *self._buffer.shape[1:]), dtype=self._buffer.dtype)
                 self.peek(first_read, out=data[:first_read])
                 offset += first_read
                 self.seek(first_read)
@@ -213,7 +215,7 @@ class HybridBuffer:
             out = (
                 out
                 if out is not None
-                else self.xp.empty((n_samples, *self._buffer.shape[1:]), dtype=self._buffer.dtype)
+                else xp_empty(self.xp, (n_samples, *self._buffer.shape[1:]), dtype=self._buffer.dtype)
             )
             out[:part1_len] = self._buffer[self._tail :]
             out[part1_len:] = self._buffer[:part2_len]
@@ -414,7 +416,7 @@ class HybridBuffer:
             return
 
         other_shape = self._buffer.shape[1:]
-        max_capacity = self._max_size / (self._buffer.dtype.itemsize * math.prod(other_shape))
+        max_capacity = self._max_size / (xp_itemsize(self._buffer.dtype) * math.prod(other_shape))
         if min_capacity > max_capacity:
             raise OverflowError(
                 f"Cannot grow buffer to {min_capacity} samples, "
@@ -422,7 +424,7 @@ class HybridBuffer:
             )
 
         new_capacity = min(max_capacity, max(self._capacity * 2, min_capacity))
-        new_buffer = self.xp.empty((new_capacity, *other_shape), dtype=self._buffer.dtype)
+        new_buffer = xp_empty(self.xp, (new_capacity, *other_shape), dtype=self._buffer.dtype)
 
         # Copy existing data to new buffer
         total_samples = self._buff_read + self._buff_unread
