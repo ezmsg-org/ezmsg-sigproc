@@ -237,6 +237,46 @@ class TestAdaptiveStandardScalerAccumulate:
         assert scaler._state.vars_sq_ewma.settings.accumulate is False
 
 
+class TestAdaptiveStandardScalerUpdateSettings:
+    """Live settings updates via update_settings."""
+
+    def test_accumulate_update_propagates_and_preserves_state(self):
+        scaler = AdaptiveStandardScalerTransformer(
+            settings=AdaptiveStandardScalerSettings(time_constant=0.1, accumulate=True)
+        )
+
+        np.random.seed(0)
+        _ = scaler(_make_scaler_test_msg(np.random.randn(50, 4)))
+        _ = scaler(_make_scaler_test_msg(np.random.randn(50, 4) + 5.0))
+        zi_samps = scaler._state.samps_ewma._state.zi.copy()
+        zi_vars = scaler._state.vars_sq_ewma._state.zi.copy()
+
+        # accumulate-only change: should propagate to children without reset.
+        scaler.update_settings(AdaptiveStandardScalerSettings(time_constant=0.1, accumulate=False))
+        assert scaler._hash != -1
+        assert scaler._state.samps_ewma.settings.accumulate is False
+        assert scaler._state.vars_sq_ewma.settings.accumulate is False
+
+        # With accumulate=False, child zi values must not move.
+        _ = scaler(_make_scaler_test_msg(np.random.randn(50, 4) + 100.0))
+        assert np.allclose(scaler._state.samps_ewma._state.zi, zi_samps)
+        assert np.allclose(scaler._state.vars_sq_ewma._state.zi, zi_vars)
+
+    def test_time_constant_update_triggers_reset(self):
+        scaler = AdaptiveStandardScalerTransformer(
+            settings=AdaptiveStandardScalerSettings(time_constant=0.1, accumulate=True)
+        )
+        _ = scaler(_make_scaler_test_msg(np.ones((10, 2))))
+        samps_ewma_before = scaler._state.samps_ewma
+
+        scaler.update_settings(AdaptiveStandardScalerSettings(time_constant=0.5, accumulate=True))
+        assert scaler._hash == -1
+
+        # Next message rebuilds the child EWMAs inside _reset_state.
+        _ = scaler(_make_scaler_test_msg(np.ones((10, 2))))
+        assert scaler._state.samps_ewma is not samps_ewma_before
+
+
 def test_adaptive_scaler_np_empty_after_init():
     from ezmsg.sigproc.scaler import AdaptiveStandardScalerSettings, AdaptiveStandardScalerTransformer
 

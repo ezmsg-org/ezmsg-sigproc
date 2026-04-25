@@ -64,6 +64,10 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
     can be difficult. Please read the argument descriptions carefully.
     """
 
+    # `anchor` only affects offset math in `_process`; every other field
+    # sizes the buffer or drives the output axes in `_reset_state`.
+    NONRESET_SETTINGS_FIELDS = frozenset({"anchor"})
+
     def __init__(self, *args, **kwargs) -> None:
         """
 

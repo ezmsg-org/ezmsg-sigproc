@@ -10,7 +10,6 @@ import numpy.typing as npt
 import scipy.signal
 from array_api_compat import get_namespace, is_numpy_array
 from ezmsg.baseproc import (
-    BaseConsumerUnit,
     BaseStatefulTransformer,
     BaseTransformerUnit,
     SettingsType,
@@ -606,23 +605,4 @@ class FilterByDesignTransformer(
 class BaseFilterByDesignTransformerUnit(
     BaseTransformerUnit[SettingsType, AxisArray, AxisArray, FilterByDesignTransformer],
     typing.Generic[SettingsType, TransformerType],
-):
-    @ez.subscriber(BaseConsumerUnit.INPUT_SETTINGS)
-    async def on_settings(self, msg: SettingsType) -> None:
-        """
-        Receive a settings message, override self.SETTINGS, and re-create the processor.
-        Child classes that wish to have fine-grained control over whether the
-        core processor resets on settings changes should override this method.
-
-        Args:
-            msg: a settings message.
-        """
-        self.apply_settings(msg)
-
-        # Check if processor exists yet
-        if hasattr(self, "processor") and self.processor is not None:
-            # Update the existing processor with new settings
-            self.processor.update_settings(self.SETTINGS)
-        else:
-            # Processor doesn't exist yet, create a new one
-            self.create_processor()
+): ...

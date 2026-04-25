@@ -48,6 +48,10 @@ class TransposeTransformer(BaseStatefulTransformer[TransposeSettings, AxisArray,
     using the :obj:`Decimate` collection instead.
     """
 
+    # `order` is a NumPy memory-layout hint consulted only in `_process`;
+    # `axes` drives the cached permutation in `_reset_state`.
+    NONRESET_SETTINGS_FIELDS = frozenset({"order"})
+
     def _hash_message(self, message: AxisArray) -> int:
         return hash(tuple(message.dims))
 

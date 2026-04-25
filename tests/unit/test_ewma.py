@@ -191,3 +191,42 @@ def test_ewma_empty_first():
     result = proc(empty)
     check_empty_result(result)
     check_state_not_corrupted(proc, normal)
+
+
+class TestEWMAUpdateSettings:
+    """Live settings updates via BaseProcessor.update_settings."""
+
+    def test_accumulate_toggle_preserves_state(self):
+        proc = EWMATransformer(settings=EWMASettings(time_constant=0.1, accumulate=True))
+
+        _ = proc(_make_ewma_test_msg(np.ones((10, 2))))
+        _ = proc(_make_ewma_test_msg(np.ones((10, 2)) * 2.0))
+        zi_before = proc._state.zi.copy()
+        alpha_before = proc._state.alpha
+
+        # `accumulate` is in NONRESET_SETTINGS_FIELDS — no reset queued.
+        proc.update_settings(EWMASettings(time_constant=0.1, accumulate=False))
+        assert proc._hash != -1
+        assert np.allclose(proc._state.zi, zi_before)
+        assert proc._state.alpha == alpha_before
+
+        # accumulate=False must now gate state updates inside _process.
+        _ = proc(_make_ewma_test_msg(np.ones((10, 2)) * 100.0))
+        assert np.allclose(proc._state.zi, zi_before)
+
+    def test_time_constant_change_recomputes_alpha(self):
+        proc = EWMATransformer(settings=EWMASettings(time_constant=0.1, accumulate=True))
+
+        msg = _make_ewma_test_msg(np.ones((10, 2)))
+        _ = proc(msg)
+        alpha_before = proc._state.alpha
+
+        # `time_constant` is NOT in NONRESET_SETTINGS_FIELDS — reset queued.
+        proc.update_settings(EWMASettings(time_constant=0.5, accumulate=True))
+        assert proc._hash == -1
+
+        # Next message triggers _reset_state, which recomputes alpha from the new time_constant.
+        _ = proc(msg)
+        alpha_after = proc._state.alpha
+        assert alpha_after != alpha_before
+        assert np.isclose(alpha_after, _alpha_from_tau(0.5, 1 / 1000.0))

@@ -103,6 +103,11 @@ class RollingScalerProcessor(BaseAdaptiveTransformer[RollingScalerSettings, Axis
 
     """
 
+    # Post-processing knobs read only inside `_process`; buffer sizing
+    # (`k_samples`, `window_size`, `min_samples`, `min_seconds`) and `axis`
+    # are cached during `_reset_state`.
+    NONRESET_SETTINGS_FIELDS = frozenset({"update_with_signal", "artifact_z_thresh", "clip"})
+
     def _hash_message(self, message: AxisArray) -> int:
         axis = message.dims[0] if self.settings.axis is None else self.settings.axis
         gain = message.axes[axis].gain if hasattr(message.axes[axis], "gain") else 1

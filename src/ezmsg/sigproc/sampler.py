@@ -77,6 +77,10 @@ class SamplerState:
 
 
 class SamplerTransformer(BaseStatefulTransformer[SamplerSettings, AxisArray, AxisArray, SamplerState]):
+    # Trigger-time defaults that are consulted inside `push_trigger`, never
+    # cached during `_reset_state`.
+    NONRESET_SETTINGS_FIELDS = frozenset({"period", "value", "estimate_alignment"})
+
     def __call__(self, message: AxisArray | SampleTriggerMessage) -> list[AxisArray]:
         if isinstance(message, AxisArray):
             return super().__call__(message)

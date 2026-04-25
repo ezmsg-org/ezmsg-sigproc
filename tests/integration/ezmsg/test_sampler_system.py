@@ -58,6 +58,7 @@ class SamplerSystem(ez.Collection):
 
 def test_sampler_system(test_name: str | None = None):
     freq = 40.0
+    n_time = 2  # samples per emitted oscillator block
     period = (0.5, 1.5)
     n_msgs = 4
 
@@ -69,7 +70,7 @@ def test_sampler_system(test_name: str | None = None):
 
     settings = SamplerSystemSettings(
         osc_settings=OscillatorSettings(
-            n_time=2,  # Number of samples to output per block
+            n_time=n_time,
             fs=freq,  # Sampling rate of signal output in Hz
             dispatch_rate="realtime",
             freq=2.0,  # Oscillation frequency in Hz
@@ -91,9 +92,13 @@ def test_sampler_system(test_name: str | None = None):
     ez.logger.info(f"Analyzing recording of {len(messages)} messages...")
     assert len(messages) >= n_msgs
     assert all([_.data.shape == (int(freq * sample_dur), 1) for _ in messages])
-    # Test the sample window slice vs the trigger timestamps
+    # Test the sample window slice vs the trigger timestamps. Tolerance is one
+    # block (n_time/freq), not one sample (1/freq): the trigger and sampler run
+    # in separate processes whose monotonic clocks can disagree by ~15ms on
+    # Windows, so cross-process alignment is bounded by the block size, not the
+    # sample period.
     latencies = [
         _.axes["time"].offset - (_.attrs["trigger"].timestamp + _.attrs["trigger"].period[0]) for _ in messages
     ]
-    assert all([0 <= _ < 1 / freq for _ in latencies])
+    assert all([0 <= _ < n_time / freq for _ in latencies])
     # Given that the input is a pure sinusoid, we could test that the signal has expected characteristics.
