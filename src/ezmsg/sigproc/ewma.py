@@ -7,9 +7,25 @@ import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
 import scipy.signal as sps
+from array_api_compat import get_namespace, is_numpy_array
 from ezmsg.baseproc import BaseStatefulTransformer, BaseTransformerUnit, processor_state
 from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
 from ezmsg.util.messages.util import replace
+
+
+def _ewma_mlx_metal_xp(data, axis_idx: int, zi, alpha: float):
+    """Run EWMA through the MLX Metal helper while preserving scipy zi layout."""
+    import mlx.core as mx
+
+    from .util.ewma_mlx_metal import MAX_CHUNK_SIZE, ewma_mlx_metal
+
+    x_mx = mx.moveaxis(data, axis_idx, -1) if axis_idx != data.ndim - 1 else data
+    zi_mx = mx.moveaxis(zi, axis_idx, -1) if axis_idx != zi.ndim - 1 else zi
+    cs = min(x_mx.shape[-1], MAX_CHUNK_SIZE)
+    y_mx, zf_mx = ewma_mlx_metal(x_mx, alpha, zi_mx, chunk_size=cs)
+    y = mx.moveaxis(y_mx, -1, axis_idx) if axis_idx != data.ndim - 1 else y_mx
+    zf = mx.moveaxis(zf_mx, -1, axis_idx) if axis_idx != zi.ndim - 1 else zf_mx
+    return y, zf
 
 
 def _tau_from_alpha(alpha: float, dt: float) -> float:
@@ -187,8 +203,14 @@ class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray
     def _process(self, message: AxisArray) -> AxisArray:
         axis = self.settings.axis or message.dims[0]
         axis_idx = message.get_axis_idx(axis)
-        if self.settings.accumulate:
-            # Normal behavior: update state with new samples
+
+        xp = np if is_numpy_array(message.data) else get_namespace(message.data)
+        if xp is not np and xp.__name__ == "mlx.core":
+            expected, zf = _ewma_mlx_metal_xp(message.data, axis_idx, self._state.zi, self._state.alpha)
+            if self.settings.accumulate:
+                self._state.zi = zf
+        elif self.settings.accumulate:
+            # Normal behavior: update state with new samples.
             expected, self._state.zi = sps.lfilter(
                 [self._state.alpha],
                 [1.0, self._state.alpha - 1.0],
@@ -197,7 +219,7 @@ class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray
                 zi=self._state.zi,
             )
         else:
-            # Process-only: compute output without updating state
+            # Process-only: compute output without updating state.
             expected, _ = sps.lfilter(
                 [self._state.alpha],
                 [1.0, self._state.alpha - 1.0],
