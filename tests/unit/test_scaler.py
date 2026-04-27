@@ -72,8 +72,19 @@ def test_scaler_mlx_matches_numpy_and_stays_mlx():
     fs = 30_000.0
     tau = 0.5
     rng = np.random.default_rng(1)
+    warmup_data = rng.normal(size=(256, 16)).astype(np.float32)
     data = rng.normal(size=(1025, 16)).astype(np.float32)
 
+    warmup_msg_np = AxisArray(
+        data=warmup_data,
+        dims=["time", "ch"],
+        axes={"time": AxisArray.TimeAxis(fs=fs)},
+    )
+    warmup_msg_mx = AxisArray(
+        data=mx.array(warmup_data),
+        dims=["time", "ch"],
+        axes={"time": AxisArray.TimeAxis(fs=fs)},
+    )
     msg_np = AxisArray(
         data=data,
         dims=["time", "ch"],
@@ -92,18 +103,15 @@ def test_scaler_mlx_matches_numpy_and_stays_mlx():
         settings=AdaptiveStandardScalerSettings(time_constant=tau, axis="time")
     )
 
+    _ = scaler_np(warmup_msg_np)
+    _ = scaler_mx(warmup_msg_mx)
     out_np = scaler_np(msg_np)
     out_mx = scaler_mx(msg_mx)
 
     assert isinstance(out_mx.data, mx.array)
     assert isinstance(scaler_mx._state.samps_ewma._state.zi, mx.array)
     assert isinstance(scaler_mx._state.vars_sq_ewma._state.zi, mx.array)
-    out_mx_np = np.asarray(out_mx.data)
-    # The first few post-initialization samples divide by a near-zero variance;
-    # float32 MLX and float64 SciPy can differ by ~0.1% while still matching
-    # once the EWMA variance has a few samples of support.
-    np.testing.assert_allclose(out_mx_np[:4], out_np.data[:4], rtol=2e-3, atol=2e-4)
-    np.testing.assert_allclose(out_mx_np[4:], out_np.data[4:], rtol=2e-4, atol=2e-4)
+    np.testing.assert_allclose(np.asarray(out_mx.data), out_np.data, rtol=2e-4, atol=2e-4)
 
 
 @requires_mlx
