@@ -60,6 +60,7 @@ Regression testing:
 """
 
 import mlx.core as mx
+import numpy as np
 
 # ---------------------------------------------------------------------------
 # Module constants
@@ -71,6 +72,34 @@ import mlx.core as mx
 #: your hardware has additional shared-memory headroom.
 MAX_CHUNK_SIZE = 512
 
+# Prefix-scan composition is fast, but it is numerically fragile when SOS
+# poles are very close to the unit circle. Above this radius we keep the
+# computation on Metal but use a serial DF-II-T kernel per channel.
+SERIAL_KERNEL_POLE_RADIUS = 0.995
+
+
+def sos_float32_max_pole_radius(sos) -> float:
+    """Return the largest denominator pole radius after float32 quantization."""
+    sos_np = np.asarray(sos, dtype=np.float32)
+    if sos_np.ndim != 2 or sos_np.shape[1] != 6:
+        raise ValueError(f"sos must have shape (n_sections, 6); got {tuple(sos_np.shape)}")
+
+    max_radius = 0.0
+    for section in sos_np:
+        den = np.asarray(section[3:6], dtype=np.float64)
+        if den[0] == 0.0:
+            raise ValueError("SOS denominator coefficient a0 must be nonzero")
+        roots = np.roots(den)
+        if roots.size:
+            max_radius = max(max_radius, float(np.max(np.abs(roots))))
+    return max_radius
+
+
+def sos_float32_stable(sos) -> bool:
+    """Whether the SOS denominator remains stable after float32 quantization."""
+    radius = sos_float32_max_pole_radius(sos)
+    return np.isfinite(radius) and radius < 1.0
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -80,10 +109,10 @@ MAX_CHUNK_SIZE = 512
 def sosfilt_mlx_metal(sos, x, zi=None, chunk_size=MAX_CHUNK_SIZE):
     """Apply an SOS biquad filter cascade on-device.
 
-    One fused Metal kernel launch per chunk handles all biquad sections
-    sequentially in threadgroup memory, matching scipy.signal.sosfilt
-    semantics (Direct Form II Transposed, sequential sections, zi/zf
-    state continuity).
+    One fused Metal kernel launch per chunk handles typical biquad sections
+    sequentially in threadgroup memory. Filters with poles very close to the
+    unit circle use a slower serial Metal kernel that preserves scipy.signal
+    SOS semantics for numerically delicate low-cutoff filters.
 
     Args:
         sos: :class:`mx.array` of shape ``(n_sections, 6)`` containing the
@@ -107,8 +136,8 @@ def sosfilt_mlx_metal(sos, x, zi=None, chunk_size=MAX_CHUNK_SIZE):
           suitable to pass as ``zi`` for the next chunk in streaming use.
 
     Raises:
-        ValueError: if ``sos`` has the wrong shape or if ``chunk_size``
-            is out of range.
+        ValueError: if ``sos`` has the wrong shape, if ``chunk_size`` is out
+            of range, or if the float32 SOS denominator would be unstable.
 
     Notes:
         The kernel is compiled once per distinct
@@ -128,6 +157,15 @@ def sosfilt_mlx_metal(sos, x, zi=None, chunk_size=MAX_CHUNK_SIZE):
         raise ValueError(f"chunk_size must be >= 1; got {chunk_size}")
     if x.ndim < 1:
         raise ValueError(f"x must have at least 1 dimension; got {x.ndim}")
+
+    max_pole_radius = sos_float32_max_pole_radius(sos)
+    if not np.isfinite(max_pole_radius) or max_pole_radius >= 1.0:
+        raise ValueError(
+            "sosfilt_mlx_metal requires SOS denominators to remain stable after "
+            f"float32 quantization; max pole radius is {max_pole_radius:.9g}. "
+            "Use a float64 scipy path or redesign the filter with a higher cutoff."
+        )
+    use_serial_kernel = max_pole_radius >= SERIAL_KERNEL_POLE_RADIUS
 
     sos_f32 = sos.astype(mx.float32) if sos.dtype != mx.float32 else sos
     x_f32 = x.astype(mx.float32) if x.dtype != mx.float32 else x
@@ -162,7 +200,10 @@ def sosfilt_mlx_metal(sos, x, zi=None, chunk_size=MAX_CHUNK_SIZE):
         end = min(start + chunk_size, n_samples)
         cs = end - start
         x_chunk = x_flat[:, start:end]
-        y_chunk, zi_flat = _launch_fused_kernel(x_chunk, sos_flat, zi_flat, n_channels, n_sections, cs)
+        if use_serial_kernel:
+            y_chunk, zi_flat = _launch_serial_kernel(x_chunk, sos_flat, zi_flat, n_channels, n_sections, cs)
+        else:
+            y_chunk, zi_flat = _launch_fused_kernel(x_chunk, sos_flat, zi_flat, n_channels, n_sections, cs)
         y_chunks.append(y_chunk)
 
     y_combined = y_chunks[0] if len(y_chunks) == 1 else mx.concatenate(y_chunks, axis=-1)
@@ -373,6 +414,88 @@ def _launch_fused_kernel(x_chunk, sos_flat, zi_flat, n_channels, n_sections, cs)
         ],
         grid=(n_channels * cs, 1, 1),
         threadgroup=(cs, 1, 1),
+        output_shapes=[
+            (n_channels, cs),
+            (n_sections * n_channels * 2,),
+        ],
+        output_dtypes=[mx.float32, mx.float32],
+    )
+    return y_chunk, zf_flat
+
+
+# ---------------------------------------------------------------------------
+# Serial kernel (near-unit-pole path)
+# ---------------------------------------------------------------------------
+#
+# The fused prefix-scan kernel composes section state matrices in float32.
+# For poles very close to the unit circle, those matrix products can drift
+# enough to swamp low-cutoff high-pass outputs. This kernel keeps the same
+# data on Metal but assigns one thread per channel and runs scipy's DF-II-T
+# recurrence in time order. It is slower, but it matches scipy's float32 SOS
+# semantics for filters that are too numerically delicate for the scan.
+
+_SERIAL_KERNEL_SOURCE = r"""
+    uint ch = thread_position_in_grid.x;
+
+    float z0[N_SECTIONS];
+    float z1[N_SECTIONS];
+    for (uint sec = 0; sec < N_SECTIONS; sec++) {
+        uint zi_base = (sec * N_CHANNELS + ch) * 2;
+        z0[sec] = zi_all[zi_base + 0];
+        z1[sec] = zi_all[zi_base + 1];
+    }
+
+    for (uint t = 0; t < CS; t++) {
+        float x_val = x_in[ch * CS + t];
+
+        for (uint sec = 0; sec < N_SECTIONS; sec++) {
+            uint sbase = sec * 6;
+            float b0 = sos_all[sbase + 0];
+            float b1 = sos_all[sbase + 1];
+            float b2 = sos_all[sbase + 2];
+            float a1 = sos_all[sbase + 4];
+            float a2 = sos_all[sbase + 5];
+
+            float y_val = b0 * x_val + z0[sec];
+            float next_z0 = b1 * x_val - a1 * y_val + z1[sec];
+            float next_z1 = b2 * x_val - a2 * y_val;
+
+            z0[sec] = next_z0;
+            z1[sec] = next_z1;
+            x_val = y_val;
+        }
+
+        y_out[ch * CS + t] = x_val;
+    }
+
+    for (uint sec = 0; sec < N_SECTIONS; sec++) {
+        uint zi_base = (sec * N_CHANNELS + ch) * 2;
+        zf_all[zi_base + 0] = z0[sec];
+        zf_all[zi_base + 1] = z1[sec];
+    }
+"""
+
+
+_serial_kernel = mx.fast.metal_kernel(
+    name="sosfilt_biquad_serial",
+    input_names=["x_in", "sos_all", "zi_all"],
+    output_names=["y_out", "zf_all"],
+    source=_SERIAL_KERNEL_SOURCE,
+)
+
+
+def _launch_serial_kernel(x_chunk, sos_flat, zi_flat, n_channels, n_sections, cs):
+    """One serial DF-II-T kernel dispatch for numerically delicate SOS filters."""
+    y_chunk, zf_flat = _serial_kernel(
+        inputs=[x_chunk, sos_flat, zi_flat],
+        template=[
+            ("T", mx.float32),
+            ("CS", cs),
+            ("N_SECTIONS", n_sections),
+            ("N_CHANNELS", n_channels),
+        ],
+        grid=(n_channels, 1, 1),
+        threadgroup=(1, 1, 1),
         output_shapes=[
             (n_channels, cs),
             (n_sections * n_channels * 2,),

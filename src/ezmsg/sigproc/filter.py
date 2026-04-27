@@ -25,6 +25,7 @@ try:
     import mlx.core as _mx
 
     from .util.sosfilt_mlx_metal import MAX_CHUNK_SIZE as _MLX_MAX_CHUNK_SIZE
+    from .util.sosfilt_mlx_metal import sos_float32_stable as _sos_float32_stable
     from .util.sosfilt_mlx_metal import sosfilt_mlx_metal as _sosfilt_mlx_metal_fn
 
     _HAS_MLX_METAL = True
@@ -301,7 +302,7 @@ class FilterState:
     fir_b: typing.Any | None = None  # reshaped taps for FFT path (broadcast shape)
     fir_b_1d: typing.Any | None = None  # 1D taps for conv path
     fir_method: str | None = None  # 'conv', 'fft', or None (scipy)
-    sos_method: str | None = None  # 'mlx_metal' or None (scipy)
+    sos_method: str | None = None  # 'mlx_metal', 'scipy_numpy', or None (scipy)
     sos_mx: typing.Any | None = None  # cached mlx.core.array of SOS coefs
 
 
@@ -372,24 +373,41 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
             n_tile = (1,) + n_tile
 
         zi_tiled = np.tile(zi[zi_expand], n_tile)
-        if not is_numpy_array(message.data):
-            xp = get_namespace(message.data)
-            zi_tiled = xp_asarray(xp, zi_tiled)
-        self.state.zi = zi_tiled
         self.state.fir_method = None
         self.state.fir_b = None
         self.state.fir_b_1d = None
 
-        # Route SOS on MLX inputs through the on-device Metal kernel.
+        sos_method = None
+        sos_mx = None
+        is_mlx_input = not is_numpy_array(message.data) and get_namespace(message.data).__name__ == "mlx.core"
+
+        # Route SOS on MLX inputs through the on-device Metal kernel when the
+        # float32 SOS remains stable. Ultra-low high-pass filters can become
+        # unstable after float32 quantization; keep those on scipy with a
+        # float64 NumPy state instead of sending them to Metal.
         if (
             self.settings.coef_type == "sos"
             and self.settings.use_mlx_metal
             and _HAS_MLX_METAL
-            and not is_numpy_array(message.data)
-            and get_namespace(message.data).__name__ == "mlx.core"
+            and is_mlx_input
+            and _sos_float32_stable(coefs[0])
         ):
+            sos_method = "mlx_metal"
+            sos_mx = _mx.array(np.asarray(coefs[0]).astype(np.float32))
+        elif self.settings.coef_type == "sos" and is_mlx_input:
+            sos_method = "scipy_numpy"
+
+        if not is_numpy_array(message.data) and sos_method != "scipy_numpy":
+            xp = get_namespace(message.data)
+            zi_tiled = xp_asarray(xp, zi_tiled)
+        self.state.zi = zi_tiled
+
+        if sos_method == "mlx_metal":
             self.state.sos_method = "mlx_metal"
-            self.state.sos_mx = _mx.array(np.asarray(coefs[0]).astype(np.float32))
+            self.state.sos_mx = sos_mx
+        elif sos_method == "scipy_numpy":
+            self.state.sos_method = "scipy_numpy"
+            self.state.sos_mx = None
         else:
             self.state.sos_method = None
             self.state.sos_mx = None
@@ -457,6 +475,16 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
                     _, coefs = _normalize_coefs(self.settings.coefs)
                     self.state.sos_mx = _mx.array(np.asarray(coefs[0]).astype(np.float32))
                 dat_out, self.state.zi = _sosfilt_mlx_metal_xp(self.state.sos_mx, message.data, axis_idx, self.state.zi)
+            elif self.state.sos_method == "scipy_numpy":
+                _, coefs = _normalize_coefs(self.settings.coefs)
+                filt_func = {"ba": scipy.signal.lfilter, "sos": scipy.signal.sosfilt}[self.settings.coef_type]
+                dat_out_np, self.state.zi = filt_func(
+                    *coefs,
+                    np.asarray(message.data),
+                    axis=axis_idx,
+                    zi=np.asarray(self.state.zi),
+                )
+                dat_out = xp_asarray(get_namespace(message.data), dat_out_np)
             else:
                 _, coefs = _normalize_coefs(self.settings.coefs)
                 filt_func = {"ba": scipy.signal.lfilter, "sos": scipy.signal.sosfilt}[self.settings.coef_type]
