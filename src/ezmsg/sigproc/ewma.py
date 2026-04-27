@@ -19,12 +19,15 @@ def _ewma_mlx_metal_xp(data, axis_idx: int, zi, alpha: float):
 
     from .util.ewma_mlx_metal import MAX_CHUNK_SIZE, ewma_mlx_metal
 
-    x_mx = mx.moveaxis(data, axis_idx, -1) if axis_idx != data.ndim - 1 else data
-    zi_mx = mx.moveaxis(zi, axis_idx, -1) if axis_idx != zi.ndim - 1 else zi
+    zi = mx.asarray(zi, dtype=data.dtype)
+    last_data_axis = data.ndim - 1
+    last_zi_axis = zi.ndim - 1
+    x_mx = mx.moveaxis(data, axis_idx, last_data_axis) if axis_idx != last_data_axis else data
+    zi_mx = mx.moveaxis(zi, axis_idx, last_zi_axis) if axis_idx != last_zi_axis else zi
     cs = min(x_mx.shape[-1], MAX_CHUNK_SIZE)
     y_mx, zf_mx = ewma_mlx_metal(x_mx, alpha, zi_mx, chunk_size=cs)
-    y = mx.moveaxis(y_mx, -1, axis_idx) if axis_idx != data.ndim - 1 else y_mx
-    zf = mx.moveaxis(zf_mx, -1, axis_idx) if axis_idx != zi.ndim - 1 else zf_mx
+    y = mx.moveaxis(y_mx, last_data_axis, axis_idx) if axis_idx != last_data_axis else y_mx
+    zf = mx.moveaxis(zf_mx, last_zi_axis, axis_idx) if axis_idx != last_zi_axis else zf_mx
     return y, zf
 
 
@@ -211,6 +214,8 @@ class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray
                 self._state.zi = zf
         elif self.settings.accumulate:
             # Normal behavior: update state with new samples.
+            if self._state.zi is not None and not is_numpy_array(self._state.zi):
+                self._state.zi = np.asarray(self._state.zi)
             expected, self._state.zi = sps.lfilter(
                 [self._state.alpha],
                 [1.0, self._state.alpha - 1.0],
@@ -220,6 +225,8 @@ class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray
             )
         else:
             # Process-only: compute output without updating state.
+            if self._state.zi is not None and not is_numpy_array(self._state.zi):
+                self._state.zi = np.asarray(self._state.zi)
             expected, _ = sps.lfilter(
                 [self._state.alpha],
                 [1.0, self._state.alpha - 1.0],

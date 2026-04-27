@@ -94,6 +94,35 @@ def test_ewma_mlx_matches_numpy_and_stays_mlx():
     np.testing.assert_allclose(np.asarray(out_mx.data), out_np.data, rtol=1e-4, atol=1e-5)
 
 
+@requires_mlx
+def test_ewma_mlx_accepts_numpy_initialized_state():
+    mx = pytest.importorskip("mlx.core")
+
+    fs = 30_000.0
+    time_constant = 0.25
+    rng = np.random.default_rng(2)
+    data1 = rng.normal(size=(64, 4)).astype(np.float32)
+    data2 = rng.normal(size=(129, 4)).astype(np.float32)
+
+    msg1_np = AxisArray(data=data1, dims=["time", "ch"], axes={"time": AxisArray.TimeAxis(fs=fs)})
+    msg2_np = AxisArray(data=data2, dims=["time", "ch"], axes={"time": AxisArray.TimeAxis(fs=fs)})
+    msg2_mx = AxisArray(data=mx.array(data2), dims=["time", "ch"], axes={"time": AxisArray.TimeAxis(fs=fs)})
+
+    ref = EWMATransformer(time_constant=time_constant, axis="time", accumulate=True)
+    proc = EWMATransformer(time_constant=time_constant, axis="time", accumulate=True)
+
+    _ = ref(msg1_np)
+    expected = ref(msg2_np)
+
+    _ = proc(msg1_np)
+    assert isinstance(proc._state.zi, np.ndarray)
+    actual = proc(msg2_mx)
+
+    assert isinstance(actual.data, mx.array)
+    assert isinstance(proc._state.zi, mx.array)
+    np.testing.assert_allclose(np.asarray(actual.data), expected.data, rtol=1e-4, atol=1e-5)
+
+
 def replace_axisarray_data(message: AxisArray, data) -> AxisArray:
     return AxisArray(data=data, dims=message.dims, axes=message.axes, key=message.key)
 
