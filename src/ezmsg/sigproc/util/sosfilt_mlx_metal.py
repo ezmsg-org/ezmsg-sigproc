@@ -59,6 +59,8 @@ Regression testing:
     cross-check for any future kernel modifications.
 """
 
+import weakref
+
 import mlx.core as mx
 import numpy as np
 
@@ -76,6 +78,8 @@ MAX_CHUNK_SIZE = 512
 # poles are very close to the unit circle. Above this radius we keep the
 # computation on Metal but use a serial DF-II-T kernel per channel.
 SERIAL_KERNEL_POLE_RADIUS = 0.995
+
+_SOS_POLE_RADIUS_CACHE: dict[int, tuple[weakref.ReferenceType, tuple[int, ...], str, float]] = {}
 
 
 def sos_float32_max_pole_radius(sos) -> float:
@@ -99,6 +103,26 @@ def sos_float32_stable(sos) -> bool:
     """Whether the SOS denominator remains stable after float32 quantization."""
     radius = sos_float32_max_pole_radius(sos)
     return np.isfinite(radius) and radius < 1.0
+
+
+def _cached_sos_float32_max_pole_radius(sos) -> float:
+    """Return SOS pole radius, reusing the result for repeated MLX array calls."""
+    if not isinstance(sos, mx.array):
+        return sos_float32_max_pole_radius(sos)
+
+    key = id(sos)
+    shape = tuple(sos.shape)
+    dtype = str(sos.dtype)
+    cached = _SOS_POLE_RADIUS_CACHE.get(key)
+    if cached is not None:
+        ref, cached_shape, cached_dtype, radius = cached
+        if ref() is sos and cached_shape == shape and cached_dtype == dtype:
+            return radius
+
+    radius = sos_float32_max_pole_radius(sos)
+    ref = weakref.ref(sos, lambda _ref, cache_key=key: _SOS_POLE_RADIUS_CACHE.pop(cache_key, None))
+    _SOS_POLE_RADIUS_CACHE[key] = (ref, shape, dtype, radius)
+    return radius
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +182,7 @@ def sosfilt_mlx_metal(sos, x, zi=None, chunk_size=MAX_CHUNK_SIZE):
     if x.ndim < 1:
         raise ValueError(f"x must have at least 1 dimension; got {x.ndim}")
 
-    max_pole_radius = sos_float32_max_pole_radius(sos)
+    max_pole_radius = _cached_sos_float32_max_pole_radius(sos)
     if not np.isfinite(max_pole_radius) or max_pole_radius >= 1.0:
         raise ValueError(
             "sosfilt_mlx_metal requires SOS denominators to remain stable after "
