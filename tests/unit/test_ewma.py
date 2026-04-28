@@ -1,6 +1,7 @@
 from dataclasses import replace as dc_replace
 
 import numpy as np
+import pytest
 from ezmsg.util.messages.axisarray import AxisArray
 
 from ezmsg.sigproc.ewma import (
@@ -11,6 +12,7 @@ from ezmsg.sigproc.ewma import (
     ewma_step,
 )
 from tests.helpers.empty_time import check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
+from tests.helpers.util import requires_mlx
 
 
 def test_tc_from_alpha():
@@ -49,6 +51,80 @@ def test_ewma():
     ewma = EWMATransformer(time_constant=time_constant, axis="time", accumulate=True)
     res = ewma(msg)
     assert np.allclose(res.data, expected)
+
+
+@requires_mlx
+def test_ewma_mlx_matches_numpy_and_stays_mlx():
+    mx = pytest.importorskip("mlx.core")
+
+    fs = 30_000.0
+    time_constant = 0.25
+    rng = np.random.default_rng(0)
+    data = rng.normal(size=(257, 8)).astype(np.float32)
+
+    msg_np = AxisArray(
+        data=data,
+        dims=["time", "ch"],
+        axes={"time": AxisArray.TimeAxis(fs=fs)},
+    )
+    msg_mx = AxisArray(
+        data=mx.array(data),
+        dims=["time", "ch"],
+        axes={"time": AxisArray.TimeAxis(fs=fs)},
+    )
+
+    ewma_np = EWMATransformer(time_constant=time_constant, axis="time", accumulate=True)
+    ewma_mx = EWMATransformer(time_constant=time_constant, axis="time", accumulate=True)
+
+    out_np = ewma_np(msg_np)
+    out_mx = ewma_mx(msg_mx)
+
+    assert isinstance(out_mx.data, mx.array)
+    assert isinstance(ewma_mx._state.zi, mx.array)
+    np.testing.assert_allclose(np.asarray(out_mx.data), out_np.data, rtol=1e-4, atol=1e-5)
+
+    next_data = rng.normal(size=(129, 8)).astype(np.float32)
+    next_np = replace_axisarray_data(msg_np, next_data)
+    next_mx = replace_axisarray_data(msg_mx, mx.array(next_data))
+
+    out_np = ewma_np(next_np)
+    out_mx = ewma_mx(next_mx)
+
+    assert isinstance(out_mx.data, mx.array)
+    np.testing.assert_allclose(np.asarray(out_mx.data), out_np.data, rtol=1e-4, atol=1e-5)
+
+
+@requires_mlx
+def test_ewma_mlx_accepts_numpy_initialized_state():
+    mx = pytest.importorskip("mlx.core")
+
+    fs = 30_000.0
+    time_constant = 0.25
+    rng = np.random.default_rng(2)
+    data1 = rng.normal(size=(64, 4)).astype(np.float32)
+    data2 = rng.normal(size=(129, 4)).astype(np.float32)
+
+    msg1_np = AxisArray(data=data1, dims=["time", "ch"], axes={"time": AxisArray.TimeAxis(fs=fs)})
+    msg2_np = AxisArray(data=data2, dims=["time", "ch"], axes={"time": AxisArray.TimeAxis(fs=fs)})
+    msg2_mx = AxisArray(data=mx.array(data2), dims=["time", "ch"], axes={"time": AxisArray.TimeAxis(fs=fs)})
+
+    ref = EWMATransformer(time_constant=time_constant, axis="time", accumulate=True)
+    proc = EWMATransformer(time_constant=time_constant, axis="time", accumulate=True)
+
+    _ = ref(msg1_np)
+    expected = ref(msg2_np)
+
+    _ = proc(msg1_np)
+    assert isinstance(proc._state.zi, np.ndarray)
+    actual = proc(msg2_mx)
+
+    assert isinstance(actual.data, mx.array)
+    assert isinstance(proc._state.zi, mx.array)
+    np.testing.assert_allclose(np.asarray(actual.data), expected.data, rtol=1e-4, atol=1e-5)
+
+
+def replace_axisarray_data(message: AxisArray, data) -> AxisArray:
+    return AxisArray(data=data, dims=message.dims, axes=message.axes, key=message.key)
 
 
 def _make_ewma_test_msg(data: np.ndarray, fs: float = 1000.0) -> AxisArray:

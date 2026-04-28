@@ -14,7 +14,7 @@ from ezmsg.sigproc.scaler import (
     RiverAdaptiveStandardScalerTransformer,
 )
 from tests.helpers.empty_time import check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
-from tests.helpers.util import assert_messages_equal
+from tests.helpers.util import assert_messages_equal, requires_mlx
 
 
 @pytest.fixture
@@ -63,6 +63,85 @@ def test_scaler(fixture_arrays):
     output = AxisArray.concatenate(*outputs, dim="time")
     assert np.allclose(output.data, expected_result, atol=1e-3)
     assert_messages_equal(test_input, backup)
+
+
+@requires_mlx
+def test_scaler_mlx_matches_numpy_and_stays_mlx():
+    mx = pytest.importorskip("mlx.core")
+
+    fs = 30_000.0
+    tau = 0.5
+    rng = np.random.default_rng(1)
+    warmup_data = rng.normal(size=(256, 16)).astype(np.float32)
+    data = rng.normal(size=(1025, 16)).astype(np.float32)
+
+    warmup_msg_np = AxisArray(
+        data=warmup_data,
+        dims=["time", "ch"],
+        axes={"time": AxisArray.TimeAxis(fs=fs)},
+    )
+    warmup_msg_mx = AxisArray(
+        data=mx.array(warmup_data),
+        dims=["time", "ch"],
+        axes={"time": AxisArray.TimeAxis(fs=fs)},
+    )
+    msg_np = AxisArray(
+        data=data,
+        dims=["time", "ch"],
+        axes={"time": AxisArray.TimeAxis(fs=fs)},
+    )
+    msg_mx = AxisArray(
+        data=mx.array(data),
+        dims=["time", "ch"],
+        axes={"time": AxisArray.TimeAxis(fs=fs)},
+    )
+
+    scaler_np = AdaptiveStandardScalerTransformer(
+        settings=AdaptiveStandardScalerSettings(time_constant=tau, axis="time")
+    )
+    scaler_mx = AdaptiveStandardScalerTransformer(
+        settings=AdaptiveStandardScalerSettings(time_constant=tau, axis="time")
+    )
+
+    _ = scaler_np(warmup_msg_np)
+    _ = scaler_mx(warmup_msg_mx)
+    out_np = scaler_np(msg_np)
+    out_mx = scaler_mx(msg_mx)
+
+    assert isinstance(out_mx.data, mx.array)
+    assert isinstance(scaler_mx._state.samps_ewma._state.zi, mx.array)
+    assert isinstance(scaler_mx._state.vars_sq_ewma._state.zi, mx.array)
+    np.testing.assert_allclose(np.asarray(out_mx.data), out_np.data, rtol=2e-4, atol=2e-4)
+
+
+@requires_mlx
+def test_scaler_mlx_accepts_numpy_initialized_state():
+    mx = pytest.importorskip("mlx.core")
+
+    fs = 30_000.0
+    tau = 0.5
+    rng = np.random.default_rng(3)
+    data1 = rng.normal(size=(64, 4)).astype(np.float32)
+    data2 = rng.normal(size=(257, 4)).astype(np.float32)
+
+    msg1_np = AxisArray(data=data1, dims=["time", "ch"], axes={"time": AxisArray.TimeAxis(fs=fs)})
+    msg2_np = AxisArray(data=data2, dims=["time", "ch"], axes={"time": AxisArray.TimeAxis(fs=fs)})
+    msg2_mx = AxisArray(data=mx.array(data2), dims=["time", "ch"], axes={"time": AxisArray.TimeAxis(fs=fs)})
+
+    ref = AdaptiveStandardScalerTransformer(settings=AdaptiveStandardScalerSettings(time_constant=tau, axis="time"))
+    proc = AdaptiveStandardScalerTransformer(settings=AdaptiveStandardScalerSettings(time_constant=tau, axis="time"))
+
+    _ = ref(msg1_np)
+    expected = ref(msg2_np)
+
+    _ = proc(msg1_np)
+    assert isinstance(proc._state.samps_ewma._state.zi, np.ndarray)
+    actual = proc(msg2_mx)
+
+    assert isinstance(actual.data, mx.array)
+    assert isinstance(proc._state.samps_ewma._state.zi, mx.array)
+    assert isinstance(proc._state.vars_sq_ewma._state.zi, mx.array)
+    np.testing.assert_allclose(np.asarray(actual.data), expected.data, rtol=2e-4, atol=2e-4)
 
 
 def _make_scaler_test_msg(data: np.ndarray, fs: float = 1000.0) -> AxisArray:
