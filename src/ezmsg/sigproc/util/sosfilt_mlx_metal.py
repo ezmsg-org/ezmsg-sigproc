@@ -64,6 +64,8 @@ import weakref
 import mlx.core as mx
 import numpy as np
 
+from .mlx_metal_common import chunked_scan, flatten_batch, restore_batch, to_float32
+
 # ---------------------------------------------------------------------------
 # Module constants
 # ---------------------------------------------------------------------------
@@ -191,18 +193,11 @@ def sosfilt_mlx_metal(sos, x, zi=None, chunk_size=MAX_CHUNK_SIZE):
         )
     use_serial_kernel = max_pole_radius >= SERIAL_KERNEL_POLE_RADIUS
 
-    sos_f32 = sos.astype(mx.float32) if sos.dtype != mx.float32 else sos
-    x_f32 = x.astype(mx.float32) if x.dtype != mx.float32 else x
+    sos_f32 = to_float32(sos)
+    x_f32 = to_float32(x)
 
     n_sections = sos_f32.shape[0]
-    batch_shape = tuple(x_f32.shape[:-1])
-    n_samples = x_f32.shape[-1]
-
-    # Flatten leading dims to a single channel axis
-    n_channels = 1
-    for d in batch_shape:
-        n_channels *= d
-    x_flat = x_f32.reshape(n_channels, n_samples) if batch_shape else x_f32.reshape(1, n_samples)
+    x_flat, batch_shape, n_channels, n_samples = flatten_batch(x_f32)
 
     # Flatten zi to the packed layout the kernel expects
     if zi is None:
@@ -212,34 +207,20 @@ def sosfilt_mlx_metal(sos, x, zi=None, chunk_size=MAX_CHUNK_SIZE):
             raise ValueError(
                 f"zi shape {tuple(zi.shape)} does not match expected " f"{(n_sections,) + batch_shape + (2,)}"
             )
-        zi_f32 = zi.astype(mx.float32) if zi.dtype != mx.float32 else zi
-        zi_flat = zi_f32.reshape(n_sections * n_channels * 2)
+        zi_flat = to_float32(zi).reshape(n_sections * n_channels * 2)
 
     # Flatten SOS to a linear coefficient buffer
     sos_flat = sos_f32.reshape(n_sections * 6)
 
-    # Chunk the signal; state flows through zi_flat across iterations
-    y_chunks = []
-    for start in range(0, n_samples, chunk_size):
-        end = min(start + chunk_size, n_samples)
-        cs = end - start
-        x_chunk = x_flat[:, start:end]
-        if use_serial_kernel:
-            y_chunk, zi_flat = _launch_serial_kernel(x_chunk, sos_flat, zi_flat, n_channels, n_sections, cs)
-        else:
-            y_chunk, zi_flat = _launch_fused_kernel(x_chunk, sos_flat, zi_flat, n_channels, n_sections, cs)
-        y_chunks.append(y_chunk)
+    launch_one = _launch_serial_kernel if use_serial_kernel else _launch_fused_kernel
 
-    y_combined = y_chunks[0] if len(y_chunks) == 1 else mx.concatenate(y_chunks, axis=-1)
+    def launch(x_chunk, state, cs):
+        return launch_one(x_chunk, sos_flat, state, n_channels, n_sections, cs)
 
-    # Restore original batch shape
-    if batch_shape:
-        y_out = y_combined.reshape(*batch_shape, n_samples)
-        zf_out = zi_flat.reshape(n_sections, *batch_shape, 2)
-    else:
-        y_out = y_combined.reshape(n_samples)
-        zf_out = zi_flat.reshape(n_sections, 2)
+    y_combined, zi_flat = chunked_scan(x_flat, n_samples, chunk_size, zi_flat, launch)
 
+    y_out = restore_batch(y_combined, batch_shape, n_samples)
+    zf_out = zi_flat.reshape(n_sections, *batch_shape, 2) if batch_shape else zi_flat.reshape(n_sections, 2)
     return y_out, zf_out
 
 

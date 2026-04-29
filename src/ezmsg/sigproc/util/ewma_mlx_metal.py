@@ -2,6 +2,8 @@
 
 import mlx.core as mx
 
+from .mlx_metal_common import chunked_scan, flatten_batch, restore_batch, to_float32
+
 MAX_CHUNK_SIZE = 1024
 
 
@@ -27,35 +29,20 @@ def ewma_mlx_metal(x, alpha: float, zi, chunk_size: int = MAX_CHUNK_SIZE):
     if zi.shape != tuple(x.shape[:-1]) + (1,):
         raise ValueError(f"zi shape {tuple(zi.shape)} does not match expected {tuple(x.shape[:-1]) + (1,)}")
 
-    x_f32 = x.astype(mx.float32) if x.dtype != mx.float32 else x
-    zi_f32 = zi.astype(mx.float32) if zi.dtype != mx.float32 else zi
+    x_f32 = to_float32(x)
+    zi_f32 = to_float32(zi)
     coef = mx.array([float(alpha), float(1.0 - alpha)], dtype=mx.float32)
 
-    batch_shape = tuple(x_f32.shape[:-1])
-    n_samples = x_f32.shape[-1]
-    n_channels = 1
-    for dim in batch_shape:
-        n_channels *= dim
-
-    x_flat = x_f32.reshape(n_channels, n_samples) if batch_shape else x_f32.reshape(1, n_samples)
+    x_flat, batch_shape, n_channels, n_samples = flatten_batch(x_f32)
     zi_flat = zi_f32.reshape(n_channels)
 
-    y_chunks = []
-    for start in range(0, n_samples, chunk_size):
-        end = min(start + chunk_size, n_samples)
-        cs = end - start
-        y_chunk, zi_flat = _launch_kernel(x_flat[:, start:end], coef, zi_flat, n_channels, cs)
-        y_chunks.append(y_chunk)
+    def launch(x_chunk, state, cs):
+        return _launch_kernel(x_chunk, coef, state, n_channels, cs)
 
-    y_combined = y_chunks[0] if len(y_chunks) == 1 else mx.concatenate(y_chunks, axis=-1)
+    y_combined, zi_flat = chunked_scan(x_flat, n_samples, chunk_size, zi_flat, launch)
 
-    if batch_shape:
-        y_out = y_combined.reshape(*batch_shape, n_samples)
-        zf_out = zi_flat.reshape(*batch_shape, 1)
-    else:
-        y_out = y_combined.reshape(n_samples)
-        zf_out = zi_flat.reshape(1)
-
+    y_out = restore_batch(y_combined, batch_shape, n_samples)
+    zf_out = zi_flat.reshape(*batch_shape, 1) if batch_shape else zi_flat.reshape(1)
     return y_out, zf_out
 
 
