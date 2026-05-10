@@ -28,10 +28,16 @@ class MergeSettings(ez.Settings):
     """Whether to relabel coordinate axis labels to ensure uniqueness."""
 
     label_a: str = "_a"
-    """Suffix appended to signal A labels when relabel_axis is True."""
+    """Per-side label for signal A.
+
+    See :attr:`ezmsg.sigproc.concat.ConcatSettings.label_a` — used as a
+    suffix on existing-axis labels when ``axis`` is in both inputs' dims,
+    or as the single CoordinateAxis entry at index 0 when ``axis`` is a
+    *new* dim (e.g. ``label_a="spk"`` for a feature-merge).
+    """
 
     label_b: str = "_b"
-    """Suffix appended to signal B labels when relabel_axis is True."""
+    """Per-side label for signal B.  See :attr:`label_a`."""
 
     assert_identical_shared_axes: bool = False
     """If True, raise ValueError when shared CoordinateAxis .data arrays differ."""

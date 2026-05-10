@@ -237,6 +237,37 @@ class TestNewAxisConcat:
         np.testing.assert_array_equal(result.data[:, :, 1], 2.0)
         assert "feature" in result.dims
 
+    def test_new_feature_axis_with_labels(self):
+        """``label_a`` / ``label_b`` populate a CoordinateAxis on a *new* axis.
+
+        When ``axis`` is not in either input's dims, the suffix-style
+        relabel doesn't apply (there's nothing to suffix).  Instead the
+        same per-side labels become the new axis's data values.
+        """
+        settings = ConcatSettings(
+            axis="feature",
+            label_a="spk",
+            label_b="sbp",
+        )
+        proc = ConcatProcessor(settings)
+        n = 5
+
+        # Inputs are (time, ch); neither has a "feature" dim.  After concat
+        # the output is (time, ch, feature) with feature labels ("spk", "sbp").
+        msg_a = _make_msg(np.ones((n, 3)), ch_labels=["C0", "C1", "C2"])
+        msg_b = _make_msg(np.ones((n, 3)) * 2, ch_labels=["C0", "C1", "C2"])
+
+        result = proc._concat(msg_a, msg_b)
+        assert result.data.shape == (n, 3, 2)
+        assert "feature" in result.dims
+        feature_ax = result.axes.get("feature")
+        assert feature_ax is not None, "feature axis missing from output"
+        assert hasattr(feature_ax, "data"), "feature axis should be a CoordinateAxis with .data"
+        np.testing.assert_array_equal(np.asarray(feature_ax.data), np.array(["spk", "sbp"]))
+        # Slice 0 = signal A (spk), slice 1 = signal B (sbp).
+        np.testing.assert_array_equal(result.data[:, :, 0], 1.0)
+        np.testing.assert_array_equal(result.data[:, :, 1], 2.0)
+
     def test_new_axis_dim_mismatch_raises(self):
         settings = ConcatSettings(axis="feature", relabel_axis=False)
         proc = ConcatProcessor(settings)

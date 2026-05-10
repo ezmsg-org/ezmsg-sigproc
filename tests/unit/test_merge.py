@@ -367,3 +367,34 @@ class TestNewAxisMerge:
         np.testing.assert_array_equal(merged.data[:, :, 0], 1.0)
         np.testing.assert_array_equal(merged.data[:, :, 1], 2.0)
         assert "feature" in merged.dims
+
+    def test_merge_on_new_axis_with_labels(self):
+        """``label_a`` / ``label_b`` populate a CoordinateAxis on the new axis.
+
+        Mirrors the cursor pipeline use case: rate + sub-band-power feature
+        streams from ``IntracorticalMicroelectrodeFeatures`` merged on a new
+        ``feature`` axis with labels ``("spk", "sbp")``.  Same setting that
+        suffixes existing-axis labels in the relabel path; here it names
+        each slice along the new axis directly.
+        """
+        settings = MergeSettings(
+            axis="feature",
+            label_a="spk",
+            label_b="sbp",
+        )
+        proc = MergeProcessor(settings)
+        fs = 100.0
+        n = 5
+
+        msg_a = _make_msg(np.ones((n, 3)), fs=fs, ch_labels=["C0", "C1", "C2"])
+        msg_b = _make_msg(np.ones((n, 3)) * 2, fs=fs, ch_labels=["C0", "C1", "C2"])
+
+        proc(msg_a)
+        merged = proc.push_b(msg_b)
+        assert merged is not None
+        assert merged.data.shape == (n, 3, 2)
+        feature_ax = merged.axes.get("feature")
+        assert feature_ax is not None and hasattr(
+            feature_ax, "data"
+        ), "label_a / label_b should produce a CoordinateAxis on the new axis"
+        np.testing.assert_array_equal(np.asarray(feature_ax.data), np.array(["spk", "sbp"]))
