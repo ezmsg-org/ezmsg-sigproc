@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 
 import ezmsg.core as ez
 import numpy as np
+from array_api_compat import get_namespace
 from ezmsg.util.messages.axisarray import AxisArray, AxisBase, CoordinateAxis
 from ezmsg.util.messages.util import replace
 
@@ -268,13 +269,15 @@ class ConcatProcessor:
 
         new_axis = concat_dim not in a.dims
 
+        xp = get_namespace(a.data)
+
         # expand_dims for new-axis concatenation.
         if new_axis:
-            a = replace(a, data=np.expand_dims(a.data, axis=-1), dims=[*a.dims, concat_dim])
-            b = replace(b, data=np.expand_dims(b.data, axis=-1), dims=[*b.dims, concat_dim])
+            a = replace(a, data=xp.expand_dims(a.data, axis=-1), dims=[*a.dims, concat_dim])
+            b = replace(b, data=xp.expand_dims(b.data, axis=-1), dims=[*b.dims, concat_dim])
 
         concat_idx = a.dims.index(concat_dim)
-        data = np.concatenate([a.data, b.data], axis=concat_idx)
+        data = xp.concat([a.data, b.data], axis=concat_idx)
 
         # Build axes: use cached axes + live alignment axis from a.
         axes = dict(self._state.cached_axes) if self._state.cached_axes is not None else dict(a.axes)
