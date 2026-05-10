@@ -11,6 +11,7 @@ from ezmsg.sigproc.concat import (
     _build_merged_coordinate_axis,
     _validate_shared_axes,
 )
+from tests.helpers.util import requires_mlx
 
 
 def _make_msg(
@@ -237,6 +238,37 @@ class TestNewAxisConcat:
         np.testing.assert_array_equal(result.data[:, :, 1], 2.0)
         assert "feature" in result.dims
 
+    def test_new_feature_axis_with_labels(self):
+        """``label_a`` / ``label_b`` populate a CoordinateAxis on a *new* axis.
+
+        When ``axis`` is not in either input's dims, the suffix-style
+        relabel doesn't apply (there's nothing to suffix).  Instead the
+        same per-side labels become the new axis's data values.
+        """
+        settings = ConcatSettings(
+            axis="feature",
+            label_a="spk",
+            label_b="sbp",
+        )
+        proc = ConcatProcessor(settings)
+        n = 5
+
+        # Inputs are (time, ch); neither has a "feature" dim.  After concat
+        # the output is (time, ch, feature) with feature labels ("spk", "sbp").
+        msg_a = _make_msg(np.ones((n, 3)), ch_labels=["C0", "C1", "C2"])
+        msg_b = _make_msg(np.ones((n, 3)) * 2, ch_labels=["C0", "C1", "C2"])
+
+        result = proc._concat(msg_a, msg_b)
+        assert result.data.shape == (n, 3, 2)
+        assert "feature" in result.dims
+        feature_ax = result.axes.get("feature")
+        assert feature_ax is not None, "feature axis missing from output"
+        assert hasattr(feature_ax, "data"), "feature axis should be a CoordinateAxis with .data"
+        np.testing.assert_array_equal(np.asarray(feature_ax.data), np.array(["spk", "sbp"]))
+        # Slice 0 = signal A (spk), slice 1 = signal B (sbp).
+        np.testing.assert_array_equal(result.data[:, :, 0], 1.0)
+        np.testing.assert_array_equal(result.data[:, :, 1], 2.0)
+
     def test_new_axis_dim_mismatch_raises(self):
         settings = ConcatSettings(axis="feature", relabel_axis=False)
         proc = ConcatProcessor(settings)
@@ -247,6 +279,89 @@ class TestNewAxisConcat:
 
         with pytest.raises(ValueError, match="Cannot concatenate along new axis"):
             proc._concat(msg_a, msg_b)
+
+    @requires_mlx
+    def test_new_feature_axis_mlx_preserves_backend(self):
+        """New-axis concat on mlx.core arrays should keep the backend
+        (no silent coercion to numpy via np.expand_dims/np.concatenate)."""
+        import mlx.core as mx
+
+        ch_axis = CoordinateAxis(data=np.array(["C0", "C1", "C2"]), dims=["ch"], unit="label")
+        time_axis = AxisArray.TimeAxis(fs=100.0, offset=0.0)
+
+        def _msg_mx(np_data):
+            return AxisArray(
+                data=mx.array(np_data),
+                dims=["time", "ch"],
+                axes=frozendict({"time": time_axis, "ch": ch_axis}),
+                key="",
+            )
+
+        n = 5
+        np_a = np.ones((n, 3), dtype=np.float32)
+        np_b = np.ones((n, 3), dtype=np.float32) * 2.0
+
+        settings = ConcatSettings(axis="feature", label_a="spk", label_b="sbp")
+        result = ConcatProcessor(settings)._concat(_msg_mx(np_a), _msg_mx(np_b))
+
+        assert isinstance(result.data, mx.array), f"Expected mx.array, got {type(result.data).__name__}"
+        assert result.data.shape == (n, 3, 2)
+        assert result.dims == ["time", "ch", "feature"]
+        np.testing.assert_array_equal(np.asarray(result.data[:, :, 0]), 1.0)
+        np.testing.assert_array_equal(np.asarray(result.data[:, :, 1]), 2.0)
+        # Cross-check vs numpy reference.
+        np_settings = ConcatSettings(axis="feature", label_a="spk", label_b="sbp")
+
+        def _msg_np(np_data):
+            return AxisArray(
+                data=np_data,
+                dims=["time", "ch"],
+                axes=frozendict({"time": time_axis, "ch": ch_axis}),
+                key="",
+            )
+
+        result_np = ConcatProcessor(np_settings)._concat(_msg_np(np_a), _msg_np(np_b))
+        np.testing.assert_allclose(np.asarray(result.data), result_np.data)
+        np.testing.assert_array_equal(
+            np.asarray(result.axes["feature"].data),
+            np.asarray(result_np.axes["feature"].data),
+        )
+
+    @requires_mlx
+    def test_existing_axis_concat_mlx_preserves_backend(self):
+        """Concat along an existing axis on mlx.core arrays should keep
+        the backend too (this path uses xp.concat without expand_dims)."""
+        import mlx.core as mx
+
+        time_axis = AxisArray.TimeAxis(fs=100.0, offset=0.0)
+
+        def _msg_mx(np_data, ch_labels):
+            return AxisArray(
+                data=mx.array(np_data),
+                dims=["time", "ch"],
+                axes=frozendict(
+                    {
+                        "time": time_axis,
+                        "ch": CoordinateAxis(data=np.array(ch_labels), dims=["ch"], unit="label"),
+                    }
+                ),
+                key="",
+            )
+
+        n = 5
+        np_a = np.ones((n, 2), dtype=np.float32)
+        np_b = np.ones((n, 3), dtype=np.float32) * 3.0
+
+        settings = ConcatSettings(axis="ch", relabel_axis=False)
+        result = ConcatProcessor(settings)._concat(
+            _msg_mx(np_a, ["A0", "A1"]),
+            _msg_mx(np_b, ["B0", "B1", "B2"]),
+        )
+
+        assert isinstance(result.data, mx.array)
+        assert result.data.shape == (n, 5)
+        np.testing.assert_array_equal(np.asarray(result.data[:, :2]), 1.0)
+        np.testing.assert_array_equal(np.asarray(result.data[:, 2:]), 3.0)
 
 
 class TestAssertIdenticalSharedAxes:

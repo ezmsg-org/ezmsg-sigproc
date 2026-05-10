@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 
 import ezmsg.core as ez
 import numpy as np
+from array_api_compat import get_namespace
 from ezmsg.util.messages.axisarray import AxisArray, AxisBase, CoordinateAxis
 from ezmsg.util.messages.util import replace
 
@@ -182,10 +183,30 @@ class ConcatSettings(ez.Settings):
     """Whether to relabel coordinate axis labels to ensure uniqueness."""
 
     label_a: str = "_a"
-    """Suffix appended to signal A labels when relabel_axis is True."""
+    """Per-side label for signal A.
+
+    Used in two distinct ways depending on whether ``axis`` is an existing
+    or new dimension on the inputs:
+
+    * **Existing axis** (``axis`` is in both inputs' ``.dims``):
+      ``label_a`` is a *suffix* appended to each entry of A's existing
+      coordinate-axis labels when ``relabel_axis`` is True.  Defaults to
+      ``"_a"``.
+
+    * **New axis** (``axis`` is not in either input's ``.dims``):
+      ``label_a`` is used as the single ``data`` entry on the merged
+      axis's CoordinateAxis at index 0.  E.g. setting
+      ``label_a="spk", label_b="sbp"`` on a Merge of two
+      ``(time, ch)`` streams produces a ``(time, ch, feature)`` output
+      whose ``feature`` axis has ``data=["spk", "sbp"]``.
+    """
 
     label_b: str = "_b"
-    """Suffix appended to signal B labels when relabel_axis is True."""
+    """Per-side label for signal B.
+
+    See :attr:`label_a`.  Defaults to ``"_b"``; used as the new-axis
+    label at index 1 in the new-axis case.
+    """
 
     assert_identical_shared_axes: bool = False
     """If True, raise ValueError when shared CoordinateAxis .data arrays differ."""
@@ -248,13 +269,15 @@ class ConcatProcessor:
 
         new_axis = concat_dim not in a.dims
 
+        xp = get_namespace(a.data)
+
         # expand_dims for new-axis concatenation.
         if new_axis:
-            a = replace(a, data=np.expand_dims(a.data, axis=-1), dims=[*a.dims, concat_dim])
-            b = replace(b, data=np.expand_dims(b.data, axis=-1), dims=[*b.dims, concat_dim])
+            a = replace(a, data=xp.expand_dims(a.data, axis=-1), dims=[*a.dims, concat_dim])
+            b = replace(b, data=xp.expand_dims(b.data, axis=-1), dims=[*b.dims, concat_dim])
 
         concat_idx = a.dims.index(concat_dim)
-        data = np.concatenate([a.data, b.data], axis=concat_idx)
+        data = xp.concat([a.data, b.data], axis=concat_idx)
 
         # Build axes: use cached axes + live alignment axis from a.
         axes = dict(self._state.cached_axes) if self._state.cached_axes is not None else dict(a.axes)
@@ -303,6 +326,11 @@ class ConcatProcessor:
                 relabel=self.settings.relabel_axis,
                 label_a=self.settings.label_a,
                 label_b=self.settings.label_b,
+            )
+        elif concat_dim not in a.dims and concat_dim not in b.dims:
+            self._state.merged_concat_axis = CoordinateAxis(
+                data=np.asarray([self.settings.label_a, self.settings.label_b]),
+                dims=[concat_dim],
             )
         else:
             self._state.merged_concat_axis = None
