@@ -108,3 +108,43 @@ def test_digitize_empty_time():
 
     check_empty_result(result)
     assert result.data.dtype == np.int16
+
+
+def test_digitize_emits_inverse_mapping_attrs():
+    """Output ``attrs`` carry the inverse-mapping coefficients needed to
+    recover (an approximation of) the original float values via
+    ``data * conversion + offset``.
+
+    For a symmetric int16 range the offset is essentially zero (within
+    ½ LSB), and the conversion is ``(max-min)/(2**16-1)``.
+
+    ``min_val`` / ``max_val`` are deliberately *not* emitted — a consumer
+    with the data dtype can recover them from ``conversion`` + ``offset``
+    alone, so carrying them on the wire would be redundant.
+    """
+    proc = DigitizeTransformer(min_val=-8.0, max_val=8.0, dtype="int16")
+    floats = np.linspace(-8.0, 8.0, 9, dtype=np.float64)[None, :]
+    out = proc(_make_msg(floats))
+
+    expected_conv = 16.0 / 65535.0
+    assert set(out.attrs) >= {"conversion", "offset"}
+    assert "min_val" not in out.attrs
+    assert "max_val" not in out.attrs
+    assert out.attrs["conversion"] == pytest.approx(expected_conv, rel=1e-9)
+    assert abs(out.attrs["offset"]) < 1e-3, f"symmetric int16 range should give offset ~ 0; got {out.attrs['offset']}"
+
+    # Round-trip: data * conversion + offset recovers the original
+    # values within ½ LSB (≈ 16 / 65535).
+    recovered = out.data.astype(np.float64) * out.attrs["conversion"] + out.attrs["offset"]
+    np.testing.assert_allclose(recovered, floats, atol=expected_conv)
+
+
+def test_digitize_preserves_existing_attrs():
+    """Pre-existing ``attrs`` flow through alongside the new ones."""
+    proc = DigitizeTransformer(min_val=-1.0, max_val=1.0, dtype="int16")
+    msg = _make_msg(np.array([[0.0]]))
+    msg.attrs["upstream_key"] = "preserve_me"
+
+    out = proc(msg)
+    assert out.attrs["upstream_key"] == "preserve_me"
+    assert "conversion" in out.attrs

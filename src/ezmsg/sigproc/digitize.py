@@ -81,7 +81,29 @@ class DigitizeTransformer(BaseTransformer[DigitizeSettings, AxisArray, AxisArray
         else:
             data = data.astype(target_dtype)
 
-        return replace(message, data=data)
+        # Stamp the inverse-mapping coefficients onto the output's attrs so
+        # downstream consumers can recover (an approximation of) the
+        # original float values via ``data * conversion + offset``.  The
+        # forward map is:
+        #     normalized = (x - min_val) / (max_val - min_val)
+        #     data       = round(normalized * output_span + output_min)
+        # Inverting and rearranging gives:
+        #     x ≈ data * conversion + offset
+        # with conversion / offset as below.  For symmetric ranges
+        # (min_val=-K, max_val=+K) on a signed dtype the offset is
+        # essentially zero (within ½ LSB).
+        #
+        # ``min_val`` / ``max_val`` are *not* emitted: a consumer that
+        # has access to ``data.dtype`` can recover them from
+        # ``conversion`` and ``offset`` alone (e.g.
+        # ``min_val = offset + np.iinfo(dtype).min * conversion``), so
+        # carrying them on the wire is redundant.
+        conversion = float(input_range) / float(output_span)
+        offset = float(self.settings.min_val) - float(output_min) * conversion
+        attrs = dict(message.attrs)
+        attrs["conversion"] = conversion
+        attrs["offset"] = offset
+        return replace(message, data=data, attrs=attrs)
 
 
 class Digitize(BaseTransformerUnit[DigitizeSettings, AxisArray, AxisArray, DigitizeTransformer]):
