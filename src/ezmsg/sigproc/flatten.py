@@ -25,16 +25,12 @@ or position index), separated by :attr:`FlattenSettings.label_separator`
 (default ``"/"``).  This ``"label"`` overwrites any inherited label
 field from the source axes — the original per-axis labels are still
 available via the named fields (``ch``, ``feature``, etc.).
-
-This is the canonical Flatten in the ezmsg ecosystem.
-``ezmsg.learn.process.flatten`` is a thin wrapper that post-processes
-the merged-axis labels for time-lag windowing
-(``"<ch>__t-<lag>"`` semantics).
 """
 
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 
 import ezmsg.core as ez
 import numpy as np
@@ -127,70 +123,67 @@ class FlattenState:
     output_dims: tuple[str, ...] = ()
 
 
-def _axis_contribution(message: AxisArray, ax_name: str, ax_size: int) -> dict:
-    """Per-axis contribution to the merged struct.
+@dataclass
+class _AxisContribution:
+    """How one source axis fills the merged struct.
 
-    Returns a dict with keys:
-      * ``"fields"``: ordered tuple of (field_name, numpy dtype) pairs
-        this axis contributes to the merged struct dtype.
-      * ``"get_row(i)``: callable mapping a 0-based axis position to a
-        ``{field_name: value}`` dict.
-      * ``"primary(i)``: callable mapping a 0-based axis position to the
-        string used for that axis's slot in the cartesian-product
-        ``"label"`` join.
+    ``rows`` is a structured array (length = source axis size)
+    contributing this axis's fields to the merged dtype.  ``primary``
+    is the per-position string column used in the canonical
+    cartesian-product ``"label"`` join.
     """
+
+    rows: np.ndarray
+    primary: np.ndarray
+
+
+def _axis_contribution(message: AxisArray, ax_name: str, ax_size: int) -> _AxisContribution:
+    """Build the per-axis contribution to the merged struct."""
     ax_obj = message.axes.get(ax_name)
     ax_data = getattr(ax_obj, "data", None) if ax_obj is not None else None
 
     if ax_data is not None and getattr(ax_data, "dtype", None) is not None and ax_data.dtype.names is not None:
-        # Structured axis: contribute every field; primary label =
-        # the "label" field if present, else fall back to a 1-based
-        # index so the cartesian-product label stays human-readable.
-        names = tuple(ax_data.dtype.names)
-        fields = tuple((n, ax_data.dtype[n]) for n in names)
-        has_label = "label" in names
-        return {
-            "fields": fields,
-            "get_row": lambda i: {n: ax_data[i][n] for n in names},
-            "primary": (lambda i: str(ax_data[i]["label"])) if has_label else (lambda i: str(i + 1)),
-        }
+        # Structured axis: pass every field through.  Primary label =
+        # the "label" field if present, else a 1-based index so the
+        # cartesian-product label stays human-readable.
+        rows = np.asarray(ax_data)
+        if "label" in rows.dtype.names:
+            primary = rows["label"].astype(str)
+        else:
+            primary = np.arange(1, ax_size + 1).astype(str)
+        return _AxisContribution(rows=rows, primary=primary)
 
     if ax_data is not None:
-        # Simple CoordinateAxis: one virtual field named after the
-        # axis whose value is the per-position label.
-        labels = [str(x) for x in axis_labels(np.asarray(ax_data[:ax_size]))]
-        max_len = max((len(s) for s in labels), default=1)
-        dtype = np.dtype(f"U{max_len}")
-        return {
-            "fields": ((ax_name, dtype),),
-            "get_row": lambda i: {ax_name: labels[i]},
-            "primary": lambda i: labels[i],
-        }
+        # Simple CoordinateAxis: one virtual field named after the axis.
+        str_labels = [str(x) for x in axis_labels(np.asarray(ax_data)[:ax_size])]
+        max_len = max((len(s) for s in str_labels), default=1)
+        labels = np.asarray(str_labels, dtype=f"U{max_len}")
+        rows = np.empty(ax_size, dtype=[(ax_name, labels.dtype)])
+        rows[ax_name] = labels
+        return _AxisContribution(rows=rows, primary=labels)
 
-    # No CoordinateAxis at all: 1-based uint32 indices.
-    dtype = np.dtype(np.uint32)
-    return {
-        "fields": ((ax_name, dtype),),
-        "get_row": lambda i: {ax_name: np.uint32(i + 1)},
-        "primary": lambda i: str(i + 1),
-    }
+    # No CoordinateAxis: 1-based uint32 positions.
+    positions = np.arange(1, ax_size + 1, dtype=np.uint32)
+    rows = np.empty(ax_size, dtype=[(ax_name, np.uint32)])
+    rows[ax_name] = positions
+    return _AxisContribution(rows=rows, primary=positions.astype(str))
 
 
-def _wider_string_dtype(a: np.dtype, b: np.dtype) -> np.dtype:
-    """Return the wider unicode dtype, or raise if not both unicode."""
-    if a.kind != "U" or b.kind != "U":
-        raise ValueError(
-            f"Cannot merge incompatible dtypes {a!r} and {b!r} on shared "
-            "struct field; widening is only defined for unicode strings."
-        )
-    return np.dtype(f"U{max(a.itemsize, b.itemsize) // 4}")
+def _merge_field_dtype(name: str, a: np.dtype, b: np.dtype) -> np.dtype:
+    """Resolve a shared field's dtype across two contributing axes.
 
-
-def _resolve_field_dtype(name: str, dt_a: np.dtype, dt_b: np.dtype) -> np.dtype:
-    """Resolve a shared field's dtype across two contributing axes."""
-    if dt_a == dt_b:
-        return dt_a
-    return _wider_string_dtype(dt_a, dt_b)
+    Equal dtypes pass through; unicode pairs widen to the larger
+    width; anything else raises — silently coercing mismatched
+    numeric/string fields would corrupt values.
+    """
+    if a == b:
+        return a
+    if a.kind == "U" and b.kind == "U":
+        return np.dtype(f"U{max(a.itemsize, b.itemsize) // 4}")
+    raise ValueError(
+        f"Cannot merge incompatible dtypes {a!r} and {b!r} on shared "
+        f"struct field {name!r}; widening is only defined for unicode strings."
+    )
 
 
 def _build_merged_axis(
@@ -202,58 +195,45 @@ def _build_merged_axis(
 ) -> CoordinateAxis:
     """Build the merged-axis structured CoordinateAxis."""
     if not flatten_axes:
-        # Degenerate case: nothing to flatten → empty struct with a
-        # single uint32 ``label`` placeholder.
-        dtype = np.dtype([("label", np.dtype("U1"))])
+        # Degenerate: nothing to flatten → one row, single canonical field.
+        dtype = np.dtype([("label", "U1")])
         return CoordinateAxis(data=np.zeros(1, dtype=dtype), dims=[output_axis])
 
-    contribs = [_axis_contribution(message, ax_name, ax_size) for ax_name, ax_size in zip(flatten_axes, flatten_sizes)]
-
-    # Build the merged dtype: union of all contributing fields, later
-    # axes overwriting (widening) on conflict.  ``"label"`` is always
-    # appended last and overrides any inherited label field.
-    field_order: list[str] = []
-    field_dtype: dict[str, np.dtype] = {}
-    for c in contribs:
-        for name, dt in c["fields"]:
-            if name in field_dtype:
-                field_dtype[name] = _resolve_field_dtype(name, field_dtype[name], dt)
-            else:
-                field_order.append(name)
-                field_dtype[name] = dt
-
-    # Cartesian product, slowest-changing axis first — mirrors the
-    # C-order reshape so output row k describes data[:, k, ...].
+    contribs = [_axis_contribution(message, name, size) for name, size in zip(flatten_axes, flatten_sizes)]
     n_flat = int(math.prod(flatten_sizes))
-    combos: list[tuple[int, ...]] = [tuple()]
-    for ax_size in flatten_sizes:
-        combos = [(*prefix, i) for prefix in combos for i in range(ax_size)]
-    assert len(combos) == n_flat
 
-    label_column = [
-        separator.join(c["primary"](pos) for c, pos in zip(contribs, combo))
-        if separator
-        else "".join(c["primary"](pos) for c, pos in zip(contribs, combo))
-        for combo in combos
-    ]
-    label_dtype = np.dtype(f"U{max((len(s) for s in label_column), default=1)}")
-    if "label" in field_dtype:
-        field_dtype["label"] = _resolve_field_dtype("label", field_dtype["label"], label_dtype)
-    else:
-        field_order.append("label")
-        field_dtype["label"] = label_dtype
+    # Expand each axis's per-position arrays to the cartesian-product
+    # length via tile+repeat — slowest-changing first mirrors numpy's
+    # C-order reshape so output row k describes data[:, k, ...].
+    def _expand(arr: np.ndarray, axis_idx: int) -> np.ndarray:
+        inner = math.prod(flatten_sizes[axis_idx + 1 :])
+        outer = math.prod(flatten_sizes[:axis_idx])
+        return np.tile(np.repeat(arr, inner), outer)
 
-    struct_dtype = np.dtype([(n, field_dtype[n]) for n in field_order])
-    struct_data = np.zeros(n_flat, dtype=struct_dtype)
+    expanded_rows = [_expand(c.rows, i) for i, c in enumerate(contribs)]
+    expanded_primary = [_expand(c.primary, i) for i, c in enumerate(contribs)]
 
-    for row_idx, combo in enumerate(combos):
-        # Apply per-axis contributions left-to-right; later axes
-        # overwrite shared fields (dict-union with later-wins).
-        for c, pos in zip(contribs, combo):
-            for name, value in c["get_row"](pos).items():
-                struct_data[row_idx][name] = value
-        # The canonical label always wins.
-        struct_data[row_idx]["label"] = label_column[row_idx]
+    # Canonical "label" column: cartesian-product join of primaries.
+    label_column = np.asarray([separator.join(parts) for parts in zip(*expanded_primary)])
+
+    # Merge struct dtype: dict-union with later-wins (widening shared
+    # string fields).  ``"label"`` is always overridden by the join
+    # column, so source-struct labels survive only via their named
+    # fields (``ch``, etc.).
+    fields: dict[str, np.dtype] = {}
+    for c in contribs:
+        for name in c.rows.dtype.names:
+            dt = c.rows.dtype[name]
+            fields[name] = _merge_field_dtype(name, fields[name], dt) if name in fields else dt
+    fields["label"] = (
+        _merge_field_dtype("label", fields["label"], label_column.dtype) if "label" in fields else label_column.dtype
+    )
+
+    struct_data = np.zeros(n_flat, dtype=np.dtype(list(fields.items())))
+    for c, rows in zip(contribs, expanded_rows):
+        for name in c.rows.dtype.names:
+            struct_data[name] = rows[name]
+    struct_data["label"] = label_column
 
     return CoordinateAxis(data=struct_data, dims=[output_axis])
 
@@ -276,7 +256,7 @@ class FlattenTransformer(BaseStatefulTransformer[FlattenSettings, AxisArray, Axi
             if ax not in message.dims:
                 raise ValueError(f"flatten_axes entry {ax!r} not found in dims {message.dims}")
         if preserve_axis in flatten_axes:
-            raise ValueError(f"preserve_axis {preserve_axis!r} cannot also be in " f"flatten_axes {flatten_axes}")
+            raise ValueError(f"preserve_axis {preserve_axis!r} cannot also be in flatten_axes {flatten_axes}")
 
         output_axis = self.settings.output_axis
         if output_axis == sample_axis:
@@ -332,7 +312,7 @@ class FlattenTransformer(BaseStatefulTransformer[FlattenSettings, AxisArray, Axi
         axes: dict = {st.output_axis: st.output_axis_obj}
         preserve_ax = message.axes.get(st.preserve_axis)
         if preserve_ax is not None:
-            if st.sample_axis != st.preserve_axis and hasattr(preserve_ax, "dims"):
+            if st.sample_axis != st.preserve_axis and isinstance(preserve_ax, CoordinateAxis):
                 preserve_ax = replace(preserve_ax, dims=[st.sample_axis])
             axes[st.sample_axis] = preserve_ax
         for ax in st.rest_axes:
