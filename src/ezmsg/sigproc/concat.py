@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import typing
 from dataclasses import dataclass, field
 
@@ -11,6 +12,11 @@ import numpy as np
 from array_api_compat import get_namespace
 from ezmsg.util.messages.axisarray import AxisArray, AxisBase, CoordinateAxis
 from ezmsg.util.messages.util import replace
+
+logger = logging.getLogger(__name__)
+
+# Sentinel for "attr key was missing on this side". Distinct from any user value.
+_MISSING = object()
 
 # ---------------------------------------------------------------------------
 # Shared helpers (also used by merge.py)
@@ -124,6 +130,179 @@ def _resolve_field_dtype(name: str, dt_a: np.dtype, dt_b: np.dtype) -> np.dtype:
     raise ValueError(f"Incompatible dtypes for shared struct field {name!r}: {dt_a} vs {dt_b}")
 
 
+# ---------------------------------------------------------------------------
+# Attrs merging + promotion
+# ---------------------------------------------------------------------------
+
+_ALLOWED_ATTR_SCALARS = (str, int, float, bool, np.integer, np.floating)
+
+
+def _check_attr_type(key: str, value: typing.Any) -> None:
+    if not isinstance(value, _ALLOWED_ATTR_SCALARS):
+        raise TypeError(
+            f"Cannot merge/promote attrs key {key!r}: unsupported value type "
+            f"{type(value).__name__}; only scalar str/int/float/bool are allowed."
+        )
+
+
+def _attrs_values_equal(a: typing.Any, b: typing.Any) -> bool:
+    try:
+        return bool(a == b)
+    except Exception:
+        return a is b
+
+
+def _classify_attrs(a_attrs: dict, b_attrs: dict) -> tuple[dict, dict, dict]:
+    """Split two attrs dicts into equal-shared vs side-to-promote.
+
+    Returns ``(equal, promote_a, promote_b)``:
+      * ``equal[k] = v`` — present in both with equal value; kept on output ``.attrs``.
+      * ``promote_a[k]``/``promote_b[k]`` — value to use on each side's concat-axis
+        elements. Use the ``_MISSING`` sentinel when the key was absent on that side.
+    """
+    equal: dict = {}
+    promote_a: dict = {}
+    promote_b: dict = {}
+    a_attrs = a_attrs or {}
+    b_attrs = b_attrs or {}
+    for k in set(a_attrs) | set(b_attrs):
+        a_has, b_has = k in a_attrs, k in b_attrs
+        if a_has and b_has and _attrs_values_equal(a_attrs[k], b_attrs[k]):
+            _check_attr_type(k, a_attrs[k])
+            equal[k] = a_attrs[k]
+            continue
+        if a_has:
+            _check_attr_type(k, a_attrs[k])
+            promote_a[k] = a_attrs[k]
+        else:
+            promote_a[k] = _MISSING
+        if b_has:
+            _check_attr_type(k, b_attrs[k])
+            promote_b[k] = b_attrs[k]
+        else:
+            promote_b[k] = _MISSING
+    return equal, promote_a, promote_b
+
+
+def _promoted_field_dtype(values: list) -> np.dtype:
+    """Pick a numpy dtype that can hold the supplied promoted values."""
+    non_missing = [v for v in values if v is not _MISSING]
+    if not non_missing:
+        return np.dtype("U1")
+    if any(isinstance(v, str) for v in non_missing):
+        max_len = max(len(str(v)) for v in non_missing)
+        return np.dtype(f"U{max(max_len, 1)}")
+    if any(isinstance(v, (float, np.floating)) for v in non_missing):
+        return np.dtype("f8")
+    # Booleans are ints in Python; if everything is bool, prefer bool.
+    if all(isinstance(v, (bool, np.bool_)) for v in non_missing):
+        return np.dtype("?")
+    if any(isinstance(v, (int, np.integer)) for v in non_missing):
+        return np.dtype("i8")
+    return np.dtype("U1")
+
+
+def _sentinel_for_dtype(dt: np.dtype) -> typing.Any:
+    if dt.kind == "U":
+        return ""
+    if dt.kind == "f":
+        return float("nan")
+    if dt.kind == "i":
+        return 0
+    if dt.kind == "b":
+        return False
+    return None
+
+
+def _extend_struct_with_fields(
+    existing: np.ndarray,
+    new_fields: list[tuple[str, np.dtype, np.ndarray]],
+) -> np.ndarray:
+    """Append new columns to a structured array, preserving existing columns.
+
+    ``new_fields`` is a list of ``(name, dtype, values)`` triples where
+    ``values`` has length ``len(existing)``.
+    """
+    union: list[tuple[str, np.dtype]] = [(n, existing.dtype[n]) for n in (existing.dtype.names or ())]
+    union.extend((n, dt) for (n, dt, _) in new_fields)
+    union_dtype = np.dtype(union)
+    out = np.zeros(len(existing), dtype=union_dtype)
+    for n in existing.dtype.names or ():
+        out[n] = existing[n]
+    for n, _, vals in new_fields:
+        out[n] = vals
+    return out
+
+
+def _apply_promoted_attrs(
+    merged_axis: CoordinateAxis | None,
+    n_a: int,
+    n_b: int,
+    promote_a: dict,
+    promote_b: dict,
+    ref_axis: CoordinateAxis | None,
+    concat_dim: str,
+) -> CoordinateAxis | None:
+    """Inject promoted attrs as per-element fields on the concat axis.
+
+    If ``merged_axis`` has simple (non-structured) ``.data``, it is first
+    converted to a structured array with a single ``"label"`` field.
+    Keys that collide with an existing struct field are dropped with a warning
+    (the per-element field already in place wins).
+    """
+    if not promote_a and not promote_b:
+        return merged_axis
+
+    promoted_keys = sorted(set(promote_a) | set(promote_b))
+
+    base_data: np.ndarray | None = None
+    if merged_axis is not None and merged_axis.data is not None:
+        if merged_axis.data.dtype.names is not None:
+            base_data = merged_axis.data
+        else:
+            labels = merged_axis.data
+            base_data = np.zeros(len(labels), dtype=np.dtype([("label", labels.dtype)]))
+            base_data["label"] = labels
+
+    existing_names = set(base_data.dtype.names or ()) if base_data is not None else set()
+
+    new_fields: list[tuple[str, np.dtype, np.ndarray]] = []
+    for k in promoted_keys:
+        if k in existing_names:
+            logger.warning(
+                "concat: attrs key %r collides with existing struct field on %r "
+                "axis; dropping promoted attr (per-element field is authoritative).",
+                k,
+                concat_dim,
+            )
+            continue
+        a_val = promote_a.get(k, _MISSING)
+        b_val = promote_b.get(k, _MISSING)
+        all_values = [a_val] * n_a + [b_val] * n_b
+        dt = _promoted_field_dtype(all_values)
+        sentinel = _sentinel_for_dtype(dt)
+        full = np.empty(n_a + n_b, dtype=dt)
+        for i, v in enumerate(all_values):
+            full[i] = sentinel if v is _MISSING else v
+        new_fields.append((k, dt, full))
+
+    if not new_fields:
+        return merged_axis
+
+    if base_data is not None:
+        merged_data = _extend_struct_with_fields(base_data, new_fields)
+        dims = ref_axis.dims if ref_axis is not None else [concat_dim]
+        unit = ref_axis.unit if ref_axis is not None else None
+        return CoordinateAxis(data=merged_data, dims=dims, unit=unit)
+
+    # No pre-existing axis data — synthesize one solely from promoted fields.
+    dtype = np.dtype([(n, dt) for (n, dt, _) in new_fields])
+    out = np.zeros(n_a + n_b, dtype=dtype)
+    for n, _, vals in new_fields:
+        out[n] = vals
+    return CoordinateAxis(data=out, dims=[concat_dim])
+
+
 def _validate_shared_axes(
     a: AxisArray,
     b: AxisArray,
@@ -221,6 +400,7 @@ class ConcatState:
     queue_b: "asyncio.Queue[AxisArray]" = field(default_factory=asyncio.Queue)
     merged_concat_axis: CoordinateAxis | None = None
     cached_axes: dict[str, AxisBase] | None = None
+    merged_attrs: dict | None = None
     # Fingerprints for cache invalidation.
     a_fingerprint: tuple | None = None
     b_fingerprint: tuple | None = None
@@ -287,13 +467,15 @@ class ConcatProcessor:
                 axes[name] = ax
 
         key = self.settings.new_key if self.settings.new_key is not None else a.key
-        return AxisArray(data, dims=list(a.dims), axes=axes, key=key)
+        attrs = dict(self._state.merged_attrs) if self._state.merged_attrs else {}
+        return AxisArray(data, dims=list(a.dims), axes=axes, key=key, attrs=attrs)
 
     def _fingerprint(self, msg: AxisArray) -> tuple:
         concat_dim = self.settings.axis
         ax = msg.axes.get(concat_dim)
         ax_hash = hash(ax.data.tobytes()) if ax is not None and hasattr(ax, "data") else None
-        return (tuple(msg.dims), msg.data.shape, ax_hash)
+        attrs_fp = frozenset((k, type(v).__name__, repr(v)) for k, v in (msg.attrs or {}).items())
+        return (tuple(msg.dims), msg.data.shape, ax_hash, attrs_fp)
 
     def _rebuild_cache(self, a: AxisArray, b: AxisArray) -> None:
         concat_dim = self.settings.axis
@@ -334,6 +516,31 @@ class ConcatProcessor:
             )
         else:
             self._state.merged_concat_axis = None
+
+        # Merge .attrs across A and B. Equal-shared keys stay in attrs; differing
+        # or partially-present keys are promoted to per-element fields on the
+        # concat axis.
+        equal_attrs, promote_a, promote_b = _classify_attrs(a.attrs, b.attrs)
+        if promote_a or promote_b:
+            if concat_dim in a.dims:
+                n_a = a.data.shape[a.dims.index(concat_dim)]
+            else:
+                n_a = 1
+            if concat_dim in b.dims:
+                n_b = b.data.shape[b.dims.index(concat_dim)]
+            else:
+                n_b = 1
+            ref_axis = ax_a if ax_a is not None else ax_b
+            self._state.merged_concat_axis = _apply_promoted_attrs(
+                self._state.merged_concat_axis,
+                n_a,
+                n_b,
+                promote_a,
+                promote_b,
+                ref_axis,
+                concat_dim,
+            )
+        self._state.merged_attrs = equal_attrs
 
         self._state.cached_axes = _build_cached_axes(
             a,
