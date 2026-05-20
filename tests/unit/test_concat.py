@@ -6,9 +6,11 @@ from ezmsg.util.messages.axisarray import AxisArray, CoordinateAxis
 from frozendict import frozendict
 
 from ezmsg.sigproc.concat import (
+    _MISSING,
     ConcatProcessor,
     ConcatSettings,
     _build_merged_coordinate_axis,
+    _classify_attrs,
     _validate_shared_axes,
 )
 from tests.helpers.util import requires_mlx
@@ -452,3 +454,204 @@ class TestCachedAxes:
         msg_a2 = _make_msg(np.ones((n, 4)), ch_labels=["A0", "A1", "A2", "A3"])
         proc._concat(msg_a2, msg_b1)
         assert proc.state.cached_axes is not first_cache
+
+
+# ---------------------------------------------------------------------------
+# Attrs merge + promotion
+# ---------------------------------------------------------------------------
+
+
+def _msg_with_attrs(
+    data: np.ndarray,
+    ch_labels: list[str] | None = None,
+    ch_axis: CoordinateAxis | None = None,
+    attrs: dict | None = None,
+) -> AxisArray:
+    """Helper to build a (time, ch) AxisArray with attrs."""
+    base = _make_msg(data, ch_labels=ch_labels, ch_axis=ch_axis)
+    return AxisArray(
+        base.data,
+        dims=base.dims,
+        axes=base.axes,
+        key=base.key,
+        attrs=attrs or {},
+    )
+
+
+class TestClassifyAttrs:
+    def test_equal_keys_returned_as_shared(self):
+        equal, promote_a, promote_b = _classify_attrs(
+            {"manufacturer": "CereLink", "unit": "uV"},
+            {"manufacturer": "CereLink", "unit": "uV"},
+        )
+        assert equal == {"manufacturer": "CereLink", "unit": "uV"}
+        assert promote_a == {} and promote_b == {}
+
+    def test_differing_keys_split(self):
+        equal, promote_a, promote_b = _classify_attrs(
+            {"device": "HUB1"},
+            {"device": "HUB2"},
+        )
+        assert equal == {}
+        assert promote_a == {"device": "HUB1"}
+        assert promote_b == {"device": "HUB2"}
+
+    def test_partial_presence_uses_missing_sentinel(self):
+        equal, promote_a, promote_b = _classify_attrs(
+            {"gain": 1.5},
+            {},
+        )
+        assert equal == {}
+        assert promote_a == {"gain": 1.5}
+        assert promote_b == {"gain": _MISSING}
+
+    def test_unsupported_attr_type_raises(self):
+        with pytest.raises(TypeError, match="unsupported value type"):
+            _classify_attrs({"bands": [1, 2, 3]}, {"bands": [1, 2, 3]})
+
+
+class TestAttrsMerge:
+    """Concat-level tests for the attrs merge + promotion behaviour."""
+
+    def _concat_with_attrs(self, attrs_a: dict, attrs_b: dict, *, relabel: bool = False):
+        settings = ConcatSettings(axis="ch", relabel_axis=relabel)
+        proc = ConcatProcessor(settings)
+        n = 5
+        msg_a = _msg_with_attrs(np.ones((n, 2)), ch_labels=["A0", "A1"], attrs=attrs_a)
+        msg_b = _msg_with_attrs(np.ones((n, 3)), ch_labels=["B0", "B1", "B2"], attrs=attrs_b)
+        return proc._concat(msg_a, msg_b)
+
+    def test_equal_attrs_preserved(self):
+        result = self._concat_with_attrs(
+            {"manufacturer": "CereLink"},
+            {"manufacturer": "CereLink"},
+        )
+        assert result.attrs == {"manufacturer": "CereLink"}
+        # Channel axis stays plain string array — no field added.
+        assert result.axes["ch"].data.dtype.names is None
+
+    def test_differing_attrs_promoted_to_struct_field(self):
+        result = self._concat_with_attrs(
+            {"device": "HUB1"},
+            {"device": "HUB2"},
+        )
+        # Conflicting attr removed from .attrs.
+        assert "device" not in result.attrs
+        # Channel axis promoted to struct with label + device.
+        ch_data = result.axes["ch"].data
+        assert ch_data.dtype.names is not None
+        assert "device" in ch_data.dtype.names
+        assert "label" in ch_data.dtype.names
+        # First 2 rows (from A) have "HUB1"; last 3 (from B) have "HUB2".
+        assert list(ch_data["device"][:2]) == ["HUB1", "HUB1"]
+        assert list(ch_data["device"][2:]) == ["HUB2", "HUB2", "HUB2"]
+        # Labels are preserved on the new struct.
+        assert list(ch_data["label"]) == ["A0", "A1", "B0", "B1", "B2"]
+
+    def test_partial_presence_promoted_with_sentinel(self):
+        result = self._concat_with_attrs(
+            {"gain": 1.5},
+            {},
+        )
+        ch_data = result.axes["ch"].data
+        assert "gain" in ch_data.dtype.names
+        # First 2 rows = 1.5; last 3 rows = NaN (missing on B).
+        np.testing.assert_allclose(ch_data["gain"][:2], [1.5, 1.5])
+        assert np.all(np.isnan(ch_data["gain"][2:]))
+
+    def test_equal_and_differing_mix(self):
+        result = self._concat_with_attrs(
+            {"vendor": "X", "device": "HUB1"},
+            {"vendor": "X", "device": "HUB2"},
+        )
+        assert result.attrs == {"vendor": "X"}
+        ch_data = result.axes["ch"].data
+        assert "device" in ch_data.dtype.names
+        assert "vendor" not in ch_data.dtype.names
+        assert list(ch_data["device"]) == ["HUB1", "HUB1", "HUB2", "HUB2", "HUB2"]
+
+    def test_collision_with_existing_field_drops_attr(self, caplog):
+        # Both inputs have a per-channel `device` field already; their attrs also
+        # try to promote `device`. The existing field must win.
+        dt = np.dtype([("label", "U8"), ("device", "U8")])
+        ch_a_data = np.array([("A0", "DEV_A0"), ("A1", "DEV_A1")], dtype=dt)
+        ch_b_data = np.array([("B0", "DEV_B0"), ("B1", "DEV_B1")], dtype=dt)
+        ax_a = CoordinateAxis(data=ch_a_data, dims=["ch"])
+        ax_b = CoordinateAxis(data=ch_b_data, dims=["ch"])
+
+        settings = ConcatSettings(axis="ch", relabel_axis=False)
+        proc = ConcatProcessor(settings)
+        n = 5
+        msg_a = _msg_with_attrs(np.ones((n, 2)), ch_axis=ax_a, attrs={"device": "from_attrs_A"})
+        msg_b = _msg_with_attrs(np.ones((n, 2)), ch_axis=ax_b, attrs={"device": "from_attrs_B"})
+
+        with caplog.at_level("WARNING"):
+            result = proc._concat(msg_a, msg_b)
+
+        # Existing per-channel field untouched.
+        ch_data = result.axes["ch"].data
+        assert list(ch_data["device"]) == ["DEV_A0", "DEV_A1", "DEV_B0", "DEV_B1"]
+        # Attr dropped from output .attrs.
+        assert "device" not in result.attrs
+        # Warning logged.
+        assert any("collides with existing struct field" in rec.message for rec in caplog.records)
+
+    def test_non_struct_axis_with_promoted_field(self):
+        # Starting axis is a plain string label array; promotion should convert
+        # it to a structured array with "label" + the promoted field.
+        result = self._concat_with_attrs(
+            {"device": "HUB1"},
+            {"device": "HUB2"},
+        )
+        ch_data = result.axes["ch"].data
+        assert ch_data.dtype.names is not None
+        # "label" field carries the original strings.
+        assert list(ch_data["label"]) == ["A0", "A1", "B0", "B1", "B2"]
+
+    def test_unsupported_attr_type_raises(self):
+        with pytest.raises(TypeError, match="unsupported value type"):
+            self._concat_with_attrs(
+                {"bands": [1, 2, 3]},
+                {"bands": [4, 5, 6]},
+            )
+
+    def test_new_axis_promotion(self):
+        """Promotion across a new axis: each input contributes 1 element."""
+        settings = ConcatSettings(axis="feature", label_a="spk", label_b="sbp")
+        proc = ConcatProcessor(settings)
+        n = 5
+        msg_a = _msg_with_attrs(np.ones((n, 3)), ch_labels=["C0", "C1", "C2"], attrs={"device": "HUB1"})
+        msg_b = _msg_with_attrs(np.ones((n, 3)) * 2, ch_labels=["C0", "C1", "C2"], attrs={"device": "HUB2"})
+        result = proc._concat(msg_a, msg_b)
+
+        feature_ax = result.axes["feature"]
+        ch_data = feature_ax.data
+        assert ch_data.dtype.names is not None
+        assert "device" in ch_data.dtype.names
+        assert "label" in ch_data.dtype.names
+        # Feature axis carries label_a, label_b (1 element each).
+        assert list(ch_data["label"]) == ["spk", "sbp"]
+        assert list(ch_data["device"]) == ["HUB1", "HUB2"]
+
+    def test_attrs_change_invalidates_cache(self):
+        # Changing only attrs (not shape or labels) must rebuild the cache so the
+        # next message's output picks up the new attrs.
+        settings = ConcatSettings(axis="ch", relabel_axis=False)
+        proc = ConcatProcessor(settings)
+        n = 5
+
+        msg_a1 = _msg_with_attrs(np.ones((n, 2)), ch_labels=["A0", "A1"], attrs={"manufacturer": "X"})
+        msg_b1 = _msg_with_attrs(np.ones((n, 3)), ch_labels=["B0", "B1", "B2"], attrs={"manufacturer": "X"})
+        r1 = proc._concat(msg_a1, msg_b1)
+        assert r1.attrs == {"manufacturer": "X"}
+
+        msg_a2 = _msg_with_attrs(np.ones((n, 2)), ch_labels=["A0", "A1"], attrs={"manufacturer": "Y"})
+        msg_b2 = _msg_with_attrs(np.ones((n, 3)), ch_labels=["B0", "B1", "B2"], attrs={"manufacturer": "Y"})
+        r2 = proc._concat(msg_a2, msg_b2)
+        assert r2.attrs == {"manufacturer": "Y"}
+
+    def test_empty_attrs_round_trip(self):
+        # Sanity check: no attrs in, empty dict out, no struct field added.
+        result = self._concat_with_attrs({}, {})
+        assert result.attrs == {}
+        assert result.axes["ch"].data.dtype.names is None

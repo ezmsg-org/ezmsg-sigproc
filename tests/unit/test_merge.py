@@ -431,3 +431,72 @@ class TestNewAxisMerge:
         np.testing.assert_array_equal(np.asarray(merged.data[:, :, 0]), 1.0)
         np.testing.assert_array_equal(np.asarray(merged.data[:, :, 1]), 2.0)
         np.testing.assert_array_equal(np.asarray(merged.axes["feature"].data), np.array(["spk", "sbp"]))
+
+
+class TestMergeAttrs:
+    """Merge wraps Concat — attrs merging behaviour should survive the wrapper."""
+
+    def test_equal_attrs_survive(self):
+        settings = MergeSettings(axis="ch")
+        proc = MergeProcessor(settings)
+        n = 5
+        msg_a = AxisArray(
+            np.ones((n, 2)),
+            dims=["time", "ch"],
+            axes=frozendict(
+                {
+                    "time": AxisArray.TimeAxis(fs=100.0, offset=0.0),
+                    "ch": CoordinateAxis(data=np.array(["A0", "A1"]), dims=["ch"], unit="label"),
+                }
+            ),
+            attrs={"manufacturer": "CereLink"},
+        )
+        msg_b = AxisArray(
+            np.ones((n, 3)),
+            dims=["time", "ch"],
+            axes=frozendict(
+                {
+                    "time": AxisArray.TimeAxis(fs=100.0, offset=0.0),
+                    "ch": CoordinateAxis(data=np.array(["B0", "B1", "B2"]), dims=["ch"], unit="label"),
+                }
+            ),
+            attrs={"manufacturer": "CereLink"},
+        )
+        proc(msg_a)
+        merged = proc.push_b(msg_b)
+        assert merged is not None
+        assert merged.attrs == {"manufacturer": "CereLink"}
+
+    def test_differing_attrs_promoted(self):
+        settings = MergeSettings(axis="ch")
+        proc = MergeProcessor(settings)
+        n = 5
+        msg_a = AxisArray(
+            np.ones((n, 2)),
+            dims=["time", "ch"],
+            axes=frozendict(
+                {
+                    "time": AxisArray.TimeAxis(fs=100.0, offset=0.0),
+                    "ch": CoordinateAxis(data=np.array(["A0", "A1"]), dims=["ch"], unit="label"),
+                }
+            ),
+            attrs={"manufacturer": "CereLink", "device": "HUB1"},
+        )
+        msg_b = AxisArray(
+            np.ones((n, 3)),
+            dims=["time", "ch"],
+            axes=frozendict(
+                {
+                    "time": AxisArray.TimeAxis(fs=100.0, offset=0.0),
+                    "ch": CoordinateAxis(data=np.array(["B0", "B1", "B2"]), dims=["ch"], unit="label"),
+                }
+            ),
+            attrs={"manufacturer": "CereLink", "device": "HUB2"},
+        )
+        proc(msg_a)
+        merged = proc.push_b(msg_b)
+        assert merged is not None
+        assert merged.attrs == {"manufacturer": "CereLink"}
+        ch_data = merged.axes["ch"].data
+        assert "device" in ch_data.dtype.names
+        assert list(ch_data["device"]) == ["HUB1", "HUB1", "HUB2", "HUB2", "HUB2"]
