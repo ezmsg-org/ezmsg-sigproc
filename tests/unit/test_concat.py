@@ -366,6 +366,65 @@ class TestNewAxisConcat:
         np.testing.assert_array_equal(np.asarray(result.data[:, 2:]), 3.0)
 
 
+class TestBackendMismatch:
+    """Concat across mismatched array backends should fail loudly (default)
+    or coerce on opt-in, instead of raising a cryptic MLX-internals error."""
+
+    @staticmethod
+    def _msg_mx(np_data, ch_labels):
+        import mlx.core as mx
+
+        return AxisArray(
+            data=mx.array(np_data),
+            dims=["time", "ch"],
+            axes=frozendict(
+                {
+                    "time": AxisArray.TimeAxis(fs=100.0, offset=0.0),
+                    "ch": CoordinateAxis(data=np.array(ch_labels), dims=["ch"], unit="label"),
+                }
+            ),
+            key="",
+        )
+
+    @requires_mlx
+    def test_mismatch_raises_clear_error(self):
+        """MLX a + numpy b -> clear, named backend-mismatch error."""
+        n = 5
+        msg_a = self._msg_mx(np.ones((n, 2), dtype=np.float32), ["A0", "A1"])
+        msg_b = _make_msg(np.ones((n, 2), dtype=np.float32) * 2, ch_labels=["B0", "B1"])
+
+        proc = ConcatProcessor(ConcatSettings(axis="feature"))
+        with pytest.raises(TypeError, match="mismatched backends"):
+            proc._concat(msg_a, msg_b)
+
+    @requires_mlx
+    def test_auto_coerce_backend_coerces_b_to_a(self):
+        """auto_coerce_backend=True coerces b onto a's namespace instead of raising."""
+        import mlx.core as mx
+
+        n = 5
+        msg_a = self._msg_mx(np.ones((n, 2), dtype=np.float32), ["A0", "A1"])
+        msg_b = _make_msg(np.ones((n, 2), dtype=np.float32) * 2, ch_labels=["B0", "B1"])
+
+        proc = ConcatProcessor(ConcatSettings(axis="feature", auto_coerce_backend=True))
+        result = proc._concat(msg_a, msg_b)
+
+        assert isinstance(result.data, mx.array)
+        assert result.data.shape == (n, 2, 2)
+        np.testing.assert_array_equal(np.asarray(result.data[:, :, 0]), 1.0)
+        np.testing.assert_array_equal(np.asarray(result.data[:, :, 1]), 2.0)
+
+    def test_same_backend_numpy_unaffected(self):
+        """Matched numpy inputs are never coerced or rejected (default settings)."""
+        n = 5
+        msg_a = _make_msg(np.ones((n, 2)), ch_labels=["A0", "A1"])
+        msg_b = _make_msg(np.ones((n, 2)) * 2, ch_labels=["B0", "B1"])
+
+        result = ConcatProcessor(ConcatSettings(axis="feature"))._concat(msg_a, msg_b)
+        assert isinstance(result.data, np.ndarray)
+        assert result.data.shape == (n, 2, 2)
+
+
 class TestAssertIdenticalSharedAxes:
     def test_identical_passes(self):
         settings = ConcatSettings(axis="feature", assert_identical_shared_axes=True)
