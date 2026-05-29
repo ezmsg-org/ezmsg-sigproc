@@ -7,6 +7,7 @@ import time
 import ezmsg.core as ez
 import numpy as np
 import scipy.interpolate
+from array_api_compat import get_namespace
 from ezmsg.baseproc import (
     BaseConsumerUnit,
     BaseStatefulProcessor,
@@ -234,6 +235,13 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
 
         # Calculate output
         resampled_data = f(xnew)
+
+        # scipy.interpolate.interp1d always returns numpy. Coerce back to the
+        # source's namespace so downstream merges with same-backend streams
+        # don't see a backend mismatch.
+        src_xp = get_namespace(src_axarr.data)
+        if get_namespace(resampled_data) is not src_xp:
+            resampled_data = src_xp.asarray(resampled_data)
 
         # Create output message
         if hasattr(ref_ax, "data"):

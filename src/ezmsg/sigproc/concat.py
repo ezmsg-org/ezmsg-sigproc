@@ -393,6 +393,12 @@ class ConcatSettings(ez.Settings):
     new_key: str | None = None
     """Output AxisArray key. If None, uses the key from signal A."""
 
+    auto_coerce_backend: bool = False
+    """If True, silently coerce signal B to signal A's array namespace when the
+    two inputs are on mismatched backends (e.g. MLX vs numpy). Defaults to False
+    (strict): a backend mismatch raises a clear error instead, since it is almost
+    always an upstream bug and silent coercion hides device<->host copies."""
+
 
 @dataclass
 class ConcatState:
@@ -450,6 +456,18 @@ class ConcatProcessor:
         new_axis = concat_dim not in a.dims
 
         xp = get_namespace(a.data)
+        xp_b = get_namespace(b.data)
+        if xp_b is not xp:
+            if self.settings.auto_coerce_backend:
+                b = replace(b, data=xp.asarray(b.data))
+            else:
+                raise TypeError(
+                    f"Concat received inputs on mismatched backends: "
+                    f"a.data namespace={xp.__name__}, b.data namespace={xp_b.__name__}. "
+                    f"Coerce both inputs to one backend upstream "
+                    f"(e.g., via ezmsg.sigproc.asarray.AsArrayTransformer) before merging, "
+                    f"or set ConcatSettings(auto_coerce_backend=True) to coerce B to A's backend."
+                )
 
         # expand_dims for new-axis concatenation.
         if new_axis:

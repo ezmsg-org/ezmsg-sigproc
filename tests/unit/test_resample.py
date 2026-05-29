@@ -7,6 +7,7 @@ from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.chunker import array_chunker
 
 from ezmsg.sigproc.resample import ResampleProcessor
+from tests.helpers.util import requires_mlx
 
 
 @pytest.fixture
@@ -126,6 +127,51 @@ async def test_resample_project(irregular_messages):
     resample(irregular_messages[-1])
     result = next(resample)
     print(result)
+
+
+@requires_mlx
+def test_resample_preserves_mlx_backend():
+    """ResampleProcessor must keep the source's array namespace.
+
+    scipy.interpolate.interp1d always returns numpy, so without the
+    namespace coercion an MLX input silently downgrades to numpy and a
+    downstream same-backend merge then fails with a cryptic error.
+    """
+    import mlx.core as mx
+    from array_api_compat import get_namespace
+
+    np.random.seed(0)
+    fs = 128.0
+    n = 200
+    tvec = np.sort(np.arange(n) / fs + np.random.normal(0, 0.001, n))
+    ch_ax = AxisArray.CoordinateAxis(data=np.arange(3).astype(str), dims=["ch"], unit="label")
+
+    def _mk(a: int, b: int) -> AxisArray:
+        return AxisArray(
+            data=mx.array(np.random.randn(b - a, 3).astype(np.float32)),
+            dims=["time", "ch"],
+            axes={
+                "time": AxisArray.CoordinateAxis(data=tvec[a:b], dims=["time"], unit="s"),
+                "ch": ch_ax,
+            },
+            key="mlx_stream",
+        )
+
+    resample = ResampleProcessor(resample_rate=100.0, buffer_duration=4.0)
+    mlx_ns = get_namespace(mx.array([1.0]))
+    seen_output = False
+    for i in range(0, n, 40):
+        resample(_mk(i, min(i + 40, n)))
+        result = next(resample)
+        if result.data.shape[0] == 0:
+            continue
+        seen_output = True
+        assert isinstance(result.data, mx.array), (
+            f"Expected mx.array out, got {type(result.data).__name__}"
+        )
+        assert get_namespace(result.data) is mlx_ns
+
+    assert seen_output, "Resampler never produced a non-empty output to check."
 
 
 @pytest.mark.asyncio
