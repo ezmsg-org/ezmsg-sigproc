@@ -146,7 +146,6 @@ def adaptive_lnc(
     num_harmonics: int = 1,
     adapt_time_constant: float = 0.1,
     freq_time_constant: float | None = 0.5,
-    control: float = 1.0,
     cancel_method: str = "notch",
     axis: str = "time",
 ) -> AdaptiveLNCTransformer:
@@ -157,7 +156,6 @@ def adaptive_lnc(
             num_harmonics=num_harmonics,
             adapt_time_constant=adapt_time_constant,
             freq_time_constant=freq_time_constant,
-            control=control,
             cancel_method=cancel_method,
             axis=axis,
         )
@@ -208,13 +206,13 @@ def test_chunking_is_invariant():
     np.testing.assert_allclose(out_whole, out_split, rtol=1e-4, atol=1e-2)
 
 
-def test_control_zero_is_passthrough():
-    """control=0 subtracts nothing: output equals input exactly."""
+def test_passthrough_emits_input_unchanged():
+    """cancel_method="passthrough" does no LNC: output equals input exactly."""
     n = 3000
     mixture = _synthetic_mixture(n, n_ch=2, seed=2)
-    proc = adaptive_lnc(control=0.0, freq_time_constant=None)
+    proc = adaptive_lnc(cancel_method="passthrough", freq_time_constant=None)
     got = _stream_in_chunks(proc, mixture, [100] * 30)
-    np.testing.assert_array_equal(got, mixture.astype(np.float32))
+    np.testing.assert_array_equal(got, mixture)
 
 
 def test_cancels_stationary_line():

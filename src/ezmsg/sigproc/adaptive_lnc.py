@@ -57,6 +57,7 @@ FLL disabled (``freq_time_constant`` None/<=0) the transformer reduces to a
 fixed-frequency canceller whose output is independent of chunking.
 """
 
+import enum
 from typing import Any
 
 import ezmsg.core as ez
@@ -103,6 +104,23 @@ def _to_numpy(arr: object) -> np.ndarray:
     return np.asarray(arr)
 
 
+class CancelMethod(str, enum.Enum):
+    """How :class:`AdaptiveLNCTransformer` removes the line."""
+
+    NOTCH = "notch"
+    """Apply the SOS notch cascade -- a perfect null that also removes any
+    signal at the line frequency."""
+
+    SUBTRACT = "subtract"
+    """Estimate the common-mode line (pooled global phase + per-channel
+    amplitude) once per window and subtract *only* it, preserving signal that
+    is independent across channels at the line frequency. Assumes a 1-D channel
+    axis."""
+
+    PASSTHROUGH = "passthrough"
+    """Emit the input unchanged -- no cancellation and no frequency tracking."""
+
+
 class AdaptiveLNCSettings(ez.Settings):
     """Settings for :class:`AdaptiveLNCTransformer`."""
 
@@ -131,19 +149,15 @@ class AdaptiveLNCSettings(ez.Settings):
     loops do not fight. Independent of chunk size (the per-update gain is
     derived from elapsed time). Read live each chunk."""
 
-    control: float = 1.0
-    """Cancellation gate in [0, 1]. 1.0 fully subtracts the estimate, 0.0 is
-    passthrough (weights keep adapting either way). Read live each chunk."""
-
-    cancel_method: str = "notch"
-    """How to remove the line. ``"notch"`` (default) applies the SOS notch
-    cascade -- a perfect null that also removes any signal at the line
-    frequency. ``"subtract"`` estimates the common-mode line (pooled global
-    phase + per-channel amplitude) once per window and subtracts *only* it,
-    preserving signal that is independent across channels at the line frequency.
-    ``"subtract"`` assumes a 1-D channel axis. (Per-channel sampling-delay
-    alignment is handled separately, upstream, by
-    ``SamplingDelayAlignmentTransformer``.)"""
+    cancel_method: CancelMethod = CancelMethod.NOTCH
+    """How to remove the line; see :class:`CancelMethod`. ``NOTCH`` (default)
+    applies the SOS notch cascade -- a perfect null that also removes any signal
+    at the line frequency. ``SUBTRACT`` estimates the common-mode line (pooled
+    global phase + per-channel amplitude) once per window and subtracts *only*
+    it, preserving signal that is independent across channels at the line
+    frequency; it assumes a 1-D channel axis. ``PASSTHROUGH`` emits the input
+    unchanged. (Per-channel sampling-delay alignment is handled separately,
+    upstream, by ``SamplingDelayAlignmentTransformer``.)"""
 
     axis: str = "time"
     """Name of the axis to filter along."""
@@ -230,11 +244,10 @@ class AdaptiveLNCTransformer(
     **Cancellation.** A fixed-frequency quadrature-LMS canceller is exactly a
     2nd-order notch (Glover 1977; see :func:`design_lnc_sos`). Each harmonic is
     one biquad notch at ``k * omega``; the cascade is applied with ``sosfilt``
-    carrying state ``zi`` across chunks. The gated output is::
+    carrying state ``zi`` across chunks. The output is::
 
         y_notch = sosfilt(design_lnc_sos(omega, mu, num_harmonics), x)
-        removed = x - y_notch                          # the line estimate
-        y = x - control * removed
+        y = y_notch                                    # the line removed
 
     This replaces the former per-sample LMS recursion: it is vectorised, scales
     with channel count, and dispatches to a GPU ``sosfilt`` (MLX/Metal) on MLX
@@ -260,7 +273,7 @@ class AdaptiveLNCTransformer(
     # These are read fresh every chunk inside `_process`, so changing them must
     # NOT reset the filter state. line_freq seeds omega, axis/delay model and
     # num_harmonics shape the state, so those do force a reset.
-    NONRESET_SETTINGS_FIELDS = frozenset({"adapt_time_constant", "freq_time_constant", "control"})
+    NONRESET_SETTINGS_FIELDS = frozenset({"adapt_time_constant", "freq_time_constant"})
 
     def _hash_message(self, message: AxisArray) -> int:
         ax_idx = message.get_axis_idx(self.settings.axis)
@@ -434,6 +447,10 @@ class AdaptiveLNCTransformer(
         return line
 
     def _process(self, message: AxisArray) -> AxisArray:
+        if self.settings.cancel_method == CancelMethod.PASSTHROUGH:
+            # No cancellation and no frequency tracking; emit the input as-is.
+            return message
+
         ax_idx = message.get_axis_idx(self.settings.axis)
         x_data = message.data
         xp, is_mlx = _namespace(x_data)
@@ -449,13 +466,12 @@ class AdaptiveLNCTransformer(
         # Time constants -> gains (independent of chunk size and fs).
         # mu = 2 / (tau_adapt * fs); beta = 1 - exp(-window_dt / tau_freq).
         mu = 2.0 / (self.settings.adapt_time_constant * fs)
-        ctrl = self.settings.control
         n_harm = max(1, int(self.settings.num_harmonics))
         tau_freq = self.settings.freq_time_constant
         tracking = tau_freq is not None and tau_freq > 0
         beta = 1.0 - np.exp(-(st.block_len / fs) / tau_freq) if tracking else 0.0
 
-        if self.settings.cancel_method == "subtract":
+        if self.settings.cancel_method == CancelMethod.SUBTRACT:
             # Reconstruct-and-subtract: always walk the window grid (the per-
             # window estimate updates there); the FLL steps omega only if
             # tracking. The first window subtracts nothing while it learns.
@@ -467,7 +483,7 @@ class AdaptiveLNCTransformer(
                 seg_len = min(st.block_len - st.samples_in_block, n - pos)
                 x_seg = x_data[pos : pos + seg_len]
                 line_seg = self._reconstruct(seg_len, n_harm, xp)
-                pieces.append(x_seg if line_seg is None else x_seg - ctrl * line_seg)
+                pieces.append(x_seg if line_seg is None else x_seg - line_seg)
                 self._accumulate_subtract(x_seg, seg_len, n_harm, xp)
                 st.phase = st.phase + st.omega * seg_len
                 st.samples_in_block += seg_len
@@ -479,8 +495,7 @@ class AdaptiveLNCTransformer(
         elif not tracking:
             # Notch, frozen NCO: constant frequency, whole chunk in one sosfilt.
             sos = self._ensure_sos(mu, n_harm, is_mlx)
-            y_notch = self._sosfilt(sos, x_data, is_mlx)
-            y_out = x_data - ctrl * (x_data - y_notch)
+            y_out = self._sosfilt(sos, x_data, is_mlx)
             st.phase = st.phase + st.omega * n
         else:
             # Notch, tracking: walk segments bounded by the frequency-update
@@ -493,7 +508,7 @@ class AdaptiveLNCTransformer(
                 sos = self._ensure_sos(mu, n_harm, is_mlx)
                 y_notch = self._sosfilt(sos, x_seg, is_mlx)
                 removed = x_seg - y_notch
-                pieces.append(x_seg - ctrl * removed)
+                pieces.append(y_notch)
                 self._accumulate_demod(removed, seg_len, xp)
                 st.phase = st.phase + st.omega * seg_len
                 st.samples_in_block += seg_len
