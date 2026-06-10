@@ -11,89 +11,9 @@ We will explore how to do this by recreating the `Downsample` signal processor u
 Choosing your signal processing class
 **********************************************************
 
-We make use of the following decision tree to choose the appropriate signal processing class:
-
-.. graphviz::
-    :align: center
-
-    digraph signal_processor_decision_tree {
-        node [shape=box, style="rounded,filled", fillcolor="#f0f0f0", fontname="Arial"];
-        edge [fontname="Arial"];
-
-        AMP [label="Multiple Processors?", fontcolor="#ff0000"];
-        ARI [label="Receives Input?", fontcolor="#ff0000"];
-        ACB [label="Single Chain / Branching?"];
-        P [label="Producer", shape=diamond, fillcolor="#27f21cff"];
-        APO [label="Produces Output?", fontcolor="#ff0000"];
-        NBC [label="no base class", style="none"];
-        ACRI [label="Receives Input?"];
-        C [label="Consumer", shape=diamond, fillcolor="#27f21cff"];
-        T [label="Transformer", shape=diamond, fillcolor="#27f21cff", fontcolor="#ff0000"];
-        PS [label="Stateful?"];
-        CS [label="Stateful?"];
-        TS [label="Stateful?", fontcolor="#ff0000"];
-        TSA [label="Adaptive?", fontcolor="#ff0000"];
-        TSAF [label="Async First?", fontcolor="#ff0000"];
-        CompositeProducer [style="none, filled", fillcolor="#effb1aff"];
-        CompositeProcessor [style="none, filled", fillcolor="#effb1aff"];
-        BaseProducer [style="none, filled", fillcolor="#effb1aff"];
-        BaseStatefulProducer [style="none, filled", fillcolor="#effb1aff"];
-        BaseConsumer [style="none, filled", fillcolor="#effb1aff"];
-        BaseStatefulConsumer [style="none, filled", fillcolor="#effb1aff"];
-        BaseTransformer [style="none, filled", fillcolor="#effb1aff"];
-        BaseAdaptiveTransformer [style="none, filled", fillcolor="#effb1aff"];
-        BaseStatefulTransformer [style="none, filled", fillcolor="#effb1aff", fontcolor="#ff0000"];
-        BaseAsyncTransformer [style="none, filled", fillcolor="#effb1aff"];
-
-        AMP -> ARI [label="no", color="#ff0000", fontcolor="#ff0000"];
-        AMP -> ACB [label="yes"];
-        ARI -> P [label="no"];
-        ARI -> APO [label="yes", color="#ff0000", fontcolor="#ff0000"];
-        ACB -> NBC [label="branching"];
-        ACB -> ACRI [label="single chain"];
-        P -> PS;
-        APO -> C [label="no"];
-        APO -> T [label="yes", color="#ff0000", fontcolor="#ff0000"];
-        ACRI -> CompositeProducer [label="no"];
-        ACRI -> CompositeProcessor [label="yes"];
-        PS -> BaseProducer [label="no"];
-        PS -> BaseStatefulProducer [label="yes"];
-        C -> CS;
-        T -> TS [color="#ff0000", fontcolor="#ff0000"];
-        CS -> BaseConsumer [label="no"];
-        CS -> BaseStatefulConsumer [label="yes"];
-        TS -> BaseTransformer [label="no"];
-        TS -> TSA [label="yes", color="#ff0000", fontcolor="#ff0000"];
-        TSA -> TSAF [label="no", color="#ff0000", fontcolor="#ff0000"];
-        TSA -> BaseAdaptiveTransformer [label="yes"];
-        TSAF -> BaseStatefulTransformer [label="no", color="#ff0000", fontcolor="#ff0000"];
-        TSAF -> BaseAsyncTransformer [label="yes"];
-    }
-.. flowchart TD
-..     AMP{Multiple Processors?};
-..     AMP -->|no| ARI{Receives Input?};
-..     AMP -->|yes| ACB{Single Chain / Branching?}
-..     ARI -->|no| P(Producer);
-..     ARI -->|yes| APO{Produces Output?};
-..     ACB -->|branching| NBC[no base class];
-..     ACB -->|single chain| ACRI{Receives Input?};
-..     P --> PS{Stateful?};
-..     APO -->|no| C(Consumer);
-..     APO -->|yes| T(Transformer);
-..     ACRI -->|no| CompositeProducer;
-..     ACRI -->|yes| CompositeProcessor;
-..     PS -->|no| BaseProducer;
-..     PS -->|yes| BaseStatefulProducer;
-..     C --> CS{Stateful?};
-..     T --> TS{Stateful?};
-..     CS -->|no| BaseConsumer;
-..     CS -->|yes| BaseStatefulConsumer;
-..     TS -->|no| BaseTransformer;
-..     TS -->|yes| TSA{Adaptive?};
-..     TSA -->|no| TSAF{Async First?};
-..     TSA -->|yes| BaseAdaptiveTransformer;
-..     TSAF -->|no| BaseStatefulTransformer;
-..     TSAF -->|yes| BaseAsyncTransformer;
+We make use of the decision tree in the `ezmsg-baseproc documentation
+<https://www.ezmsg.org/ezmsg-baseproc/guides/ProcessorsBase.html#implementing-a-custom-standalone-processor>`_
+to choose the appropriate signal processing class.
 
 In our case, we are creating a **single** signal processor that **receives input** and **produces output**. The decision tree indicates that we will be using a **transformer**-type base class. To continue, we need to determine if the processor is *stateful*, *adaptive* and *async first* or not.
 

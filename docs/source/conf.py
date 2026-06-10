@@ -30,7 +30,6 @@ extensions = [
     "sphinx.ext.intersphinx",
     "sphinx.ext.viewcode",
     "sphinx.ext.duration",
-    "sphinx.ext.graphviz",
     # "sphinx_autodoc_typehints",  # Disabled due to compatibility issue
     "sphinx_copybutton",
     "myst_parser",  # For markdown files

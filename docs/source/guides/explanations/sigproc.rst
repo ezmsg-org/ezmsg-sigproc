@@ -33,66 +33,10 @@ Furthermore, if a processor of any type must maintain state between processing c
 
 Additionally, we also consider adaptive stateful transformers, which are stateful transformers that adapt their internal state based on the input signal characteristics (e.g., adaptive filters). If we would like a transformer to be asynchronous in all calls, we would use an asynchronous transformer.
 
-The decision tree for this classification is as follows:
+The decision tree for this classification can be found in the `ezmsg-baseproc documentation
+<https://www.ezmsg.org/ezmsg-baseproc/guides/ProcessorsBase.html#implementing-a-custom-standalone-processor>`_.
 
-.. graphviz::
-    :align: center
-
-    digraph signal_processor_decision_tree {
-        node [shape=box, style="rounded,filled", fillcolor="#f0f0f0", fontname="Arial"];
-        edge [fontname="Arial"];
-
-        AMP [label="Multiple Processors?"];
-        ARI [label="Receives Input?"];
-        ACB [label="Single Chain / Branching?"];
-        P [label="Producer", shape=diamond, fillcolor="#27f21cff"];
-        APO [label="Produces Output?"];
-        NBC [label="no base class", style="none"];
-        ACRI [label="Receives Input?"];
-        C [label="Consumer", shape=diamond, fillcolor="#27f21cff"];
-        T [label="Transformer", shape=diamond, fillcolor="#27f21cff"];
-        PS [label="Stateful?"];
-        CS [label="Stateful?"];
-        TS [label="Stateful?"];
-        TSA [label="Adaptive?"];
-        TSAF [label="Async First?"];
-        CompositeProducer [style="none, filled", fillcolor="#effb1aff"];
-        CompositeProcessor [style="none, filled", fillcolor="#effb1aff"];
-        BaseProducer [style="none, filled", fillcolor="#effb1aff"];
-        BaseStatefulProducer [style="none, filled", fillcolor="#effb1aff"];
-        BaseConsumer [style="none, filled", fillcolor="#effb1aff"];
-        BaseStatefulConsumer [style="none, filled", fillcolor="#effb1aff"];
-        BaseTransformer [style="none, filled", fillcolor="#effb1aff"];
-        BaseAdaptiveTransformer [style="none, filled", fillcolor="#effb1aff"];
-        BaseStatefulTransformer [style="none, filled", fillcolor="#effb1aff"];
-        BaseAsyncTransformer [style="none, filled", fillcolor="#effb1aff"];
-
-        AMP -> ARI [label="no"];
-        AMP -> ACB [label="yes"];
-        ARI -> P [label="no"];
-        ARI -> APO [label="yes"];
-        ACB -> NBC [label="branching"];
-        ACB -> ACRI [label="single chain"];
-        P -> PS;
-        APO -> C [label="no"];
-        APO -> T [label="yes"];
-        ACRI -> CompositeProducer [label="no"];
-        ACRI -> CompositeProcessor [label="yes"];
-        PS -> BaseProducer [label="no"];
-        PS -> BaseStatefulProducer [label="yes"];
-        C -> CS;
-        T -> TS;
-        CS -> BaseConsumer [label="no"];
-        CS -> BaseStatefulConsumer [label="yes"];
-        TS -> BaseTransformer [label="no"];
-        TS -> TSA [label="yes"];
-        TSA -> TSAF [label="no"];
-        TSA -> BaseAdaptiveTransformer [label="yes"];
-        TSAF -> BaseStatefulTransformer [label="no"];
-        TSAF -> BaseAsyncTransformer [label="yes"];
-    }
-
-The leaf nodes in yellow are abstract base classes provided in `ezmsg.sigproc.base` for implementing standalone processors. The table below summarizes these base classes.
+The leaf nodes of the decision tree are abstract base classes provided in `ezmsg.sigproc.base` for implementing standalone processors. The table below summarizes these base classes.
 
 Abstract implementations (Base Classes) for standalone processors
 ***************************************************************************************
@@ -126,7 +70,7 @@ In this table, we summarize the generic TypeVars used in the processor class pro
 
 Processor Class Protocols
 ===========================
-In this table, we summarize the processor class protocols used to define the abstract base classes provided in `ezmsg.sigproc.base`. Each protocol corresponds to a specific processor type and characteristics as outlined in the decision tree above.
+In this table, we summarize the processor class protocols used to define the abstract base classes provided in `ezmsg.sigproc.base`. Each protocol corresponds to a specific processor type and characteristics as outlined in the decision tree linked above.
 
 +-----+-----------------------+--------+-------+------------------------+--------+-----------------+
 | Idx | Class                 | Parent | State | ``__call__`` signature | @state | ``partial_fit`` |
@@ -156,7 +100,7 @@ Note: ``__call__`` and ``partial_fit`` both have asynchronous alternatives: ``__
 Processor Base Classes
 ========================
 
-In this table, we summarize the abstract base classes provided in `ezmsg.sigproc.base` for implementing standalone signal processors. Each base class corresponds to a specific processor type and protocol, as outlined in the decision tree above.
+In this table, we summarize the abstract base classes provided in `ezmsg.sigproc.base` for implementing standalone signal processors. Each base class corresponds to a specific processor type and protocol, as outlined in the decision tree linked above.
 
 .. list-table:: 
    :widths: 5 20 5 5 30
@@ -253,7 +197,7 @@ Implementing a custom standalone processor
   @processor_state
   class MyState:
 
-3. Decide on your base processor class, considering the protocol, whether it should be async-first, and other factors using the decision tree above. 
+3. Decide on your base processor class, considering the protocol, whether it should be async-first, and other factors using the decision tree linked above.
 
 4. Implement the child class.
     * The minimum implementation is ``_process`` for sync processors, ``_aprocess`` for async processors, and ``_produce`` for producers.
