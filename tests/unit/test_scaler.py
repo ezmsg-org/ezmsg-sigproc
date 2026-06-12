@@ -316,6 +316,46 @@ class TestAdaptiveStandardScalerAccumulate:
         assert scaler._state.vars_sq_ewma.settings.accumulate is False
 
 
+class TestAdaptiveStandardScalerPassthrough:
+    """Tests for the passthrough setting on AdaptiveStandardScalerTransformer."""
+
+    def test_passthrough_identity(self):
+        """passthrough=True returns the input unchanged — no scaling."""
+        scaler = AdaptiveStandardScalerTransformer(
+            settings=AdaptiveStandardScalerSettings(time_constant=0.1, passthrough=True)
+        )
+
+        msg = _make_scaler_test_msg(np.arange(20, dtype=float).reshape(10, 2) + 50.0)
+        out = scaler(msg)
+
+        assert out is msg
+        # No state was ever initialized — the scaler was skipped entirely.
+        assert scaler._state.samps_ewma is None
+
+    def test_passthrough_toggle_preserves_state(self):
+        """Toggling passthrough does not reset the child EWMA states."""
+        scaler = AdaptiveStandardScalerTransformer(settings=AdaptiveStandardScalerSettings(time_constant=0.1))
+
+        np.random.seed(42)
+        _ = scaler(_make_scaler_test_msg(np.random.randn(100, 4)))
+        zi_samps = scaler._state.samps_ewma._state.zi.copy()
+        zi_vars = scaler._state.vars_sq_ewma._state.zi.copy()
+
+        # Passthrough: identity output, state untouched even with wild input.
+        scaler.update_settings(AdaptiveStandardScalerSettings(time_constant=0.1, passthrough=True))
+        assert scaler._hash != -1
+        msg = _make_scaler_test_msg(np.random.randn(50, 4) + 1000.0)
+        assert scaler(msg) is msg
+        assert np.allclose(scaler._state.samps_ewma._state.zi, zi_samps)
+        assert np.allclose(scaler._state.vars_sq_ewma._state.zi, zi_vars)
+
+        # Resume scaling: statistics pick up where they left off.
+        scaler.update_settings(AdaptiveStandardScalerSettings(time_constant=0.1, passthrough=False))
+        out = scaler(_make_scaler_test_msg(np.random.randn(50, 4)))
+        assert out.data.shape == (50, 4)
+        assert not np.any(np.isnan(out.data))
+
+
 class TestAdaptiveStandardScalerUpdateSettings:
     """Live settings updates via update_settings."""
 

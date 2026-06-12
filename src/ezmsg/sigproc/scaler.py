@@ -104,9 +104,20 @@ class AdaptiveStandardScalerTransformer(
     ]
 ):
     # `accumulate` can be live-propagated into the child EWMAs (see
-    # `update_settings` below); `time_constant` and `axis` are baked into
+    # `update_settings` below) and `passthrough` is read live in
+    # `__call__`/`__acall__`; `time_constant` and `axis` are baked into
     # the children during `_reset_state`.
-    NONRESET_SETTINGS_FIELDS = frozenset({"accumulate"})
+    NONRESET_SETTINGS_FIELDS = frozenset({"accumulate", "passthrough"})
+
+    def __call__(self, message: AxisArray) -> AxisArray:
+        if self.settings.passthrough:
+            return message
+        return super().__call__(message)
+
+    async def __acall__(self, message: AxisArray) -> AxisArray:
+        if self.settings.passthrough:
+            return message
+        return await super().__acall__(message)
 
     def update_settings(self, new_settings: AdaptiveStandardScalerSettings) -> None:
         # Propagate accumulate into the existing child EWMAs before deferring

@@ -169,6 +169,12 @@ class EWMASettings(ez.Settings):
     the current EWMA estimate without updating state (useful for inference
     periods where you don't want to adapt statistics)."""
 
+    passthrough: bool = False
+    """If True, return the input unchanged (identity) without touching the
+    EWMA. Unlike a very large time_constant -- which still applies a (stale)
+    baseline estimate -- passthrough leaves the data untouched. May be toggled
+    at runtime without resetting the filter state."""
+
 
 @processor_state
 class EWMAState:
@@ -177,17 +183,18 @@ class EWMAState:
 
 
 class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray, EWMAState]):
-    # `accumulate` is read live in `_process` to gate state updates; other
-    # fields are cached into state (alpha, zi) during `_reset_state`.
-    NONRESET_SETTINGS_FIELDS = frozenset({"accumulate"})
+    # `accumulate` is read live in `_process` to gate state updates and
+    # `passthrough` is read live in `__call__`/`__acall__`; other fields are
+    # cached into state (alpha, zi) during `_reset_state`.
+    NONRESET_SETTINGS_FIELDS = frozenset({"accumulate", "passthrough"})
 
     def __call__(self, message: AxisArray) -> AxisArray:
-        if np.prod(message.data.shape) == 0:
+        if self.settings.passthrough or np.prod(message.data.shape) == 0:
             return message
         return super().__call__(message)
 
     async def __acall__(self, message: AxisArray) -> AxisArray:
-        if np.prod(message.data.shape) == 0:
+        if self.settings.passthrough or np.prod(message.data.shape) == 0:
             return message
         return await super().__acall__(message)
 
