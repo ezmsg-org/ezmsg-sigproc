@@ -97,8 +97,13 @@ def butter_design_fun(
 
     """
     coefs = None
-    if order > 0:
-        btype, cutoffs = ButterworthFilterSettings(order=order, cuton=cuton, cutoff=cutoff).filter_specs()
+    # order > 0 with neither corner set is a valid "no filter" request:
+    # filter_specs() returns None, which we treat as passthrough (coefs stays
+    # None -> the transformer returns the input unchanged) rather than crashing
+    # on an unpack of None.
+    specs = ButterworthFilterSettings(order=order, cuton=cuton, cutoff=cutoff).filter_specs()
+    if order > 0 and specs is not None:
+        btype, cutoffs = specs
         coefs = scipy.signal.butter(
             order,
             Wn=cutoffs,

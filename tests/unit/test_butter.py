@@ -288,6 +288,26 @@ def test_butterworth_empty_order0_passthrough():
     check_empty_result(result)
 
 
+def test_butterworth_order_no_corners_passthrough():
+    """order > 0 with neither cuton nor cutoff is a valid "no filter" request.
+
+    Regression test: this used to crash in butter_design_fun on an unpack of
+    None from filter_specs(); now it designs no filter and passes data through.
+    """
+    from ezmsg.sigproc.butterworthfilter import (
+        ButterworthFilterSettings,
+        ButterworthFilterTransformer,
+        butter_design_fun,
+    )
+
+    assert butter_design_fun(fs=1000.0, order=4) is None
+
+    proc = ButterworthFilterTransformer(ButterworthFilterSettings(order=4, axis="time"))
+    msg = make_msg()
+    result = proc(msg)
+    assert np.array_equal(result.data, msg.data)
+
+
 def test_butterworth_empty_first():
     from ezmsg.sigproc.butterworthfilter import ButterworthFilterSettings, ButterworthFilterTransformer
 
