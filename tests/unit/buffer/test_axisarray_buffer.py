@@ -220,8 +220,13 @@ class TestHybridAxisBuffer:
         assert all(0 <= idx <= 5 for idx in indices)
 
     def test_overflow_behavior(self):
-        """Test buffer overflow with LinearAxis"""
-        buf = HybridAxisBuffer(duration=0.1)  # Small buffer
+        """LinearAxis honors overflow_strategy; default 'grow' keeps every sample.
+
+        The LinearAxis path is pure metadata, so it mirrors the configured
+        overflow strategy to stay in lockstep with the sister data buffer in
+        HybridAxisArrayBuffer (which, under the default 'grow', also keeps all).
+        """
+        buf = HybridAxisBuffer(duration=0.1)  # Small buffer, default 'grow'
 
         # Initialize with high-frequency axis (10kHz)
         axis = LinearAxis(gain=0.0001, offset=0.0)
@@ -230,17 +235,66 @@ class TestHybridAxisBuffer:
         assert buf.available() == 500
         assert buf.capacity == 1000  # 0.1 sec / 0.0001
 
-        # Write more data to cause overflow
+        # Write more data to overflow the nominal capacity.
         axis2 = LinearAxis(gain=0.0001, offset=0.1)
-        buf.write(axis2, n_samples=700)  # Total would be 1200
+        buf.write(axis2, n_samples=700)  # Total 1200
 
-        # Even though LinearAxis doesn't have a true capacity limit,
-        #  we simulate one anyway to stay in sync with sister buffers
-        #  (e.g., in HybridAxisArrayBuffer)
-        assert buf.available() == 1000
-
-        # But capacity remains the same
+        # 'grow' keeps every sample rather than capping.
+        assert buf.available() == 1200
+        # The nominal duration-based capacity is unchanged.
         assert buf.capacity == 1000
+
+    def test_overflow_strategy_warn_overwrite_caps_dropping_oldest(self):
+        """'warn-overwrite' caps at capacity by dropping the oldest samples."""
+        buf = HybridAxisBuffer(duration=0.1, overflow_strategy="warn-overwrite")
+        axis = LinearAxis(gain=0.001, offset=0.0)  # capacity = 100
+        buf.write(axis, n_samples=80)
+        assert buf.available() == 80
+        assert buf.first_value == pytest.approx(0.0)
+        with pytest.warns(RuntimeWarning):
+            buf.write(LinearAxis(gain=0.001, offset=0.08), n_samples=40)  # 120 -> drop oldest 20
+        assert buf.available() == 100
+        # Oldest 20 dropped -> first value advanced by 20 * gain.
+        assert buf.first_value == pytest.approx(0.02)
+
+    def test_overflow_strategy_drop_caps_dropping_newest(self):
+        """'drop' caps at capacity by rejecting the newest overflowing samples."""
+        buf = HybridAxisBuffer(duration=0.1, overflow_strategy="drop")
+        axis = LinearAxis(gain=0.001, offset=0.0)  # capacity = 100
+        buf.write(axis, n_samples=80)
+        buf.write(LinearAxis(gain=0.001, offset=0.08), n_samples=40)  # 120 -> keep oldest 100
+        assert buf.available() == 100
+        # Oldest samples retained -> first value unchanged.
+        assert buf.first_value == pytest.approx(0.0)
+
+    def test_overflow_strategy_raise(self):
+        """'raise' raises OverflowError when capacity is exceeded."""
+        buf = HybridAxisBuffer(duration=0.1, overflow_strategy="raise")
+        axis = LinearAxis(gain=0.001, offset=0.0)  # capacity = 100
+        buf.write(axis, n_samples=100)
+        with pytest.raises(OverflowError):
+            buf.write(LinearAxis(gain=0.001, offset=0.1), n_samples=1)
+
+    @pytest.mark.parametrize("strategy", ["warn-overwrite", "drop"])
+    def test_single_message_larger_than_capacity(self, strategy):
+        """A single write bigger than the whole buffer must still cap correctly.
+
+        Capping strategies keep exactly ``capacity`` samples: 'warn-overwrite'
+        keeps the newest, 'drop' keeps the oldest.
+        """
+        import warnings
+
+        buf = HybridAxisBuffer(duration=0.1, overflow_strategy=strategy)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            buf.write(LinearAxis(gain=0.001, offset=0.0), n_samples=250)  # capacity = 100
+        assert buf.available() == 100
+        if strategy == "warn-overwrite":
+            # Keeps newest 100 (samples 150..249) -> first value at 150 * gain.
+            assert buf.first_value == pytest.approx(0.15)
+        else:
+            # Keeps oldest 100 (samples 0..99) -> first value at 0.
+            assert buf.first_value == pytest.approx(0.0)
 
     def test_mixed_axis_types_error(self):
         """Test that mixing axis types raises an error"""
