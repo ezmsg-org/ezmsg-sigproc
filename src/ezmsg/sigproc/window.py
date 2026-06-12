@@ -105,8 +105,10 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
         #     object.__setattr__(self.settings, "newaxis", "win")
         if self.settings.window_shift is None and self.settings.zero_pad_until != "input":
             ez.logger.warning(
-                "`zero_pad_until` must be 'input' if `window_shift` is None. "
-                f"Ignoring received argument value: {self.settings.zero_pad_until}"
+                "`zero_pad_until` must be 'input' if `window_shift` is None; "
+                f"coercing from {self.settings.zero_pad_until!r}. Window settings: "
+                f"axis={self.settings.axis!r}, newaxis={self.settings.newaxis!r}, "
+                f"window_dur={self.settings.window_dur!r}."
             )
             object.__setattr__(self.settings, "zero_pad_until", "input")
         elif self.settings.window_shift is not None and self.settings.zero_pad_until == "input":
