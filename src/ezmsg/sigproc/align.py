@@ -21,6 +21,14 @@ class AlignAlongAxisSettings(ez.Settings):
     buffer_dur: float = 10.0
     """Buffer duration in seconds for each input stream."""
 
+    gain_rtol: float = 1e-6
+    """Relative tolerance for treating the two streams' axis gains as equal.
+
+    Guards against spurious full resets when the two inputs carry nominally
+    identical sampling rates that differ only by sub-ppm floating-point noise
+    (e.g. a gain computed via different upstream paths). Set larger to tolerate
+    coarser rate jitter, or smaller to distinguish very close rates."""
+
 
 @processor_state
 class AlignAlongAxisState:
@@ -123,9 +131,15 @@ class AlignAlongAxisProcessor(
         """Process input B: check gain, detect shape changes, buffer, try align."""
         align_axis = self.settings.axis or message.dims[0]
 
-        # Gain compatibility check.
+        # Gain compatibility check. Skipped when B's gain can't be estimated
+        # (e.g. a single-sample CoordinateAxis yields None) — there is nothing
+        # to compare against, so fall through and buffer the sample.
         b_gain = self._extract_gain(message)
-        if self._state.gain is not None and not math.isclose(b_gain, self._state.gain):
+        if (
+            b_gain is not None
+            and self._state.gain is not None
+            and not math.isclose(b_gain, self._state.gain, rel_tol=self.settings.gain_rtol)
+        ):
             self._full_reset(align_axis)
             self._hash = self._hash_message(message)
 
