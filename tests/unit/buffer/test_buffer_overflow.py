@@ -190,3 +190,48 @@ class TestHybridAxisArrayBufferOverflow:
         buf.write(linear_axis_message(samples=8, fs=100.0))
         buf.write(linear_axis_message(samples=4, fs=100.0))
         assert buf.available() == 12
+
+    # Combos where the data buffer overflows eagerly (so the two sub-buffers
+    # agree continuously): grow never drops, and immediate flushes each write.
+    # on_demand + a capping strategy defers the data-buffer drop to flush time,
+    # a pre-existing HybridBuffer quirk unrelated to the desync fixed here.
+    @pytest.mark.parametrize(
+        "overflow_strategy, update_strategy",
+        [
+            ("grow", "on_demand"),  # ALIGN's actual config — the original crash
+            ("grow", "immediate"),
+            ("warn-overwrite", "immediate"),
+            ("drop", "immediate"),
+        ],
+    )
+    def test_linear_axis_array_buffer_sub_buffers_stay_in_sync(
+        self, linear_axis_message, overflow_strategy, update_strategy
+    ):
+        """Regression: a one-sided burst past capacity must not desync the data
+        and axis sub-buffers (previously crashed in seek with an AssertionError).
+
+        Mirrors the ALIGN failure where one stream accumulates well beyond
+        ``buffer_dur`` while the other is silent. The two sub-buffers must
+        report equal counts throughout, and draining must not trip the seek
+        invariant assertion.
+        """
+        import warnings
+
+        buf = HybridAxisArrayBuffer(
+            duration=0.1,  # fs=100 -> capacity 10
+            overflow_strategy=overflow_strategy,
+            update_strategy=update_strategy,
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)  # warn-overwrite emits one
+            for i in range(50):  # 50 samples >> capacity 10
+                buf.write(linear_axis_message(samples=1, fs=100.0, offset=i * 0.01))
+                assert buf._data_buffer.available() == buf._axis_buffer.available()
+
+            avail = buf.available()
+            assert avail == (50 if overflow_strategy == "grow" else 10)
+
+            # Draining everything must not trip the seek invariant assertion.
+            out = buf.read(avail)
+        assert out is not None
+        assert out.data.shape[0] == avail

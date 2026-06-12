@@ -2,6 +2,7 @@
 
 import math
 import typing
+import warnings
 
 import numpy as np
 from array_api_compat import get_namespace
@@ -36,6 +37,14 @@ class HybridAxisBuffer:
     def __init__(self, duration: float, **kwargs):
         self.duration = duration
         self.buffer_kwargs = kwargs
+        # Overflow policy for the LinearAxis path. The CoordinateAxis path
+        # delegates to its inner HybridBuffer, which applies the strategy
+        # itself; the LinearAxis path is pure metadata (offset + count) and so
+        # must mirror the same policy here to stay in lockstep with the sister
+        # data buffer in HybridAxisArrayBuffer.
+        self._overflow_strategy = kwargs.get("overflow_strategy", "grow")
+        self._warn_once = kwargs.get("warn_once", True)
+        self._warned = False
         # Delay initialization until the first message arrives
         self._coords_buffer = None
         self._coords_template = None
@@ -108,13 +117,39 @@ class HybridAxisBuffer:
                 raise ValueError(
                     f"Buffer initialized with gain={self._linear_axis.gain}, but received gain={axis.gain}."
                 )
-            if self._linear_n_available + n_samples > self.capacity:
-                # Simulate overflow by advancing the offset and decreasing
-                # the number of available samples.
-                n_to_discard = self._linear_n_available + n_samples - self.capacity
-                self.seek(n_to_discard)
-            # Update the offset corresponding to the oldest sample in the buffer
-            #  by anchoring on the new offset and accounting for the samples already available.
+
+            n_overflow = self._linear_n_available + n_samples - self.capacity
+            if n_overflow > 0 and self._overflow_strategy != "grow":
+                # Mirror HybridBuffer's per-strategy overflow handling so the
+                # axis count stays equal to the sister data buffer's count.
+                if self._overflow_strategy == "raise":
+                    raise OverflowError(
+                        f"Axis buffer overflow: {self._linear_n_available + n_samples} samples "
+                        f"exceeds capacity {self.capacity}."
+                    )
+                elif self._overflow_strategy == "drop":
+                    # Drop the newest overflowing samples; the oldest samples
+                    # (and thus the current offset) are retained.
+                    self._linear_n_available += n_samples - n_overflow
+                    return
+                else:  # "warn-overwrite": keep the most recent `capacity` samples
+                    if not self._warn_once or not self._warned:
+                        self._warned = True
+                        warnings.warn(
+                            f"Axis buffer overflow: {n_samples} samples received, overwriting "
+                            f"{n_overflow} previous samples.",
+                            RuntimeWarning,
+                        )
+                    # Anchor the offset on the oldest retained sample, which lies
+                    # `capacity - 1` samples back from the newest written sample.
+                    # Computed directly (not via seek) so it is correct even when
+                    # a single message is larger than the whole buffer.
+                    self._linear_axis.offset = axis.offset + (n_samples - self.capacity) * axis.gain
+                    self._linear_n_available = self.capacity
+                    return
+            # "grow" (or no overflow): retain every sample. Update the offset of
+            # the oldest sample by anchoring on the new message's offset and
+            # accounting for the samples already available.
             self._linear_axis.offset = axis.offset - self._linear_n_available * axis.gain
             self._linear_n_available += n_samples
 
@@ -257,7 +292,9 @@ class HybridAxisArrayBuffer:
         in_axis = first_msg.axes[self._axis]
         self._axis_buffer._initialize(in_axis)
 
-        capacity = int(self.duration / self._axis_buffer.gain)
+        # Use the axis buffer's capacity verbatim so the two sub-buffers share
+        # an identical capacity and overflow at the same sample count.
+        capacity = self._axis_buffer.capacity
         self._data_buffer = HybridBuffer(
             get_namespace(first_msg.data),
             capacity,
