@@ -269,6 +269,44 @@ def test_ewma_empty_first():
     check_state_not_corrupted(proc, normal)
 
 
+def test_ewma_passthrough_identity():
+    """passthrough=True returns the input message unchanged."""
+    ewma = EWMATransformer(settings=EWMASettings(time_constant=0.1, passthrough=True))
+
+    msg = _make_ewma_test_msg(np.arange(20, dtype=float).reshape(10, 2))
+    out = ewma(msg)
+
+    assert out is msg
+    # No state was ever initialized — the EWMA was skipped entirely.
+    assert ewma._state.zi is None
+
+
+def test_ewma_passthrough_toggle_preserves_state():
+    """Toggling passthrough does not reset state; processing resumes from prior zi."""
+    proc_toggled = EWMATransformer(settings=EWMASettings(time_constant=0.1))
+    proc_ref = EWMATransformer(settings=EWMASettings(time_constant=0.1))
+
+    msg1 = _make_ewma_test_msg(np.ones((10, 2)))
+    _ = proc_toggled(msg1)
+    _ = proc_ref(msg1)
+    zi_before = proc_toggled._state.zi.copy()
+
+    # Passthrough: input returned as-is, state untouched.
+    proc_toggled.settings = dc_replace(proc_toggled.settings, passthrough=True)
+    msg2 = _make_ewma_test_msg(np.ones((10, 2)) * 100.0)
+    out2 = proc_toggled(msg2)
+    assert out2 is msg2
+    assert np.allclose(proc_toggled._state.zi, zi_before)
+
+    # Resume: continues from the preserved state, matching the reference
+    # that never went through passthrough.
+    proc_toggled.settings = dc_replace(proc_toggled.settings, passthrough=False)
+    msg3 = _make_ewma_test_msg(np.ones((10, 2)) * 2.0)
+    out_toggled = proc_toggled(msg3)
+    out_ref = proc_ref(msg3)
+    assert np.allclose(out_toggled.data, out_ref.data)
+
+
 class TestEWMAUpdateSettings:
     """Live settings updates via BaseProcessor.update_settings."""
 
@@ -288,6 +326,21 @@ class TestEWMAUpdateSettings:
 
         # accumulate=False must now gate state updates inside _process.
         _ = proc(_make_ewma_test_msg(np.ones((10, 2)) * 100.0))
+        assert np.allclose(proc._state.zi, zi_before)
+
+    def test_passthrough_toggle_preserves_state(self):
+        proc = EWMATransformer(settings=EWMASettings(time_constant=0.1))
+
+        _ = proc(_make_ewma_test_msg(np.ones((10, 2))))
+        zi_before = proc._state.zi.copy()
+
+        # `passthrough` is in NONRESET_SETTINGS_FIELDS — no reset queued.
+        proc.update_settings(EWMASettings(time_constant=0.1, passthrough=True))
+        assert proc._hash != -1
+        assert np.allclose(proc._state.zi, zi_before)
+
+        msg = _make_ewma_test_msg(np.ones((10, 2)) * 100.0)
+        assert proc(msg) is msg
         assert np.allclose(proc._state.zi, zi_before)
 
     def test_time_constant_change_recomputes_alpha(self):

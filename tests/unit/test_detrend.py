@@ -403,3 +403,39 @@ def test_detrend_accumulate_toggle():
     _ = proc(_make_msg(np.ones((10, 2)) * 100.0))
     zi_after_resume = proc._state.zi.copy()
     assert not np.allclose(zi_after_frozen, zi_after_resume)
+
+
+# --- Passthrough flag ---
+
+
+def test_detrend_passthrough_identity():
+    """passthrough=True returns the input unchanged — no mean subtraction."""
+    proc = DetrendTransformer(settings=EWMASettings(time_constant=0.1, passthrough=True))
+
+    msg = _make_msg(np.arange(20, dtype=float).reshape(10, 2) + 50.0)
+    out = proc(msg)
+
+    assert out is msg
+    assert proc._state.zi is None
+
+
+def test_detrend_passthrough_toggle_preserves_state():
+    """Toggling passthrough does not reset the EWMA baseline state."""
+    proc = DetrendTransformer(settings=EWMASettings(time_constant=0.1, accumulate=True))
+
+    # Initialize baseline
+    _ = proc(_make_msg(np.ones((50, 2)) * 10.0))
+    zi_before = proc._state.zi.copy()
+
+    # Passthrough: identity output, state untouched even with wild input.
+    proc.settings = dc_replace(proc.settings, passthrough=True)
+    msg = _make_msg(np.ones((10, 2)) * 1000.0)
+    out = proc(msg)
+    assert out is msg
+    assert np.allclose(proc._state.zi, zi_before)
+
+    # Resume detrending: baseline picks up where it left off.
+    proc.settings = dc_replace(proc.settings, passthrough=False)
+    out2 = proc(_make_msg(np.ones((10, 2)) * 10.0))
+    # Input near the preserved baseline of ~10 → detrended output near 0.
+    assert np.all(np.abs(out2.data) < 1.0)
