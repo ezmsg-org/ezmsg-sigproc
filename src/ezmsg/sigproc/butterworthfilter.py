@@ -97,8 +97,9 @@ def butter_design_fun(
 
     """
     coefs = None
-    if order > 0:
-        btype, cutoffs = ButterworthFilterSettings(order=order, cuton=cuton, cutoff=cutoff).filter_specs()
+    specs = ButterworthFilterSettings(order=order, cuton=cuton, cutoff=cutoff).filter_specs()
+    if order > 0 and specs is not None:
+        btype, cutoffs = specs
         coefs = scipy.signal.butter(
             order,
             Wn=cutoffs,
