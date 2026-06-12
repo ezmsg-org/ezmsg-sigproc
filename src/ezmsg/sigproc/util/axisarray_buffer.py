@@ -36,6 +36,11 @@ class HybridAxisBuffer:
 
     def __init__(self, duration: float, **kwargs):
         self.duration = duration
+        # `warn_overflow` is consumed here (not a HybridBuffer kwarg). When this
+        # axis buffer is paired with a sister data buffer (HybridAxisArrayBuffer),
+        # the data buffer owns the overflow warning, so the array buffer sets
+        # this False to avoid a duplicate warning for the same event.
+        self._warn_overflow = kwargs.pop("warn_overflow", True)
         self.buffer_kwargs = kwargs
         # Overflow policy for the LinearAxis path. The CoordinateAxis path
         # delegates to its inner HybridBuffer, which applies the strategy
@@ -133,7 +138,7 @@ class HybridAxisBuffer:
                     self._linear_n_available += n_samples - n_overflow
                     return
                 else:  # "warn-overwrite": keep the most recent `capacity` samples
-                    if not self._warn_once or not self._warned:
+                    if self._warn_overflow and (not self._warn_once or not self._warned):
                         self._warned = True
                         warnings.warn(
                             f"Axis buffer overflow: {n_samples} samples received, overwriting "
@@ -253,7 +258,9 @@ class HybridAxisArrayBuffer:
         self.duration = duration
         self._axis = axis
         self.buffer_kwargs = kwargs
-        self._axis_buffer = HybridAxisBuffer(duration=duration, **kwargs)
+        # The data buffer owns the overflow warning; silence the axis buffer's
+        # duplicate warning for the same overflow event.
+        self._axis_buffer = HybridAxisBuffer(duration=duration, warn_overflow=False, **kwargs)
         # Delay initialization until the first message arrives
         self._data_buffer = None
         self._template_msg = None

@@ -191,6 +191,21 @@ class TestHybridAxisArrayBufferOverflow:
         buf.write(linear_axis_message(samples=4, fs=100.0))
         assert buf.available() == 12
 
+    def test_warn_overwrite_warns_once_not_per_sub_buffer(self, linear_axis_message):
+        """The data buffer owns the overflow warning; the axis sub-buffer must
+        not emit a duplicate for the same overflow event (regression: a single
+        warn-overwrite overflow previously produced two RuntimeWarnings)."""
+        buf = HybridAxisArrayBuffer(
+            duration=0.1,  # capacity 10
+            overflow_strategy="warn-overwrite",
+            update_strategy="immediate",
+        )
+        buf.write(linear_axis_message(samples=8, fs=100.0))
+        with pytest.warns(RuntimeWarning) as record:
+            buf.write(linear_axis_message(samples=8, fs=100.0))  # 16 > 10 -> overwrite
+        overflow_warnings = [w for w in record if "overflow" in str(w.message).lower()]
+        assert len(overflow_warnings) == 1, [str(w.message) for w in overflow_warnings]
+
     # Combos where the data buffer overflows eagerly (so the two sub-buffers
     # agree continuously): grow never drops, and immediate flushes each write.
     # on_demand + a capping strategy defers the data-buffer drop to flush time,
