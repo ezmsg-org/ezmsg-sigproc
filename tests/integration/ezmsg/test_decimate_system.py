@@ -54,4 +54,13 @@ def test_decimate_system(target_rate: float):
         antialiased, _ = scipy.signal.lfilter(b, a, inputs.data, axis=0, zi=zi)
         expected = antialiased[:: int(expected_factor)]
 
-    assert np.allclose(outputs.data, expected)
+    # The raw and decimated streams are logged by independent MessageLoggers, and
+    # the graph is torn down on the *output* count (TERM watches LOGFILT), so the
+    # raw log can end a message or two ahead of the filtered log -- leaving
+    # `expected` (built from all raw samples) longer than `outputs`. The anti-alias
+    # filter is causal and zi-initialized, so each stream is a prefix of a longer
+    # run; compare only the overlapping prefix rather than requiring equal length.
+    # (test_filter_system applies the same truncation for the same race.)
+    n = min(outputs.data.shape[0], expected.shape[0])
+    assert n > 0
+    np.testing.assert_allclose(outputs.data[:n], expected[:n])
