@@ -100,9 +100,13 @@ def test_chunk_invariance(fs: float):
     np.testing.assert_array_equal(whole, fragmented)
 
 
-@pytest.mark.parametrize("fs", [30000.0, 30012.0])
+@pytest.mark.parametrize("fs", [30000.0, 30012.0, 30030.0])
 def test_integer_mode_matches_window(fs: float):
-    """fractional=False reproduces the legacy Window+Aggregate(mean) grid+values."""
+    """fractional=False reproduces the legacy Window+Aggregate(mean) grid+values.
+
+    fs=30030 (0.02*fs = 600.6) is the case that distinguishes Window's
+    int()-truncation from round(): the integer grid must truncate to match.
+    """
     bin_dur = 0.02
     sig = np.random.default_rng(2).standard_normal((30000, 4))
 
@@ -227,8 +231,8 @@ def test_state_resets_on_fs_change():
     fs2 = 30012.0
     out = proc(_sig_msgs(np.ones((30000, 2)), fs2, 30000)[0])
 
-    assert proc._state.fs == fs2
-    assert proc._state.samples_per_bin == pytest.approx(bin_dur * fs2)
+    assert proc._state.schedule.fs == fs2
+    assert proc._state.schedule.spb == pytest.approx(bin_dur * fs2)
     # Output offset reflects the new stream start (0.0), not stale fs1 state.
     assert out.axes["time"].offset == pytest.approx(0.0)
     assert np.all(np.isfinite(out.data))
