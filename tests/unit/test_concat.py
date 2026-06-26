@@ -175,7 +175,10 @@ class TestBasicConcat:
 
         import asyncio
 
-        result = asyncio.get_event_loop().run_until_complete(proc.__acall__())
+        # asyncio.run (not get_event_loop) so this is robust to other tests in the
+        # suite that close/clear the loop policy (e.g. via asyncio.run); get_event_loop
+        # raises "no current event loop" on 3.10+ once that has happened.
+        result = asyncio.run(proc.__acall__())
         assert result.data.shape == (n, 5)
         np.testing.assert_array_equal(result.data[:, :2], data_a)
         np.testing.assert_array_equal(result.data[:, 2:], data_b)
