@@ -197,33 +197,3 @@ class BinnedAggregate(BaseTransformerUnit[BinnedAggregateSettings, AxisArray, Ax
         result = await self.processor.__acall__(message)
         if result is not None and result.data.size > 0:
             yield self.OUTPUT_SIGNAL, result
-
-
-def binned_aggregate(
-    axis: str = "time",
-    bin_duration: float = 0.02,
-    operation: AggregationFunction = AggregationFunction.MEAN,
-    fractional: bool = True,
-) -> BinnedAggregateTransformer:
-    """Bin a signal axis at a fixed bin rate and aggregate within each bin.
-
-    Args:
-        axis: The name of the axis to bin and aggregate along.
-        bin_duration: Output bin duration in seconds.
-        operation: :obj:`AggregationFunction` applied within each bin.
-        fractional: If True, fractional ``bin_duration * fs`` bins with a carry
-            accumulator (nominal ``bin_duration`` gain), matching
-            ``ezmsg.event.rate.EventRate``. If False, fixed
-            ``int(bin_duration * fs)`` sample bins (sample-locked grid).
-
-    Returns:
-        :obj:`BinnedAggregateTransformer`
-    """
-    return BinnedAggregateTransformer(
-        BinnedAggregateSettings(
-            axis=axis,
-            bin_duration=bin_duration,
-            operation=operation,
-            fractional=fractional,
-        )
-    )
