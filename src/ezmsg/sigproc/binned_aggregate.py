@@ -1,30 +1,30 @@
 """Resample a signal axis to a lower rate by aggregating fixed-duration bins.
 
 This is the dense-signal counterpart to the binning used by
-``ezmsg.event.rate.EventRate`` (spike rate from threshold-crossing events).
-Both reduce a high-rate axis to a lower-rate "bin" axis, but historically they
-disagreed at off-nominal sample rates:
+``ezmsg.event.rate.EventRate``. Both reduce a high-rate axis to a lower-rate
+"bin" axis, but historically they disagreed when ``bin_duration * fs`` is not an
+integer:
 
 * ``EventRate`` bins by a *fractional* ``samples_per_bin = bin_duration * fs``
-  with a carry accumulator, so its bins track wall-clock time and it labels the
-  output gain as the nominal ``bin_duration``.
-* ``Window`` (the usual SBP path: ``Pow -> Window -> Aggregate``) bins by a
-  *fixed* ``int(bin_duration * fs)`` sample count, so its gain is
+  with a carry accumulator, so each bin spans exactly ``bin_duration`` in the
+  input's time base and it labels the output gain as the nominal ``bin_duration``.
+* ``Window`` (``Pow -> Window -> Aggregate``) bins by a *fixed*
+  ``int(bin_duration * fs)`` sample count, so its gain is
   ``int(bin_duration * fs) / fs``.
 
-At a clean rate (e.g. 30000 Hz) those coincide, but at a real recording rate
-(e.g. ~30012 Hz) they diverge in both gain and bin count, so a downstream
-``Merge``/``AlignAlongAxis`` of the two branches never aligns.
+At a clean rate (e.g. 30000 Hz) those coincide, but at an off-nominal rate
+(e.g. 30012 Hz) they diverge in both gain and bin count, so two such streams
+never share a grid.
 
 :obj:`BinnedAggregateTransformer` applies an arbitrary :obj:`AggregationFunction`
 per bin instead of only counting, but it does *not* define its own bin
 boundaries: it drives them through the shared :obj:`ezmsg.sigproc.util.binning.BinSchedule`,
-the single source of truth for the grid. Driving the SBP branch through this with
-``operation=MEAN`` puts it on the same grid as the spike-rate branch -- because
-both go through the same schedule -- so the two merge trivially with no post-hoc
-reconciler/aligner required. Set ``fractional=False`` to instead bin by a fixed
-``int(bin_duration * fs)`` sample count (sample-locked grid, gain
-``int(bin_duration * fs) / fs``), matching :obj:`Window`.
+the single source of truth for the grid. Any consumer that goes through the same
+schedule at the same ``bin_duration`` lands on the same grid by construction, so
+two such streams align downstream (e.g. with :obj:`ezmsg.sigproc.merge.Merge`).
+Set ``fractional=False`` to instead bin by a fixed ``int(bin_duration * fs)``
+sample count (sample-locked grid, gain ``int(bin_duration * fs) / fs``), matching
+:obj:`Window`.
 
 .. note::
     The schedule reproduces ``EventRate``'s grid by *shared code*, not by a
@@ -68,9 +68,9 @@ class BinnedAggregateSettings(ez.Settings):
 
     fractional: bool = True
     """If True (default), bins span a *fractional* ``bin_duration * fs`` samples
-    with a carry accumulator across chunks; bins track wall-clock time and the
-    output gain is the nominal ``bin_duration``. This matches
-    ``ezmsg.event.rate.EventRate``. If False, bins span a *fixed*
+    with a carry accumulator across chunks; each bin spans exactly ``bin_duration``
+    in the input's time base and the output gain is the nominal ``bin_duration``.
+    This matches ``ezmsg.event.rate.EventRate``. If False, bins span a *fixed*
     ``int(bin_duration * fs)`` samples and the output gain is
     ``int(bin_duration * fs) / fs`` (sample-locked, matching :obj:`Window`)."""
 
@@ -212,7 +212,7 @@ def binned_aggregate(
         bin_duration: Output bin duration in seconds.
         operation: :obj:`AggregationFunction` applied within each bin.
         fractional: If True, fractional ``bin_duration * fs`` bins with a carry
-            accumulator (wall-clock grid, nominal gain), matching
+            accumulator (nominal ``bin_duration`` gain), matching
             ``ezmsg.event.rate.EventRate``. If False, fixed
             ``int(bin_duration * fs)`` sample bins (sample-locked grid).
 

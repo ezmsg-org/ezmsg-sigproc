@@ -10,9 +10,8 @@ This is the single piece of arithmetic that historically diverged between
 :obj:`ezmsg.sigproc.window.Window` (which bins by a *fixed* ``int(bin_duration *
 fs)`` sample count) and ``ezmsg.event.rate.EventRate`` (which bins by a
 *fractional* ``bin_duration * fs`` with a carry accumulator). At a clean rate
-the two coincide; at a real recording rate (e.g. ~30012 Hz) they diverge in both
-gain and bin count, so a downstream ``Merge``/``AlignAlongAxis`` of the two
-branches never aligns.
+the two coincide; at an off-nominal rate (e.g. 30012 Hz) they diverge in both
+gain and bin count, so two such streams never share a grid.
 
 :obj:`BinSchedule` makes the boundary rule a *single source of truth*. Any
 consumer (dense aggregation, event counting, window segmentation) that drives
