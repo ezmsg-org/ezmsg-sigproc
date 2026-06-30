@@ -166,9 +166,7 @@ def test_resample_preserves_mlx_backend():
         if result.data.shape[0] == 0:
             continue
         seen_output = True
-        assert isinstance(result.data, mx.array), (
-            f"Expected mx.array out, got {type(result.data).__name__}"
-        )
+        assert isinstance(result.data, mx.array), f"Expected mx.array out, got {type(result.data).__name__}"
         assert get_namespace(result.data) is mlx_ns
 
     assert seen_output, "Resampler never produced a non-empty output to check."
@@ -182,3 +180,84 @@ async def test_resample_no_input():
 
     null = next(resample)
     assert np.prod(null.data.shape) == 0
+
+
+def _linear_msg(fs: float, offset: float, n: int, n_ch: int, key: str, coord: bool = False) -> AxisArray:
+    t = offset + np.arange(n) / fs
+    time_ax = (
+        AxisArray.CoordinateAxis(data=t, dims=["time"], unit="s")
+        if coord
+        else AxisArray.LinearAxis(gain=1 / fs, offset=offset, unit="s")
+    )
+    return AxisArray(
+        data=t[:, None] + np.arange(n_ch)[None, :] * 1000.0,
+        dims=["time", "ch"],
+        axes={
+            "time": time_ax,
+            "ch": AxisArray.CoordinateAxis(
+                data=np.array([f"{key}{i}" for i in range(n_ch)]), dims=["ch"], unit="label"
+            ),
+        },
+        key=key,
+    )
+
+
+def test_resample_coordinate_axis_reference():
+    """push_reference must accept a CoordinateAxis reference (no .gain attribute)."""
+    fs, chunk = 100.0, 30
+    resample = ResampleProcessor(resample_rate=None, buffer_duration=4.0)
+    total = 0
+    for i in range(8):
+        resample.push_reference(_linear_msg(fs, i * chunk / fs, chunk, 1, "ref", coord=True))
+        resample(_linear_msg(fs, i * chunk / fs, chunk, 2, "sig", coord=True))
+        total += next(resample).data.shape[0]
+    assert total > 0
+
+
+def test_resample_output_reference_shares_grid():
+    """output_reference yields the reference gathered onto the exact output grid."""
+    fs_ref, fs_sig, chunk = 100.0, 99.7, 30
+    resample = ResampleProcessor(resample_rate=None, buffer_duration=4.0, output_reference=True)
+    for i in range(8):
+        resample.push_reference(_linear_msg(fs_ref, i * chunk / fs_ref, chunk, 4, "ref"))
+        resample(_linear_msg(fs_sig, i * chunk / fs_sig, chunk, 2, "sig"))
+        b = next(resample)
+        a = resample.state.reference_output
+        if b.data.shape[0] == 0:
+            continue
+        assert a is not None
+        # Same length and identical alignment axis as the resampled output.
+        assert a.data.shape[0] == b.data.shape[0]
+        assert a.data.shape[1] == 4 and b.data.shape[1] == 2
+        ta = a.axes["time"].value(np.arange(a.data.shape[0]))
+        tb = b.axes["time"].value(np.arange(b.data.shape[0]))
+        assert np.allclose(ta, tb)
+        # Reference data col 0 encodes its own timestamp -> confirms correct samples gathered.
+        assert np.max(np.abs(a.data[:, 0] - ta)) < 1e-9
+
+
+def test_resample_recovers_from_reference_reset():
+    """A sustained backward reference jump re-anchors (with warning) instead of stalling."""
+    fs, chunk = 100.0, 30
+    resample = ResampleProcessor(resample_rate=None, buffer_duration=4.0, reference_reset_after_chunks=3)
+    counts = []
+    with pytest.warns(RuntimeWarning):
+        for i in range(25):
+            off = i * chunk / fs - (100.0 if i >= 10 else 0.0)
+            resample.push_reference(_linear_msg(fs, off, chunk, 1, "ref"))
+            resample(_linear_msg(fs, i * chunk / fs, chunk, 2, "sig"))
+            counts.append(next(resample).data.shape[0])
+    assert sum(counts[14:]) > 0, "Resampler never recovered after the reference reset."
+
+
+def test_resample_reset_disabled_can_stall():
+    """With recovery disabled (inf threshold), a large backward jump stops output."""
+    fs, chunk = 100.0, 30
+    resample = ResampleProcessor(resample_rate=None, buffer_duration=4.0, reference_reset_after_chunks=float("inf"))
+    counts = []
+    for i in range(25):
+        off = i * chunk / fs - (100.0 if i >= 10 else 0.0)
+        resample.push_reference(_linear_msg(fs, off, chunk, 1, "ref"))
+        resample(_linear_msg(fs, i * chunk / fs, chunk, 2, "sig"))
+        counts.append(next(resample).data.shape[0])
+    assert sum(counts[12:]) == 0, "Expected output to stall when recovery is disabled."

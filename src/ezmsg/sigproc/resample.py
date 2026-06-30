@@ -3,6 +3,7 @@
 import asyncio
 import math
 import time
+import warnings
 
 import ezmsg.core as ez
 import numpy as np
@@ -46,6 +47,41 @@ class ResampleSettings(ez.Settings):
     might be more efficient. For most other scenarios, "immediate" is best.
     """
 
+    output_reference: bool = False
+    """
+    If True, also buffer the *data* carried by INPUT_REFERENCE messages and, for each
+    output chunk, gather the reference samples that sit on the exact same grid the signal
+    was resampled onto. The gathered reference signal is exposed via
+    :attr:`ResampleState.reference_output` (and published on ``OUTPUT_REFERENCE`` by
+    :class:`ResampleUnit`). This is what lets a downstream consumer concatenate the
+    reference stream with the resampled stream without a second time-alignment, because
+    the two share an identical axis *by construction*.
+
+    Only meaningful when ``resample_rate is None`` (reference-driven mode); in prescribed-
+    rate mode the reference grid is synthetic and carries no data.
+    """
+
+    reference_reset_after_chunks: float = 3
+    """
+    Robustness against a non-monotonic reference clock.
+
+    The resampler only emits at reference values greater than the last one it returned
+    (a high-water mark). A *sustained* backward jump in the reference clock (e.g. a
+    misbehaving source whose chunk offsets reset to an earlier time) would otherwise
+    leave every incoming reference value behind the high-water mark forever, so the
+    transformer would stop producing output.
+
+    If this many consecutive reference messages arrive entirely at or below the
+    high-water mark, the jump is treated as a clock reset: the high-water mark is
+    re-anchored to the new (lower) clock and a ``RuntimeWarning`` is emitted. Output then
+    resumes on the new clock. Small, self-correcting jitter (a few out-of-order samples)
+    does not trigger this and is simply skipped, keeping the output monotonic.
+
+    Set to ``float("inf")`` to disable reset recovery (the transformer may then stall
+    indefinitely on a backward clock jump). Output across a genuine reset is necessarily
+    discontinuous; sanitising the reference timestamps upstream remains the robust fix.
+    """
+
 
 @processor_state
 class ResampleState:
@@ -81,11 +117,34 @@ class ResampleState:
     if we have not received an update within max_chunk_delay.
     """
 
+    ref_data_buffer: HybridAxisArrayBuffer | None = None
+    """
+    Buffer for the *data* carried by reference messages, used only when
+    ``output_reference`` is set. Held in lockstep with ``ref_axis_buffer`` (same writes,
+    same seeks) so that the reference data at index ``i`` corresponds to the reference
+    axis value at index ``i``. Lets :meth:`__next__` gather the reference signal on the
+    exact output grid.
+    """
+
+    reference_output: AxisArray | None = None
+    """
+    The reference signal gathered onto the most recent output grid (only populated when
+    ``output_reference`` is set and the last :meth:`__next__` produced data). Shares its
+    axis with the resampled output, so the two can be concatenated without re-aligning.
+    """
+
+    stale_ref_pushes: int = 0
+    """
+    Number of consecutive reference messages that arrived entirely at or below the
+    high-water mark. Used to detect a sustained backward clock jump (reset). See
+    :attr:`ResampleSettings.reference_reset_after_chunks`.
+    """
+
 
 class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisArray, ResampleState]):
     # Both fields are read per-chunk inside `__next__` / `_process` only;
     # `resample_rate` / `buffer_duration` / `axis` all size cached buffers.
-    NONRESET_SETTINGS_FIELDS = frozenset({"max_chunk_delay", "fill_value"})
+    NONRESET_SETTINGS_FIELDS = frozenset({"max_chunk_delay", "fill_value", "reference_reset_after_chunks"})
 
     def _hash_message(self, message: AxisArray) -> int:
         ax_idx: int = message.get_axis_idx(self.settings.axis)
@@ -114,19 +173,73 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
             t0 = in_ax.data[0] if hasattr(in_ax, "data") else in_ax.value(0)
             self.state.last_ref_ax_val = t0 - out_gain
         self.state.last_write_time = -np.inf
+        self.state.reference_output = None
+        self.state.stale_ref_pushes = 0
+
+    @staticmethod
+    def _axis_first_step(ax) -> tuple[float, float]:
+        """Return ``(first_value, step)`` for either a LinearAxis or a CoordinateAxis.
+
+        A CoordinateAxis has no ``gain``; estimate the step from consecutive samples
+        (falling back to 0.0 for a single sample). The step is only used to seed the
+        high-water mark just below the first reference value, so an estimate is fine.
+        """
+        if hasattr(ax, "data"):
+            first = float(ax.data[0])
+            step = float(ax.data[1] - ax.data[0]) if len(ax.data) > 1 else 0.0
+        else:
+            first = ax.value(0)
+            step = ax.gain
+        return first, step
 
     def push_reference(self, message: AxisArray) -> None:
         ax = message.axes[self.settings.axis]
         ax_idx = message.get_axis_idx(self.settings.axis)
+        n = message.data.shape[ax_idx]
         if self.state.ref_axis_buffer is None:
             self.state.ref_axis_buffer = HybridAxisBuffer(
                 duration=self.settings.buffer_duration,
                 update_strategy=self.settings.buffer_update_strategy,
                 overflow_strategy="grow",
             )
-            t0 = ax.data[0] if hasattr(ax, "data") else ax.value(0)
-            self.state.last_ref_ax_val = t0 - ax.gain
-        self.state.ref_axis_buffer.write(ax, n_samples=message.data.shape[ax_idx])
+            first, step = self._axis_first_step(ax)
+            self.state.last_ref_ax_val = first - step
+            if self.settings.output_reference:
+                # Sister buffer for the reference *data*, kept in lockstep with the axis
+                # buffer above so a shared index addresses the same sample in both.
+                self.state.ref_data_buffer = HybridAxisArrayBuffer(
+                    duration=self.settings.buffer_duration,
+                    axis=self.settings.axis,
+                    update_strategy=self.settings.buffer_update_strategy,
+                    overflow_strategy="grow",
+                )
+
+        # --- Detect a sustained backward clock jump (reset) ---
+        # A whole message arriving at/below the high-water mark is abnormal; a run of them
+        # means the clock jumped back and is not catching up. Re-anchor so we don't stall
+        # forever. Self-correcting jitter (a single stale chunk) does not trigger this.
+        if self.state.last_ref_ax_val is not None and n > 0:
+            incoming_max = float(np.max(ax.data)) if hasattr(ax, "data") else ax.value(n - 1)
+            if incoming_max <= self.state.last_ref_ax_val:
+                self.state.stale_ref_pushes += 1
+            else:
+                self.state.stale_ref_pushes = 0
+            if self.state.stale_ref_pushes >= self.settings.reference_reset_after_chunks:
+                first, step = self._axis_first_step(ax)
+                warnings.warn(
+                    "ResampleProcessor: reference clock jumped backward and stayed behind "
+                    f"the last emitted value for {self.state.stale_ref_pushes} consecutive "
+                    "messages; treating it as a clock reset and re-anchoring to the new "
+                    "clock. Output across the reset is discontinuous; make the reference "
+                    "timestamps monotonic upstream to avoid this.",
+                    RuntimeWarning,
+                )
+                self.state.last_ref_ax_val = first - step
+                self.state.stale_ref_pushes = 0
+
+        self.state.ref_axis_buffer.write(ax, n_samples=n)
+        if self.state.ref_data_buffer is not None:
+            self.state.ref_data_buffer.write(message)
 
     def _process(self, message: AxisArray) -> None:
         """
@@ -150,6 +263,8 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
         self.state.last_write_time = time.monotonic()
 
     def __next__(self) -> AxisArray:
+        # Cleared each call; only repopulated on the success path below.
+        self.state.reference_output = None
         if self.state.src_buffer is None or self.state.ref_axis_buffer is None:
             # If we have not received any data, or we require reference data
             #  that we do not yet have, then return an empty template.
@@ -257,13 +372,28 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
             },
         )
 
+        # Gather the reference signal on this same output grid, if requested. We index by
+        # the very same ref_idx used to build the output, so the gathered reference shares
+        # an identical axis with `result` and the two need no further alignment.
+        if self.state.ref_data_buffer is not None:
+            ref_axarr = self.state.ref_data_buffer.peek()
+            if ref_axarr is not None and ref_axarr.data.shape[0] == ref.available():
+                self.state.reference_output = replace(
+                    ref_axarr,
+                    data=ref_axarr.data[ref_idx],
+                    axes={**ref_axarr.axes, self.settings.axis: out_ax},
+                )
+
         # Update the state. For state buffers, seek beyond samples that are no longer needed.
         # src: keep at least 1 sample before the final resampled value
         seek_ix = np.where(x >= xnew[-1])[0]
         if len(seek_ix) > 0:
             self.state.src_buffer.seek(max(0, src_start_ix + seek_ix[0] - 1))
-        # ref: remove samples that have been sent to output
+        # ref: remove samples that have been sent to output. Keep the data buffer in
+        # lockstep with the axis buffer so a shared index keeps addressing the same sample.
         self.state.ref_axis_buffer.seek(ref_idx[-1] + 1)
+        if self.state.ref_data_buffer is not None:
+            self.state.ref_data_buffer.seek(ref_idx[-1] + 1)
         self.state.last_ref_ax_val = xnew[-1]
 
         return result
@@ -277,16 +407,28 @@ class ResampleUnit(BaseConsumerUnit[ResampleSettings, AxisArray, ResampleProcess
     SETTINGS = ResampleSettings
     INPUT_REFERENCE = ez.InputStream(AxisArray)
     OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
+    OUTPUT_REFERENCE = ez.OutputStream(AxisArray)
+    """The reference signal gathered onto the same grid as ``OUTPUT_SIGNAL``.
+
+    Only published when ``output_reference`` is set. Because it shares an identical axis
+    with ``OUTPUT_SIGNAL`` by construction, a downstream :class:`~ezmsg.sigproc.concat.Concat`
+    can combine the two without a second time-alignment (see
+    :class:`~ezmsg.sigproc.resampleconcat.ResampleConcat`, which fuses both steps).
+    """
 
     @ez.subscriber(INPUT_REFERENCE)
     async def on_reference(self, message: AxisArray):
         self.processor.push_reference(message)
 
     @ez.publisher(OUTPUT_SIGNAL)
+    @ez.publisher(OUTPUT_REFERENCE)
     async def gen_resampled(self):
         while True:
             result: AxisArray = next(self.processor)
             if np.prod(result.data.shape) > 0:
                 yield self.OUTPUT_SIGNAL, result
+                ref_out = self.processor.state.reference_output
+                if ref_out is not None:
+                    yield self.OUTPUT_REFERENCE, ref_out
             else:
-                await asyncio.sleep(0.001)
+                await asyncio.sleep(0)
