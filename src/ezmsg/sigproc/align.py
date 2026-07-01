@@ -108,8 +108,26 @@ class AlignAlongAxisProcessor(
     def _hash_message(self, message: AxisArray) -> int:
         return hash(self._extract_gain(message))
 
+    def _request_reset(self) -> None:
+        # update_settings() calls this (via the base class) when a reset-relevant
+        # setting such as buffer_dur or axis changes, and it invalidates _hash to
+        # -1. That collides with the "first message" sentinel our _reset_state
+        # keys on, so flag the intent explicitly: a requested reset must
+        # full-reset (rebuild the buffers with the new settings), never take the
+        # initialization shortcut below.
+        self._force_full_reset = True
+        super()._request_reset()
+
     def _reset_state(self, message: AxisArray) -> None:
         align_axis = self.settings.axis or message.dims[0]
+        if self._hash == -1 and not getattr(self, "_force_full_reset", False):
+            self._state.align_axis = align_axis
+            if self._state.buf_a is None:
+                self._state.buf_a = HybridAxisArrayBuffer(duration=self.settings.buffer_dur, axis=align_axis)
+            if self._state.buf_b is None:
+                self._state.buf_b = HybridAxisArrayBuffer(duration=self.settings.buffer_dur, axis=align_axis)
+            return
+        self._force_full_reset = False
         self._full_reset(align_axis)
 
     def _process(self, message: AxisArray) -> _AlignPair | None:
