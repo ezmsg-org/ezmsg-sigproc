@@ -403,6 +403,8 @@ class HybridBuffer:
                 # We have wrapped around the buffer; our count of read samples
                 #  is simply the buffer capacity minus the count of unread samples.
                 self._buff_read = self._capacity - self._buff_unread
+            if self._buff_read + self._buff_unread > self._capacity:
+                self._buff_read = self._capacity - self._buff_unread
 
         self._deque.clear()
         self._deque_len = 0
