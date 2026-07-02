@@ -25,6 +25,7 @@ from ezmsg.util.messages.axisarray import AxisArray, AxisBase
 from ezmsg.util.messages.util import replace
 
 from ezmsg.sigproc.util.array import array_device, is_float_dtype, xp_asarray, xp_create
+from ezmsg.sigproc.util.channels import channel_clusters_from_field
 
 
 def _find_block_diagonal_clusters(weights: np.ndarray) -> list[tuple[np.ndarray, np.ndarray]] | None:
@@ -474,6 +475,16 @@ class CommonRereferenceSettings(ez.Settings):
     list of channel indices forming one cluster. The common reference is computed
     independently within each cluster. If None, all channels form a single cluster."""
 
+    cluster_by_field: str | None = None
+    """Derive ``channel_clusters`` automatically from a structured field of the
+    channel coordinate axis (e.g. ``"bank"`` to rereference within each electrode
+    bank). Used only when ``channel_clusters`` is None and the axis actually
+    carries that field; otherwise falls back to a single all-channel cluster.
+    Explicit ``channel_clusters`` always takes precedence.
+    Note: the any changes to the field values are not detected. The channel->field
+    map is expected to be static for the stream's life.
+    """
+
 
 @processor_state
 class CommonRereferenceState:
@@ -487,7 +498,14 @@ class CommonRereferenceTransformer(
     def _hash_message(self, message: AxisArray) -> int:
         axis = self.settings.axis or message.dims[-1]
         axis_idx = message.get_axis_idx(axis)
-        return hash((message.key, message.data.shape[axis_idx]))
+        components: tuple = (message.key, message.data.shape[axis_idx])
+        # On the cluster_by_field path, re-derive clusters only when the channel
+        # axis gains or loses the target structured field
+        if self.settings.channel_clusters is None and self.settings.cluster_by_field is not None:
+            ax = message.axes.get(axis)
+            names = getattr(getattr(getattr(ax, "data", None), "dtype", None), "names", None)
+            components += (bool(names and self.settings.cluster_by_field in names),)
+        return hash(components)
 
     def _reset_state(self, message: AxisArray) -> None:
         xp = get_namespace(message.data)
@@ -495,8 +513,11 @@ class CommonRereferenceTransformer(
         axis_idx = message.get_axis_idx(axis)
         n_chans = message.data.shape[axis_idx]
 
-        if self.settings.channel_clusters is not None:
-            self._state.clusters = [xp.asarray(group) for group in self.settings.channel_clusters]
+        clusters = self.settings.channel_clusters
+        if clusters is None and self.settings.cluster_by_field is not None:
+            clusters = channel_clusters_from_field(message, axis, self.settings.cluster_by_field)
+        if clusters is not None:
+            self._state.clusters = [xp.asarray(group) for group in clusters]
         else:
             self._state.clusters = [xp.arange(n_chans)]
 
@@ -519,7 +540,15 @@ class CommonRereferenceTransformer(
 
             if not self.settings.include_current:
                 N = cluster_data.shape[axis_idx]
-                ref_data = (N / (N - 1)) * ref_data - cluster_data / (N - 1)
+                if N > 1:
+                    ref_data = (N / (N - 1)) * ref_data - cluster_data / (N - 1)
+                else:
+                    # A single-channel cluster has no "other" channels to form a
+                    # leave-one-out reference from, so pass it through unchanged
+                    # rather than dividing by N - 1 == 0. This is reachable via
+                    # cluster_by_field when a derived group (e.g. an electrode
+                    # bank) happens to contain a lone channel.
+                    ref_data = xp.zeros_like(ref_data)
 
             # Write per-cluster result into output at the correct axis position
             idx = [slice(None)] * output.ndim
@@ -540,6 +569,7 @@ def common_rereference(
     axis: str | None = None,
     include_current: bool = True,
     channel_clusters: list[list[int]] | None = None,
+    cluster_by_field: str | None = None,
 ) -> CommonRereferenceTransformer:
     """
     Perform common average referencing (CAR) on streaming data.
@@ -550,12 +580,18 @@ def common_rereference(
         include_current: Set False to exclude each channel from participating in the calculation of its reference.
         channel_clusters: Optional channel clusters for per-cluster rereferencing. See
             :attr:`CommonRereferenceSettings.channel_clusters`.
+        cluster_by_field: Optionally derive clusters from a structured channel-axis field
+            (e.g. ``"bank"``). See :attr:`CommonRereferenceSettings.cluster_by_field`.
 
     Returns:
         :obj:`CommonRereferenceTransformer`
     """
     return CommonRereferenceTransformer(
         CommonRereferenceSettings(
-            mode=mode, axis=axis, include_current=include_current, channel_clusters=channel_clusters
+            mode=mode,
+            axis=axis,
+            include_current=include_current,
+            channel_clusters=channel_clusters,
+            cluster_by_field=cluster_by_field,
         )
     )
