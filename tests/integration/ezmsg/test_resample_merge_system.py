@@ -96,9 +96,14 @@ def _hubs(glitch_at: int, glitch_back: float) -> dict:
     }
 
 
-def _run(comps: dict, conns: tuple, output_stream, fn: Path) -> tuple[int, int, int]:
+def _run(comps: dict, conns: tuple, output_stream, fn: Path) -> tuple[int, int, int, float]:
     log = MessageLogger(MessageLoggerSettings(output=fn))
-    term = TerminateOnTimeout(TerminateOnTimeoutSettings(time=2.0))
+    # Idle-gap terminator: end the graph once no message has reached the logger
+    # for `time` seconds. `time` must comfortably exceed the worst-case scheduling
+    # stall on a loaded CI runner -- if a transient stall opens an output gap
+    # longer than `time` mid-stream, the graph is torn down early and the output
+    # is truncated. 2.0 s was too tight on Windows CI; 4.0 s gives headroom.
+    term = TerminateOnTimeout(TerminateOnTimeoutSettings(time=4.0))
     comps = {**comps, "LOG": log, "TERM": term}
     conns = (
         *conns,
@@ -110,7 +115,21 @@ def _run(comps: dict, conns: tuple, output_stream, fn: Path) -> tuple[int, int, 
     os.remove(fn)
     total = sum(m.data.shape[0] for m in msgs)
     n_ch = msgs[0].data.shape[1] if msgs else 0
-    return len(msgs), total, n_ch
+    # `last_t` is the stream-time of the final emitted sample -- i.e. how far
+    # through the signal the output reached. Unlike message count (a coalescing
+    # artifact) or total samples (which the reset discontinuity drops by a
+    # timing-dependent amount), this tracks whether output progressed past the
+    # glitch to the end, and is insensitive to mid-stream drops. It only falls if
+    # the tail is truncated, which the generous idle timeout above guards against.
+    if msgs:
+        ax = msgs[-1].axes["time"]
+        if hasattr(ax, "data") and len(ax.data):
+            last_t = float(ax.data[-1])
+        else:
+            last_t = float(ax.offset + (msgs[-1].data.shape[0] - 1) * ax.gain)
+    else:
+        last_t = float("-inf")
+    return len(msgs), total, n_ch, last_t
 
 
 def _run_resample_merge(glitch_at, glitch_back, reset_after, use_output_reference, fn):
@@ -158,15 +177,20 @@ def _run_composite(glitch_at, glitch_back, reset_after, fn):
 
 def test_resample_merge_healthy_system(test_name: str | None = None):
     """Monotonic reference clock: the graph streams to completion, 6 channels out."""
-    n_msgs, total, n_ch = _run_resample_merge(
+    _, _, n_ch, last_t = _run_resample_merge(
         glitch_at=-1,
         glitch_back=0.0,
         reset_after=3,
         use_output_reference=False,
         fn=get_test_fn(test_name),
     )
-    assert n_msgs >= 50, f"Healthy graph should produce ~60 merged messages, got {n_msgs}."
-    assert total >= 1500 and n_ch == 6
+    # Assert output reached the end of the stream (last sample time), not a
+    # message or sample count: under backpressure the same data arrives coalesced
+    # into a variable number of messages (108 locally vs 29 on a loaded Windows
+    # runner). A full run reaches ~1.799 s; 1.5 leaves margin while staying far
+    # above the seized run's ~0.449 s (see the seize test).
+    assert last_t > 1.5, f"Healthy graph should stream to completion (last sample ~1.8 s), got {last_t:.3f} s."
+    assert n_ch == 6, f"Merged output should be 4+2=6 channels, got {n_ch}."
 
 
 def test_resample_merge_seizes_when_recovery_disabled_system(test_name: str | None = None):
@@ -176,14 +200,18 @@ def test_resample_merge_seizes_when_recovery_disabled_system(test_name: str | No
     large sustained backward offset jump pushes the reference permanently below the
     resampler's high-water mark and the merged output ceases well before input is exhausted.
     """
-    n_msgs, _, _ = _run_resample_merge(
+    n_msgs, _, _, last_t = _run_resample_merge(
         glitch_at=15,
         glitch_back=100.0,
         reset_after=float("inf"),
         use_output_reference=False,
         fn=get_test_fn(test_name),
     )
-    assert n_msgs <= 20, f"Expected output to cease near the chunk-15 glitch, got {n_msgs}."
+    # Output ceases at the chunk-15 glitch, so the last emitted sample sits near
+    # 15*30/1000 = 0.45 s; a recovered/healthy run reaches >= 0.799 s. Assert on
+    # last sample time (see _run) -- it isolates "output stopped early" from the
+    # variable amount of data dropped. n_msgs > 0 is a liveness sanity.
+    assert n_msgs > 0 and last_t < 0.6, f"Expected output to cease near the chunk-15 glitch, got {last_t:.3f} s."
 
 
 def test_resample_merge_recovers_with_output_reference_system(test_name: str | None = None):
@@ -193,19 +221,25 @@ def test_resample_merge_recovers_with_output_reference_system(test_name: str | N
     feeding MERGE.INPUT_SIGNAL_A from RESAMPLE.OUTPUT_REFERENCE keeps the two halves
     sample-aligned through the drops, so the merged 6-channel output continues.
     """
-    n_msgs, total, n_ch = _run_resample_merge(
+    _, _, n_ch, last_t = _run_resample_merge(
         glitch_at=15,
         glitch_back=1.0,
         reset_after=3,
         use_output_reference=True,
         fn=get_test_fn(test_name),
     )
-    assert n_msgs > 25, f"Hardened graph should keep producing after the glitch, got {n_msgs}."
+    # Recovery re-anchors and keeps producing past the glitch to the (re-anchored)
+    # end at ~0.799 s. Assert on last sample time, not sample count: the reset
+    # drops a timing-dependent amount of data (observed 1710 samples locally but
+    # 960 on a loaded runner), while the *time reached* stays ~0.799 s regardless.
+    # 0.6 sits between the seized ~0.449 s and the recovered ~0.799 s.
+    assert last_t > 0.6, f"Hardened graph should keep producing past the glitch (~0.8 s), got {last_t:.3f} s."
     assert n_ch == 6, f"Merged output should stay 4+2=6 channels, got {n_ch}."
 
 
 def test_resampleconcat_recovers_system(test_name: str | None = None):
     """The fused ResampleConcat unit produces aligned 6-channel output and recovers from a reset."""
-    n_msgs, total, n_ch = _run_composite(glitch_at=15, glitch_back=1.0, reset_after=3, fn=get_test_fn(test_name))
-    assert n_msgs > 25, f"Composite should keep producing after the glitch, got {n_msgs}."
+    _, _, n_ch, last_t = _run_composite(glitch_at=15, glitch_back=1.0, reset_after=3, fn=get_test_fn(test_name))
+    # Last sample time, same rationale as the merge recovery test above.
+    assert last_t > 0.6, f"Composite should keep producing past the glitch (~0.8 s), got {last_t:.3f} s."
     assert n_ch == 6, f"Composite output should be 4+2=6 channels, got {n_ch}."
