@@ -480,7 +480,10 @@ class CommonRereferenceSettings(ez.Settings):
     channel coordinate axis (e.g. ``"bank"`` to rereference within each electrode
     bank). Used only when ``channel_clusters`` is None and the axis actually
     carries that field; otherwise falls back to a single all-channel cluster.
-    Explicit ``channel_clusters`` always takes precedence."""
+    Explicit ``channel_clusters`` always takes precedence.
+    Note: the any changes to the field values are not detected. The channel->field
+    map is expected to be static for the stream's life.
+    """
 
 
 @processor_state
@@ -496,18 +499,12 @@ class CommonRereferenceTransformer(
         axis = self.settings.axis or message.dims[-1]
         axis_idx = message.get_axis_idx(axis)
         components: tuple = (message.key, message.data.shape[axis_idx])
-        # When clusters are derived from a structured channel-axis field, the
-        # cached clusters go stale if that field's values change even though the
-        # key and channel count are unchanged. Fold the field's bytes into the
-        # hash so the state re-derives. Scoped to the cluster_by_field path so
-        # the common (no-field) case pays nothing; the cost is O(channels) once
-        # per message, far below the O(channels x samples) rereference compute.
+        # On the cluster_by_field path, re-derive clusters only when the channel
+        # axis gains or loses the target structured field
         if self.settings.channel_clusters is None and self.settings.cluster_by_field is not None:
             ax = message.axes.get(axis)
-            data = getattr(ax, "data", None)
-            names = getattr(getattr(data, "dtype", None), "names", None)
-            if data is not None and names and self.settings.cluster_by_field in names:
-                components += (data[self.settings.cluster_by_field].tobytes(),)
+            names = getattr(getattr(getattr(ax, "data", None), "dtype", None), "names", None)
+            components += (bool(names and self.settings.cluster_by_field in names),)
         return hash(components)
 
     def _reset_state(self, message: AxisArray) -> None:
