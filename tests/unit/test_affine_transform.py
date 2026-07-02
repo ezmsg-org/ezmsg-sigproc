@@ -175,6 +175,163 @@ def test_common_rereference_clusters():
     assert np.allclose(msg_out.data, expected)
 
 
+def _banked_ch_axis(banks: list[str]):
+    """Structured ch CoordinateAxis like ezmsg-blackrock ChannelMap emits."""
+    dt = np.dtype([("label", "U16"), ("bank", "U1"), ("elec", "i4")])
+    ch = np.zeros(len(banks), dtype=dt)
+    ch["bank"] = banks
+    ch["elec"] = list(range(1, len(banks) + 1))
+    ch["label"] = [f"ch{i}" for i in range(len(banks))]
+    return AxisArray.CoordinateAxis(data=ch, dims=["ch"])
+
+
+def test_common_rereference_cluster_by_field():
+    """cluster_by_field='bank' derives per-bank clusters from a structured ch axis."""
+    n_times = 300
+    banks = ["A", "A", "A", "A", "B", "B", "B", "B"]
+    rng = np.random.default_rng(42)
+    in_dat = rng.standard_normal((n_times, len(banks)))
+    ch_ax = _banked_ch_axis(banks)
+    msg_in = AxisArray(in_dat, dims=["time", "ch"], axes={"ch": ch_ax})
+
+    xformer = CommonRereferenceTransformer(CommonRereferenceSettings(mode="mean", axis="ch", cluster_by_field="bank"))
+    msg_out = xformer(msg_in)
+
+    # Expected: per-bank CAR (bank A = ch 0-3, bank B = ch 4-7)
+    expected = np.zeros_like(in_dat)
+    for cluster in ([0, 1, 2, 3], [4, 5, 6, 7]):
+        cd = in_dat[:, cluster]
+        expected[:, cluster] = cd - np.mean(cd, axis=1, keepdims=True)
+    assert np.allclose(msg_out.data, expected)
+
+
+def test_common_rereference_cluster_by_field_fallback():
+    """cluster_by_field with no structured 'bank' field falls back to global CAR."""
+    n_times = 50
+    n_chans = 8
+    rng = np.random.default_rng(0)
+    in_dat = rng.standard_normal((n_times, n_chans))
+    # Unstructured (label-only) ch axis -> no 'bank' field available.
+    ch_ax = AxisArray.CoordinateAxis(data=np.array([str(i) for i in range(n_chans)]), dims=["ch"])
+    msg_in = AxisArray(in_dat, dims=["time", "ch"], axes={"ch": ch_ax})
+
+    xformer = CommonRereferenceTransformer(CommonRereferenceSettings(mode="mean", axis="ch", cluster_by_field="bank"))
+    msg_out = xformer(msg_in)
+    assert np.allclose(msg_out.data, in_dat - in_dat.mean(axis=1, keepdims=True))
+
+
+def test_common_rereference_cluster_by_field_interleaved():
+    """Per-bank CAR works when channels of a bank are non-contiguous."""
+    n_times = 200
+    banks = ["A", "B", "A", "B", "A", "B"]  # interleaved -> non-contiguous clusters
+    rng = np.random.default_rng(7)
+    in_dat = rng.standard_normal((n_times, len(banks)))
+    msg_in = AxisArray(in_dat, dims=["time", "ch"], axes={"ch": _banked_ch_axis(banks)})
+
+    xformer = CommonRereferenceTransformer(CommonRereferenceSettings(mode="mean", axis="ch", cluster_by_field="bank"))
+    msg_out = xformer(msg_in)
+
+    expected = np.zeros_like(in_dat)
+    for cluster in ([0, 2, 4], [1, 3, 5]):
+        cd = in_dat[:, cluster]
+        expected[:, cluster] = cd - np.mean(cd, axis=1, keepdims=True)
+    assert np.allclose(msg_out.data, expected)
+
+
+def test_common_rereference_cluster_by_field_exclude_current():
+    """cluster_by_field composes with include_current=False (per-bank, leave-one-out)."""
+    n_times = 100
+    banks = ["A", "A", "A", "B", "B", "B"]
+    rng = np.random.default_rng(3)
+    in_dat = rng.standard_normal((n_times, len(banks)))
+    msg_in = AxisArray(in_dat, dims=["time", "ch"], axes={"ch": _banked_ch_axis(banks)})
+
+    xformer = CommonRereferenceTransformer(
+        CommonRereferenceSettings(mode="mean", axis="ch", cluster_by_field="bank", include_current=False)
+    )
+    msg_out = xformer(msg_in)
+
+    expected = np.zeros_like(in_dat)
+    for cluster in ([0, 1, 2], [3, 4, 5]):
+        cd = in_dat[:, cluster]
+        n = cd.shape[1]
+        # leave-one-out mean within the bank: (sum - self) / (n - 1)
+        loo_ref = (cd.sum(axis=1, keepdims=True) - cd) / (n - 1)
+        expected[:, cluster] = cd - loo_ref
+    assert np.allclose(msg_out.data, expected)
+
+
+def test_common_rereference_singleton_cluster_exclude_current():
+    """A lone channel in a derived bank + include_current=False must not divide by
+    N-1 == 0. The singleton passes through unchanged; larger banks still do LOO."""
+    n_times = 100
+    banks = ["A", "B", "B", "B"]  # bank A is a single channel
+    rng = np.random.default_rng(5)
+    in_dat = rng.standard_normal((n_times, len(banks)))
+    msg_in = AxisArray(in_dat, dims=["time", "ch"], axes={"ch": _banked_ch_axis(banks)})
+
+    xformer = CommonRereferenceTransformer(
+        CommonRereferenceSettings(mode="mean", axis="ch", cluster_by_field="bank", include_current=False)
+    )
+    msg_out = xformer(msg_in)  # must not raise ZeroDivisionError
+
+    expected = np.zeros_like(in_dat)
+    # Lone channel: no other channels to reference -> unchanged.
+    expected[:, 0] = in_dat[:, 0]
+    # Bank B: leave-one-out mean within the bank.
+    cd = in_dat[:, [1, 2, 3]]
+    loo_ref = (cd.sum(axis=1, keepdims=True) - cd) / (cd.shape[1] - 1)
+    expected[:, [1, 2, 3]] = cd - loo_ref
+    assert np.allclose(msg_out.data, expected)
+
+
+def test_common_rereference_field_values_change_is_not_detected():
+    """Intentional concession: a live bank remap at fixed key + channel count is
+    NOT re-derived. _hash_message folds only an O(1) "field present" boolean, not
+    the field's bytes, to keep the per-message hash from scaling with channel
+    count. A genuine remap on real hardware arrives with a new key or channel
+    count (see the escape-hatch assertion below)."""
+    n_times = 80
+    rng = np.random.default_rng(11)
+    in_dat = rng.standard_normal((n_times, 4))
+
+    xformer = CommonRereferenceTransformer(CommonRereferenceSettings(mode="mean", axis="ch", cluster_by_field="bank"))
+
+    # First layout: two banks of two.
+    msg1 = AxisArray(in_dat, dims=["time", "ch"], axes={"ch": _banked_ch_axis(["A", "A", "B", "B"])}, key="dev")
+    xformer(msg1)
+    assert [list(c) for c in xformer._state.clusters] == [[0, 1], [2, 3]]
+
+    # Same key and channel count, different bank assignment -> hash unchanged,
+    # so the cached clusters are (deliberately) NOT re-derived.
+    msg2 = AxisArray(in_dat, dims=["time", "ch"], axes={"ch": _banked_ch_axis(["A", "B", "A", "B"])}, key="dev")
+    xformer(msg2)
+    assert [list(c) for c in xformer._state.clusters] == [[0, 1], [2, 3]]
+
+    # Escape hatch: a new key (as a real remap would carry) forces re-derivation.
+    msg3 = AxisArray(in_dat, dims=["time", "ch"], axes={"ch": _banked_ch_axis(["A", "B", "A", "B"])}, key="dev2")
+    xformer(msg3)
+    assert [list(c) for c in xformer._state.clusters] == [[0, 2], [1, 3]]
+
+
+def test_common_rereference_explicit_clusters_beat_field():
+    """Explicit channel_clusters take precedence over cluster_by_field."""
+    n_times = 50
+    banks = ["A", "A", "A", "A", "B", "B", "B", "B"]
+    rng = np.random.default_rng(1)
+    in_dat = rng.standard_normal((n_times, len(banks)))
+    msg_in = AxisArray(in_dat, dims=["time", "ch"], axes={"ch": _banked_ch_axis(banks)})
+
+    # One explicit all-channel cluster should override the bank grouping -> global CAR.
+    xformer = CommonRereferenceTransformer(
+        CommonRereferenceSettings(
+            mode="mean", axis="ch", channel_clusters=[list(range(len(banks)))], cluster_by_field="bank"
+        )
+    )
+    msg_out = xformer(msg_in)
+    assert np.allclose(msg_out.data, in_dat - in_dat.mean(axis=1, keepdims=True))
+
+
 def test_car_passthrough():
     n_times = 300
     n_chans = 64
