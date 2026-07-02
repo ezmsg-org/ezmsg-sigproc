@@ -97,6 +97,57 @@ class TestStaggeredArrival:
         np.testing.assert_allclose(aa_a.data, 1.0)
         np.testing.assert_allclose(aa_b.data, 99.0)
 
+    def test_b_arrives_first(self):
+        # B commonly arrives before the first A (e.g. the offline feature merge
+        # pushes sbp before rate). The first A message triggers the base class's
+        # _reset_state; it must NOT discard the B data push_b already buffered,
+        # otherwise the streams desync.
+        settings = AlignAlongAxisSettings(axis="time")
+        proc = AlignAlongAxisProcessor(settings)
+        fs = 100.0
+        chunk = 10
+
+        msg_b = _make_msg(np.ones((chunk, 3)) * 99, fs=fs, offset=0.0)
+        assert proc.push_b(msg_b) is None  # A not present yet; B buffered.
+
+        msg_a = _make_msg(np.ones((chunk, 2)) * 1, fs=fs, offset=0.0)
+        pair = proc(msg_a)  # First A: init reset must preserve buffered B.
+        assert pair is not None
+        aa_a, aa_b = pair
+        assert aa_a.data.shape == (chunk, 2)
+        assert aa_b.data.shape == (chunk, 3)
+        np.testing.assert_allclose(aa_a.data, 1.0)
+        np.testing.assert_allclose(aa_b.data, 99.0)
+
+
+class TestSettingsUpdate:
+    """update_settings() requests a reset via _hash == -1, the same sentinel
+    the first-message init path keys on. A requested reset must still rebuild
+    the buffers with the new settings rather than take the init shortcut."""
+
+    def test_update_settings_rebuilds_buffers(self):
+        settings = AlignAlongAxisSettings(axis="time", buffer_dur=10.0)
+        proc = AlignAlongAxisProcessor(settings)
+        fs = 100.0
+        chunk = 10
+
+        # Establish a running, aligned stream.
+        proc(_make_msg(np.ones((chunk, 2)), fs=fs, offset=0.0))
+        proc.push_b(_make_msg(np.ones((chunk, 3)), fs=fs, offset=0.0))
+        assert proc.state.buf_a.duration == 10.0
+
+        # Change a reset-relevant setting mid-stream. This invalidates _hash to
+        # -1 via _request_reset().
+        proc.update_settings(AlignAlongAxisSettings(axis="time", buffer_dur=30.0))
+        assert proc._hash == -1
+
+        old_buf_a = proc.state.buf_a
+        proc(_make_msg(np.ones((chunk, 2)) * 5, fs=fs, offset=chunk / fs))
+        # The requested reset must have rebuilt the buffers with the new duration,
+        # not preserved the old ones as the first-init path would.
+        assert proc.state.buf_a is not old_buf_a
+        assert proc.state.buf_a.duration == 30.0
+
 
 class TestFloatingPointOffset:
     def test_tiny_epsilon(self):
