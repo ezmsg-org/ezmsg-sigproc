@@ -261,6 +261,30 @@ def test_common_rereference_cluster_by_field_exclude_current():
     assert np.allclose(msg_out.data, expected)
 
 
+def test_common_rereference_singleton_cluster_exclude_current():
+    """A lone channel in a derived bank + include_current=False must not divide by
+    N-1 == 0. The singleton passes through unchanged; larger banks still do LOO."""
+    n_times = 100
+    banks = ["A", "B", "B", "B"]  # bank A is a single channel
+    rng = np.random.default_rng(5)
+    in_dat = rng.standard_normal((n_times, len(banks)))
+    msg_in = AxisArray(in_dat, dims=["time", "ch"], axes={"ch": _banked_ch_axis(banks)})
+
+    xformer = CommonRereferenceTransformer(
+        CommonRereferenceSettings(mode="mean", axis="ch", cluster_by_field="bank", include_current=False)
+    )
+    msg_out = xformer(msg_in)  # must not raise ZeroDivisionError
+
+    expected = np.zeros_like(in_dat)
+    # Lone channel: no other channels to reference -> unchanged.
+    expected[:, 0] = in_dat[:, 0]
+    # Bank B: leave-one-out mean within the bank.
+    cd = in_dat[:, [1, 2, 3]]
+    loo_ref = (cd.sum(axis=1, keepdims=True) - cd) / (cd.shape[1] - 1)
+    expected[:, [1, 2, 3]] = cd - loo_ref
+    assert np.allclose(msg_out.data, expected)
+
+
 def test_common_rereference_field_values_change_is_not_detected():
     """Intentional concession: a live bank remap at fixed key + channel count is
     NOT re-derived. _hash_message folds only an O(1) "field present" boolean, not

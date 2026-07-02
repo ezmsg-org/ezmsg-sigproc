@@ -540,7 +540,15 @@ class CommonRereferenceTransformer(
 
             if not self.settings.include_current:
                 N = cluster_data.shape[axis_idx]
-                ref_data = (N / (N - 1)) * ref_data - cluster_data / (N - 1)
+                if N > 1:
+                    ref_data = (N / (N - 1)) * ref_data - cluster_data / (N - 1)
+                else:
+                    # A single-channel cluster has no "other" channels to form a
+                    # leave-one-out reference from, so pass it through unchanged
+                    # rather than dividing by N - 1 == 0. This is reachable via
+                    # cluster_by_field when a derived group (e.g. an electrode
+                    # bank) happens to contain a lone channel.
+                    ref_data = xp.zeros_like(ref_data)
 
             # Write per-cluster result into output at the correct axis position
             idx = [slice(None)] * output.ndim
