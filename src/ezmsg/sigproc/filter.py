@@ -288,6 +288,15 @@ class FilterBaseSettings(ez.Settings):
     through scipy. Set to False to fall back to the scipy path (bit-exact
     with numpy at the cost of CPU round-trips and ~5-8x slowdown)."""
 
+    edge_scale_zi: bool = False
+    """If True, scale the steady-state initial filter conditions by the first
+    input sample (the scipy ``lfilter_zi * x[0]`` / filtfilt idiom) so a
+    constant/DC offset in the input is treated as the pre-stream steady state
+    rather than a step at t=0. Without it, a large DC offset (e.g. raw
+    broadband) rings through the filter as a start-up transient. Applies only
+    to IIR/SOS steady-state ``zi``; FIR history-state ``zi`` is unaffected.
+    Default False preserves the historical zero-initialized start-up."""
+
 
 class FilterSettings(FilterBaseSettings):
     coefs: FilterCoefficients | None = None
@@ -331,6 +340,7 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
         n_tail = message.data.ndim - axis_idx - 1
         _, coefs = _normalize_coefs(self.settings.coefs)
 
+        is_fir = False
         if self.settings.coef_type == "ba":
             b, a = coefs
             is_fir = len(a) == 1 or np.allclose(a[1:], 0)
@@ -373,6 +383,24 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
             n_tile = (1,) + n_tile
 
         zi_tiled = np.tile(zi[zi_expand], n_tile)
+
+        # Optionally edge-scale the steady-state initial conditions by the first
+        # sample so a constant/DC offset is treated as the pre-stream steady
+        # state (scipy ``lfilter_zi * x[0]`` / filtfilt idiom) instead of a step
+        # at t=0 that rings through the filter. Skipped for FIR (history-state
+        # zi, not steady-state). ``first_sample`` is taken in NumPy; the xp
+        # conversion below moves ``zi_tiled`` onto the input's namespace.
+        if (
+            self.settings.edge_scale_zi
+            and message.data.shape[axis_idx] > 0
+            and not (self.settings.coef_type == "ba" and is_fir)
+        ):
+            first_idx = tuple(
+                slice(0, 1) if i == axis_idx else slice(None) for i in range(message.data.ndim)
+            )
+            first_sample = np.asarray(message.data[first_idx])
+            zi_tiled = zi_tiled * first_sample
+
         self.state.fir_method = None
         self.state.fir_b = None
         self.state.fir_b_1d = None
@@ -615,6 +643,7 @@ class FilterByDesignTransformer(
             coef_type=self.settings.coef_type,
             coefs=coefs,
             use_mlx_metal=self.settings.use_mlx_metal,
+            edge_scale_zi=getattr(self.settings, "edge_scale_zi", False),
         )
         self.state.filter = FilterTransformer(settings=new_settings)
         self.state.needs_redesign = False

@@ -63,6 +63,13 @@ class ButterworthZeroPhaseSettings(ButterworthFilterSettings):
     decays to this fraction of its peak. Default is 0.01 (1% of peak).
     """
 
+    edge_scale_zi: bool = True
+    """Zero-phase filtering edge-scales the forward pass's initial conditions
+    by the first sample by default (the backward pass already does). Without
+    this, a constant/DC offset in the input rings through the forward filter as
+    a large start-up transient (its magnitude scales with the offset). Set to
+    False to restore the historical zero-initialized forward start-up."""
+
     max_pad_duration: float | None = None
     """
     Maximum pad duration in seconds. If set, the pad_length will be capped

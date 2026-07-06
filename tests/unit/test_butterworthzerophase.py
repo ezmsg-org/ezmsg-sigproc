@@ -796,3 +796,76 @@ def test_butterworthzerophase_benchmark(backend, n_channels, benchmark):
         return outputs
 
     benchmark(process_all_chunks)
+
+
+# ---------------------------------------------------------------------------
+# edge_scale_zi: DC-offset start-up transient suppression
+# ---------------------------------------------------------------------------
+
+
+def _run_zerophase_streaming(x, fs, edge_scale_zi, *, order=4, coef_type="sos", cuton=250.0, cutoff=5000.0, chunk=600):
+    """Feed ``x`` (time, ch) through ButterworthZeroPhase in fixed chunks and
+    return the concatenated output."""
+    xformer = ButterworthZeroPhaseTransformer(
+        ButterworthZeroPhaseSettings(
+            axis="time",
+            coef_type=coef_type,
+            order=order,
+            cuton=cuton,
+            cutoff=cutoff,
+            wn_hz=True,
+            edge_scale_zi=edge_scale_zi,
+        )
+    )
+    outputs = []
+    for i in range(0, x.shape[0], chunk):
+        msg = _make_message(x[i : i + chunk], ["time", "ch"], fs)
+        result = xformer(msg)
+        if result.data.size > 0:
+            outputs.append(result.data)
+    return np.concatenate(outputs, axis=0)
+
+
+def test_edge_scale_zi_default_true_for_zerophase():
+    """Zero-phase filtering edge-scales the forward pass by default; the plain
+    causal filter keeps the historical zero-initialized start-up."""
+    assert ButterworthZeroPhaseSettings().edge_scale_zi is True
+
+    from ezmsg.sigproc.filter import FilterSettings
+
+    assert FilterSettings().edge_scale_zi is False
+
+
+@pytest.mark.parametrize("coef_type", ["ba", "sos"])
+def test_edge_scale_zi_suppresses_dc_startup_transient(coef_type):
+    """A large DC offset must not ring through the forward filter as a start-up
+    transient when edge_scale_zi is on (the default); with it off, it does."""
+    fs = 30000.0
+    rng = np.random.default_rng(0)
+    noise = rng.normal(0.0, 50.0, size=(int(fs), 4))  # 1 s, zero-mean
+    signal = noise + 5000.0  # large DC offset, like raw broadband
+
+    y_on = _run_zerophase_streaming(signal, fs, edge_scale_zi=True, coef_type=coef_type)
+    steady = float(y_on[2000:].std())
+    first_on = float(y_on[:50].std())
+    assert np.isfinite(y_on).all()
+    # With edge-scaling the opening samples look like steady state.
+    assert first_on < 2.0 * steady, f"transient not suppressed (on): first={first_on:.1f} steady={steady:.1f}"
+
+    y_off = _run_zerophase_streaming(signal, fs, edge_scale_zi=False, coef_type=coef_type)
+    first_off = float(y_off[:50].std())
+    # Without it, the DC offset produces a large opening transient.
+    assert first_off > 5.0 * steady, f"expected transient (off): first={first_off:.1f} steady={steady:.1f}"
+
+
+def test_edge_scale_zi_makes_output_dc_invariant():
+    """Band-pass output rejects DC; with edge-scaling the output is (near)
+    invariant to a DC offset because there is no start-up transient either."""
+    fs = 30000.0
+    rng = np.random.default_rng(1)
+    noise = rng.normal(0.0, 50.0, size=(int(fs), 4))
+
+    y_zero = _run_zerophase_streaming(noise, fs, edge_scale_zi=True)
+    y_dc = _run_zerophase_streaming(noise + 5000.0, fs, edge_scale_zi=True)
+    # Adding a DC offset should not change the band-passed output.
+    assert np.max(np.abs(y_zero - y_dc)) < 0.05 * float(y_zero.std())
