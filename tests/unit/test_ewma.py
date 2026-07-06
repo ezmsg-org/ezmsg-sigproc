@@ -359,3 +359,69 @@ class TestEWMAUpdateSettings:
         alpha_after = proc._state.alpha
         assert alpha_after != alpha_before
         assert np.isclose(alpha_after, _alpha_from_tau(0.5, 1 / 1000.0))
+
+
+def test_ewma_init_seed():
+    """``init`` seeds the running estimate instead of the first sample, so the
+    first output is ``alpha*x0 + (1-alpha)*init`` rather than ``x0``."""
+    fs = 100.0
+    tau = 1.0
+    alpha = _alpha_from_tau(tau, 1 / fs)
+    data = np.full((50, 3), 7.0)  # constant 7
+    msg = AxisArray(
+        data=data,
+        dims=["time", "ch"],
+        axes={"time": AxisArray.TimeAxis(fs=fs), "ch": AxisArray.CoordinateAxis(data=np.arange(3).astype(str), dims=["ch"])},
+    )
+
+    # Default: seeded from the first sample -> first output equals it.
+    default_out = EWMATransformer(time_constant=tau, axis="time", accumulate=True)(msg)
+    assert np.allclose(default_out.data[0], 7.0)
+
+    # init seed: first output = alpha*x0 + (1-alpha)*init.
+    seeded_out = EWMATransformer(time_constant=tau, axis="time", accumulate=True, init=0.0)(msg)
+    assert np.allclose(seeded_out.data[0], alpha * 7.0 + (1 - alpha) * 0.0)
+    # And it converges toward the constant as it accumulates.
+    assert seeded_out.data[-1].mean() > seeded_out.data[0].mean()
+
+
+def test_ewma_init_seed_per_channel():
+    """A per-channel array ``init`` broadcasts to the (non-axis) sample shape,
+    seeding each channel's estimate independently."""
+    fs = 100.0
+    tau = 1.0
+    alpha = _alpha_from_tau(tau, 1 / fs)
+    data = np.full((20, 3), 7.0)  # constant 7 in every channel
+    msg = AxisArray(
+        data=data,
+        dims=["time", "ch"],
+        axes={"time": AxisArray.TimeAxis(fs=fs)},
+    )
+
+    init = np.array([0.0, 10.0, 20.0])  # distinct seed per channel
+    out = EWMATransformer(time_constant=tau, axis="time", accumulate=True, init=init)(msg)
+
+    # First output is alpha*x0 + (1-alpha)*init, evaluated per channel.
+    np.testing.assert_allclose(out.data[0], alpha * 7.0 + (1 - alpha) * init)
+
+
+def test_ewma_init_seed_accumulate_false():
+    """With accumulate=False the seed is applied but never advanced, so every
+    message is filtered from the same init state (state is not carried)."""
+    fs = 100.0
+    tau = 1.0
+    alpha = _alpha_from_tau(tau, 1 / fs)
+    data = np.full((10, 2), 7.0)
+
+    def mk() -> AxisArray:
+        return AxisArray(data=data.copy(), dims=["time", "ch"], axes={"time": AxisArray.TimeAxis(fs=fs)})
+
+    proc = EWMATransformer(time_constant=tau, axis="time", accumulate=False, init=0.0)
+    out1 = proc(mk())
+    out2 = proc(mk())
+
+    # First output uses the seed...
+    assert np.allclose(out1.data[0], alpha * 7.0)
+    # ...and because the state is not advanced, a second identical message is
+    # filtered from the same seed and produces identical output.
+    assert np.allclose(out1.data, out2.data)

@@ -175,6 +175,14 @@ class EWMASettings(ez.Settings):
     baseline estimate -- passthrough leaves the data untouched. May be toggled
     at runtime without resetting the filter state."""
 
+    init: npt.NDArray | float | None = None
+    """Optional value used to seed the running estimate on the first message,
+    broadcast to the per-sample (non-``axis``) shape. When ``None`` (default)
+    the estimate is seeded from the first sample (matches river's
+    AdaptiveStandardScaler). Provide a known baseline (e.g. a training-session
+    mean) so a transient/outlier first sample does not anchor the estimate for
+    ~3*``time_constant``."""
+
 
 @processor_state
 class EWMAState:
@@ -206,8 +214,17 @@ class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray
 
     def _reset_state(self, message: AxisArray) -> None:
         axis = self.settings.axis or message.dims[0]
+        axis_idx = message.get_axis_idx(axis)
         self._state.alpha = _alpha_from_tau(self.settings.time_constant, message.axes[axis].gain)
-        sub_dat = slice_along_axis(message.data, slice(None, 1, None), axis=message.get_axis_idx(axis))
+        # Seed the running estimate. Default: the first sample (river-matched).
+        # If ``init`` is given, seed from it instead so a transient/outlier
+        # first sample cannot anchor the estimate -- broadcast to the first
+        # sample's (per-``axis``-size-1) shape.
+        sub_dat = slice_along_axis(message.data, slice(None, 1, None), axis=axis_idx)
+        if self.settings.init is not None:
+            xp = np if is_numpy_array(message.data) else get_namespace(message.data)
+            init_arr = xp.asarray(self.settings.init, dtype=message.data.dtype)
+            sub_dat = xp.broadcast_to(init_arr, sub_dat.shape)
         self._state.zi = (1 - self._state.alpha) * sub_dat
 
     def _process(self, message: AxisArray) -> AxisArray:

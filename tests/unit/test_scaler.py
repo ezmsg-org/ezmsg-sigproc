@@ -458,3 +458,122 @@ def test_adaptive_scaler_river_empty_first():
     result = proc(empty)
     check_empty_result(result)
     check_state_not_corrupted(proc, normal)
+
+
+# ---------------------------------------------------------------------------
+# init_mean / init_std: seed the scaler to avoid a transient first sample
+# anchoring the running statistics (the "bad seed" cold-start problem).
+# ---------------------------------------------------------------------------
+
+
+def _scaler_first_sample_transient(fs=100.0, n=1000, transient=100.0, seed=0):
+    """A 1-channel signal that opens with a big transient sample then settles to
+    zero-mean unit-variance noise -- the classic filter-edge cold-start case."""
+    rng = np.random.default_rng(seed)
+    x = rng.standard_normal((n, 1))
+    x[0, 0] = transient
+    msg = AxisArray(
+        x,
+        dims=["time", "ch"],
+        axes=frozendict(
+            {"time": AxisArray.TimeAxis(fs=fs), "ch": AxisArray.CoordinateAxis(data=np.array(["0"]), dims=["ch"])}
+        ),
+    )
+    return x, msg
+
+
+def test_scaler_default_seed_unchanged(fixture_arrays):
+    """init_mean/init_std default to None and reproduce the river-matched
+    first-sample seed (existing behavior)."""
+    assert AdaptiveStandardScalerSettings().init_mean is None
+    assert AdaptiveStandardScalerSettings().init_std is None
+    data, expected_result = fixture_arrays
+    test_input = AxisArray(
+        data[:, None], dims=["time", "ch"], axes=frozendict({"time": AxisArray.TimeAxis(fs=100.0)})
+    )
+    tau = 0.010913566679372915
+    out = AdaptiveStandardScalerTransformer(time_constant=tau, axis="time")(test_input)
+    assert np.allclose(out.data[:, 0], expected_result, atol=1e-3)
+
+
+def test_scaler_init_seed_first_output_is_zscore():
+    """With init_mean/init_std the first output is a proper z-score from the
+    seed (~ (x0 - mean)/std), not 0 (the unseeded var==0 first-sample case)."""
+    _, msg = _scaler_first_sample_transient(transient=5.0)
+    x0 = float(msg.data[0, 0])
+
+    # Unseeded: on the first sample var == 0, so the output is 0.
+    unseeded = AdaptiveStandardScalerTransformer(time_constant=1.0, axis="time")(msg)
+    assert np.isclose(unseeded.data[0, 0], 0.0)
+
+    # Seeded with a large tau (alpha ~ 0) so the first-sample update is
+    # negligible: first output ~= (x0 - init_mean) / init_std = x0.
+    seeded = AdaptiveStandardScalerTransformer(
+        time_constant=100.0, axis="time", init_mean=0.0, init_std=1.0
+    )(msg)
+    assert np.isclose(seeded.data[0, 0], x0, atol=0.1)
+
+
+def test_scaler_init_seed_avoids_cold_start_collapse():
+    """Without a seed, a transient first sample anchors the running mean and
+    the following samples collapse negative for ~3*tau. Seeding with the true
+    baseline (0, 1) keeps the z-score well-behaved from the start."""
+    _, msg = _scaler_first_sample_transient(fs=100.0, transient=100.0)
+
+    unseeded = AdaptiveStandardScalerTransformer(time_constant=1.0, axis="time")(msg)
+    seeded = AdaptiveStandardScalerTransformer(
+        time_constant=1.0, axis="time", init_mean=0.0, init_std=1.0
+    )(msg)
+
+    # Post-transient window (still inside the ~3*tau = 3 s = 300-sample warmup).
+    win = slice(10, 100)
+    unseeded_mean = float(unseeded.data[win, 0].mean())
+    seeded_mean = float(seeded.data[win, 0].mean())
+    assert unseeded_mean < -0.8  # collapsed (running mean anchored high by transient)
+    assert abs(seeded_mean) < 0.5  # de-biased: centered near 0, not collapsed
+    assert seeded_mean - unseeded_mean > 0.8  # seeding clearly de-biases the warmup
+    # NB: seeding fixes the mean-anchor collapse; the transient sample still
+    # enters the variance EWMA (compressing the z-score) until it decays -- that
+    # residual is removed upstream by not producing the transient (edge_scale_zi).
+
+
+def test_scaler_init_seed_per_channel():
+    """Per-channel array init_mean/init_std seed each channel independently, so
+    the first output is a per-channel z-score against that channel's baseline."""
+    fs = 100.0
+    rng = np.random.default_rng(3)
+    means = np.array([10.0, -5.0, 0.0])
+    stds = np.array([2.0, 0.5, 1.0])
+    x = rng.standard_normal((500, 3)) * stds + means
+    msg = AxisArray(x, dims=["time", "ch"], axes=frozendict({"time": AxisArray.TimeAxis(fs=fs)}))
+
+    # Large tau (alpha ~ 0) so the first-sample update is negligible and the
+    # first output reflects the seed: (x0 - init_mean) / init_std per channel.
+    seeded = AdaptiveStandardScalerTransformer(
+        time_constant=100.0, axis="time", init_mean=means, init_std=stds
+    )(msg)
+
+    expected0 = (x[0] - means) / stds
+    np.testing.assert_allclose(seeded.data[0], expected0, atol=1e-2)
+
+
+def test_scaler_init_seed_accumulate_false():
+    """With accumulate=False the seeded stats are applied but not advanced, so
+    two identical messages produce identical z-scores from the seed (rather
+    than the unseeded var==0 first output of 0)."""
+    fs = 100.0
+    x = np.full((10, 1), 7.0)
+
+    def mk() -> AxisArray:
+        return AxisArray(x.copy(), dims=["time", "ch"], axes=frozendict({"time": AxisArray.TimeAxis(fs=fs)}))
+
+    proc = AdaptiveStandardScalerTransformer(
+        time_constant=100.0, axis="time", accumulate=False, init_mean=0.0, init_std=1.0
+    )
+    out1 = proc(mk())
+    out2 = proc(mk())
+
+    # First output reflects the seed ((x0 - 0)/1 ~= 7), not the unseeded 0...
+    assert out1.data[0, 0] > 5.0
+    # ...and the state is frozen, so a second identical message is identical.
+    assert np.allclose(out1.data, out2.data)

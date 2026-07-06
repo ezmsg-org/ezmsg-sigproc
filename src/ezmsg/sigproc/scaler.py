@@ -4,6 +4,7 @@ import typing
 
 import ezmsg.core as ez
 import numpy as np
+import numpy.typing as npt
 from array_api_compat import get_namespace
 from ezmsg.baseproc import (
     BaseStatefulTransformer,
@@ -85,7 +86,20 @@ class RiverAdaptiveStandardScalerTransformer(
         return replace(message, data=result)
 
 
-class AdaptiveStandardScalerSettings(EWMASettings): ...
+class AdaptiveStandardScalerSettings(EWMASettings):
+    init_mean: npt.NDArray | float | None = None
+    """Optional value used to seed the running mean on the first message,
+    broadcast to the per-sample (non-``axis``) shape. When ``None`` (default)
+    the mean is seeded from the first sample (matches river). Provide a known
+    baseline (e.g. a training-session mean) together with ``init_std`` so a
+    transient/outlier first sample does not anchor the z-score for
+    ~3*``time_constant``."""
+
+    init_std: npt.NDArray | float | None = None
+    """Optional value used to seed the running standard deviation on the first
+    message (paired with ``init_mean``). Seeds the second-moment EWMA to
+    ``init_mean**2 + init_std**2`` so the very first output is a well-scaled
+    z-score rather than 0. Ignored unless ``init_mean`` is also given."""
 
 
 @processor_state
@@ -127,15 +141,28 @@ class AdaptiveStandardScalerTransformer(
         super().update_settings(new_settings)
 
     def _reset_state(self, message: AxisArray) -> None:
+        # Optionally seed the mean and second-moment EWMAs from provided
+        # statistics so a transient/outlier first sample does not anchor the
+        # z-score for ~3*time_constant. E[x^2] = var + mean^2, so seed the
+        # squared-EWMA with init_mean**2 + init_std**2. Both must be given.
+        mean_init = self.settings.init_mean
+        vars_sq_init = None
+        if self.settings.init_mean is not None and self.settings.init_std is not None:
+            xp = get_namespace(message.data)
+            m = xp.asarray(self.settings.init_mean)
+            s = xp.asarray(self.settings.init_std)
+            vars_sq_init = m**2 + s**2
         self._state.samps_ewma = EWMATransformer(
             time_constant=self.settings.time_constant,
             axis=self.settings.axis,
             accumulate=self.settings.accumulate,
+            init=mean_init,
         )
         self._state.vars_sq_ewma = EWMATransformer(
             time_constant=self.settings.time_constant,
             axis=self.settings.axis,
             accumulate=self.settings.accumulate,
+            init=vars_sq_init,
         )
 
     @property
