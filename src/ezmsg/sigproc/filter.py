@@ -288,15 +288,6 @@ class FilterBaseSettings(ez.Settings):
     through scipy. Set to False to fall back to the scipy path (bit-exact
     with numpy at the cost of CPU round-trips and ~5-8x slowdown)."""
 
-    edge_scale_zi: bool = False
-    """If True, scale the steady-state initial filter conditions by the first
-    input sample (the scipy ``lfilter_zi * x[0]`` / filtfilt idiom) so a
-    constant/DC offset in the input is treated as the pre-stream steady state
-    rather than a step at t=0. Without it, a large DC offset (e.g. raw
-    broadband) rings through the filter as a start-up transient. Applies only
-    to IIR/SOS steady-state ``zi``; FIR history-state ``zi`` is unaffected.
-    Default False preserves the historical zero-initialized start-up."""
-
 
 class FilterSettings(FilterBaseSettings):
     coefs: FilterCoefficients | None = None
@@ -323,6 +314,16 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
     def __call__(self, message: AxisArray) -> AxisArray:
         if self.settings.coefs is None:
             return message
+        # Defer state creation on empty chunks. A size-zero message can't supply
+        # the first sample that edge-scaling needs, so pass it straight through
+        # and leave zi None until the first non-empty chunk. This is the single
+        # point every path funnels through -- direct sync use, and the async /
+        # live path where FilterByDesignTransformer._process calls
+        # ``self.state.filter(message)`` (see the note at its _process) -- so the
+        # guard belongs here rather than in FilterByDesignTransformer.__call__,
+        # which the async path bypasses.
+        if message.data.size == 0:
+            return message
         if self._state.zi is None:
             self._reset_state(message)
             self._hash = self._hash_message(message)
@@ -335,10 +336,20 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
         return hash((message.key, samp_shape))
 
     def _reset_state(self, message: AxisArray) -> None:
+        # Empty chunks never reach here: FilterTransformer.__call__ returns them
+        # early (deferring state creation), so a real first sample is guaranteed.
         axis = message.dims[0] if self.settings.axis is None else self.settings.axis
         axis_idx = message.get_axis_idx(axis)
         n_tail = message.data.ndim - axis_idx - 1
         _, coefs = _normalize_coefs(self.settings.coefs)
+
+        # The first sample along the filter axis. Edge-scaling the initial
+        # conditions by it treats the pre-stream signal as a constant equal to
+        # the first sample (the scipy ``lfilter_zi * x[0]`` / filtfilt idiom), so
+        # a DC offset does not ring through as a start-up transient. This is the
+        # correct start-up for a real signal; unscaled ``lfilter_zi`` is the
+        # steady state for a unit-amplitude step, which is right only if x0 == 1.
+        first_idx = tuple(slice(0, 1) if i == axis_idx else slice(None) for i in range(message.data.ndim))
 
         is_fir = False
         if self.settings.coef_type == "ba":
@@ -346,13 +357,17 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
             is_fir = len(a) == 1 or np.allclose(a[1:], 0)
 
             if is_fir and not is_numpy_array(message.data):
-                # FIR + non-numpy: use conv_general if available, else FFT
+                # FIR + non-numpy: use conv_general if available, else FFT. The
+                # zi buffer holds the last M input samples; seed it with the
+                # first sample (constant-x0 pre-history) rather than zeros so a
+                # DC offset does not produce an M-sample start-up transient.
                 xp = get_namespace(message.data)
                 dev = array_device(message.data)
                 M = len(b) - 1  # filter order
                 zi_shape = list(message.data.shape)
                 zi_shape[axis_idx] = M
-                self.state.zi = xp_create(xp.zeros, tuple(zi_shape), dtype=message.data.dtype, device=dev)
+                zeros = xp_create(xp.zeros, tuple(zi_shape), dtype=message.data.dtype, device=dev)
+                self.state.zi = zeros + message.data[first_idx]  # broadcast x0 across the M slots
                 # 1D taps for conv path
                 self.state.fir_b_1d = xp_asarray(xp, b, dtype=message.data.dtype, device=dev)
                 # Reshape b to broadcast: (1, ..., M+1, ..., 1) for FFT path
@@ -365,14 +380,13 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
                 self.state.sos_mx = None
                 return
 
-            if is_fir:
-                # FIR + numpy: use lfiltic with zero initial conditions
-                zi = scipy.signal.lfiltic(b, a, [])
-            else:
-                # IIR filters...
-                zi = scipy.signal.lfilter_zi(b, a)
+            # ``lfilter_zi`` gives the steady state for a constant unit input and
+            # works for FIR (a=[1]) as well as IIR; edge-scaling by x0 below then
+            # yields the constant-x0 pre-history for both.
+            zi = scipy.signal.lfilter_zi(b, a)
         else:
-            # For second-order sections (SOS) filters, use sosfilt_zi
+            # For second-order sections (SOS) filters, use sosfilt_zi. This is
+            # the constant-unit-input steady state for both IIR and FIR-as-SOS.
             zi = scipy.signal.sosfilt_zi(*coefs)
 
         zi_expand = (None,) * axis_idx + (slice(None),) + (None,) * n_tail
@@ -384,22 +398,13 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
 
         zi_tiled = np.tile(zi[zi_expand], n_tile)
 
-        # Optionally edge-scale the steady-state initial conditions by the first
-        # sample so a constant/DC offset is treated as the pre-stream steady
-        # state (scipy ``lfilter_zi * x[0]`` / filtfilt idiom) instead of a step
-        # at t=0 that rings through the filter. Skipped for FIR (history-state
-        # zi, not steady-state). ``first_sample`` is taken in NumPy; the xp
-        # conversion below moves ``zi_tiled`` onto the input's namespace.
-        if (
-            self.settings.edge_scale_zi
-            and message.data.shape[axis_idx] > 0
-            and not (self.settings.coef_type == "ba" and is_fir)
-        ):
-            first_idx = tuple(
-                slice(0, 1) if i == axis_idx else slice(None) for i in range(message.data.ndim)
-            )
-            first_sample = np.asarray(message.data[first_idx])
-            zi_tiled = zi_tiled * first_sample
+        # Edge-scale by the first sample (see ``first_idx`` note above). Applies
+        # to every scipy path -- IIR and FIR alike, since lfilter_zi/sosfilt_zi
+        # give the constant-input steady state. ``first_sample`` is taken in
+        # NumPy; the xp conversion below moves ``zi_tiled`` onto the input's
+        # namespace.
+        first_sample = np.asarray(message.data[first_idx])
+        zi_tiled = zi_tiled * first_sample
 
         self.state.fir_method = None
         self.state.fir_b = None
@@ -643,7 +648,6 @@ class FilterByDesignTransformer(
             coef_type=self.settings.coef_type,
             coefs=coefs,
             use_mlx_metal=self.settings.use_mlx_metal,
-            edge_scale_zi=getattr(self.settings, "edge_scale_zi", False),
         )
         self.state.filter = FilterTransformer(settings=new_settings)
         self.state.needs_redesign = False

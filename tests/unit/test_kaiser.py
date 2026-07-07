@@ -150,16 +150,20 @@ def test_kaiser_filter_transformer(
 
     if coef_type == "ba":
         b, a = coefs
-        # FIR filters use zero initial conditions (lfiltic with empty arrays)
-        zi = scipy.signal.lfiltic(b, a, [])
+        # FIRFilterTransformer edge-scales the constant-input steady state
+        # (lfilter_zi) by the first sample (constant-x0 pre-history), so a DC
+        # offset does not cause an M-sample start-up transient. Mirror that.
+        zi = scipy.signal.lfilter_zi(b, a)
         if n_dims == 3:
             zi = np.tile(zi[None, None, :], (n_freqs, n_chans, 1))
+        zi = zi * tmp_dat[..., :1]
         out_dat, _ = scipy.signal.lfilter(b, a, tmp_dat, zi=zi)
     elif coef_type == "sos":
-        # SOS representation uses sosfilt_zi for initial conditions
+        # SOS representation uses sosfilt_zi, likewise edge-scaled by x0.
         zi = scipy.signal.sosfilt_zi(coefs)
         if n_dims == 3:
             zi = np.tile(zi[:, None, None, :], (1, n_freqs, n_chans, 1))
+        zi = zi * tmp_dat[..., :1]
         out_dat, _ = scipy.signal.sosfilt(coefs, tmp_dat, zi=zi)
 
     expected = np.moveaxis(out_dat, -1, time_ax)
