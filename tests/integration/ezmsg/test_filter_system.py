@@ -101,13 +101,15 @@ def test_filter_system(filter_type: str, coef_type: str, order: int):
             fs=fs,
             output=coef_type,
         )
+    # FilterTransformer edge-scales the steady-state initial conditions by the
+    # first sample, so scale the reference zi by inputs_data[0] (per channel).
     if coef_type == "ba":
         # Next 2 lines normalize the coefficients, but are in fact unneeded for the test.
         system = scipy.signal.dlti(*coefs)
         coefs = (system.num, system.den)
-        zi = scipy.signal.lfilter_zi(*coefs)[:, None]
+        zi = scipy.signal.lfilter_zi(*coefs)[:, None] * inputs_data[0]
         expected, _ = scipy.signal.lfilter(coefs[0], coefs[1], inputs_data, axis=inputs.get_axis_idx("time"), zi=zi)
     else:  # coef_type == "sos":
-        zi = scipy.signal.sosfilt_zi(coefs)[:, :, None] + np.zeros((1, 1, n_ch))
+        zi = (scipy.signal.sosfilt_zi(coefs)[:, :, None] + np.zeros((1, 1, n_ch))) * inputs_data[0]
         expected, _ = scipy.signal.sosfilt(coefs, inputs_data, axis=inputs.get_axis_idx("time"), zi=zi)
     assert np.allclose(outputs_data, expected)
