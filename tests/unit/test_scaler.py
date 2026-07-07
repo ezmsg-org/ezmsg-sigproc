@@ -49,8 +49,27 @@ def test_adaptive_standard_scaler_river(fixture_arrays):
     assert_messages_equal([test_input], backup)
 
 
+def _bias_corrected_zscore_1d(data, tau, fs):
+    """Reference adaptive standard scaler with bias-corrected (adjust=True)
+    EWMAs: at each t, standardize by the exact exponentially-weighted mean and
+    variance of the samples seen so far."""
+    from ezmsg.sigproc.ewma import _alpha_from_tau
+
+    alpha = _alpha_from_tau(tau, 1.0 / fs)
+    data = np.asarray(data, dtype=float)
+    z = np.empty_like(data)
+    for t in range(1, len(data) + 1):
+        k = np.arange(1, t + 1)
+        w = alpha * (1 - alpha) ** (t - k)
+        w = w / w.sum()
+        mean = (w * data[:t]).sum()
+        var = (w * data[:t] ** 2).sum() - mean**2
+        z[t - 1] = (data[t - 1] - mean) / np.sqrt(var) if var > 0 else 0.0
+    return z
+
+
 def test_scaler(fixture_arrays):
-    data, expected_result = fixture_arrays
+    data, _ = fixture_arrays
     chunker = array_chunker(data, 4, fs=100.0)
     test_input = list(chunker)
     backup = copy.deepcopy(test_input)
@@ -61,7 +80,9 @@ def test_scaler(fixture_arrays):
     for chunk in test_input:
         outputs.append(xformer(chunk))
     output = AxisArray.concatenate(*outputs, dim="time")
-    assert np.allclose(output.data, expected_result, atol=1e-3)
+    # Bias-corrected scaler == exact windowed z-score; first output is 0 (var 0).
+    assert np.allclose(output.data, _bias_corrected_zscore_1d(data, tau, fs=100.0), atol=1e-6)
+    assert np.isclose(output.data.flat[0], 0.0)
     assert_messages_equal(test_input, backup)
 
 
@@ -461,119 +482,69 @@ def test_adaptive_scaler_river_empty_first():
 
 
 # ---------------------------------------------------------------------------
-# init_mean / init_std: seed the scaler to avoid a transient first sample
-# anchoring the running statistics (the "bad seed" cold-start problem).
+# Bias-correction: the scaler's child EWMAs zero-initialize and divide by
+# 1-(1-alpha)^t, so the running mean and variance are the exact averages of the
+# samples seen so far -- well-scaled from the first sample, with no cold-start
+# warmup and no seeding required. (A genuine transient *first sample* still
+# enters the windowed stats for ~tau; that is removed upstream at the source by
+# the filter edge-scaling, not by the scaler.)
 # ---------------------------------------------------------------------------
 
 
-def _scaler_first_sample_transient(fs=100.0, n=1000, transient=100.0, seed=0):
-    """A 1-channel signal that opens with a big transient sample then settles to
-    zero-mean unit-variance noise -- the classic filter-edge cold-start case."""
-    rng = np.random.default_rng(seed)
-    x = rng.standard_normal((n, 1))
-    x[0, 0] = transient
-    msg = AxisArray(
-        x,
-        dims=["time", "ch"],
-        axes=frozendict(
-            {"time": AxisArray.TimeAxis(fs=fs), "ch": AxisArray.CoordinateAxis(data=np.array(["0"]), dims=["ch"])}
-        ),
-    )
-    return x, msg
+def test_scaler_first_output_is_zero():
+    """On the first sample the running mean equals x0 and the variance is 0, so
+    the bias-corrected z-score is 0 -- for any time_constant, even when x0 is a
+    large transient."""
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal((500, 1))
+    x[0, 0] = 100.0  # transient first sample
+    msg = AxisArray(x, dims=["time", "ch"], axes=frozendict({"time": AxisArray.TimeAxis(fs=100.0)}))
+    for tau in (0.05, 1.0, 100.0):
+        out = AdaptiveStandardScalerTransformer(time_constant=tau, axis="time")(msg)
+        assert np.isclose(out.data[0, 0], 0.0)
 
 
-def test_scaler_default_seed_unchanged(fixture_arrays):
-    """init_mean/init_std default to None and reproduce the river-matched
-    first-sample seed (existing behavior)."""
-    assert AdaptiveStandardScalerSettings().init_mean is None
-    assert AdaptiveStandardScalerSettings().init_std is None
-    data, expected_result = fixture_arrays
-    test_input = AxisArray(
-        data[:, None], dims=["time", "ch"], axes=frozendict({"time": AxisArray.TimeAxis(fs=100.0)})
-    )
-    tau = 0.010913566679372915
-    out = AdaptiveStandardScalerTransformer(time_constant=tau, axis="time")(test_input)
-    assert np.allclose(out.data[:, 0], expected_result, atol=1e-3)
-
-
-def test_scaler_init_seed_first_output_is_zscore():
-    """With init_mean/init_std the first output is a proper z-score from the
-    seed (~ (x0 - mean)/std), not 0 (the unseeded var==0 first-sample case)."""
-    _, msg = _scaler_first_sample_transient(transient=5.0)
-    x0 = float(msg.data[0, 0])
-
-    # Unseeded: on the first sample var == 0, so the output is 0.
-    unseeded = AdaptiveStandardScalerTransformer(time_constant=1.0, axis="time")(msg)
-    assert np.isclose(unseeded.data[0, 0], 0.0)
-
-    # Seeded with a large tau (alpha ~ 0) so the first-sample update is
-    # negligible: first output ~= (x0 - init_mean) / init_std = x0.
-    seeded = AdaptiveStandardScalerTransformer(
-        time_constant=100.0, axis="time", init_mean=0.0, init_std=1.0
-    )(msg)
-    assert np.isclose(seeded.data[0, 0], x0, atol=0.1)
-
-
-def test_scaler_init_seed_avoids_cold_start_collapse():
-    """Without a seed, a transient first sample anchors the running mean and
-    the following samples collapse negative for ~3*tau. Seeding with the true
-    baseline (0, 1) keeps the z-score well-behaved from the start."""
-    _, msg = _scaler_first_sample_transient(fs=100.0, transient=100.0)
-
-    unseeded = AdaptiveStandardScalerTransformer(time_constant=1.0, axis="time")(msg)
-    seeded = AdaptiveStandardScalerTransformer(
-        time_constant=1.0, axis="time", init_mean=0.0, init_std=1.0
-    )(msg)
-
-    # Post-transient window (still inside the ~3*tau = 3 s = 300-sample warmup).
-    win = slice(10, 100)
-    unseeded_mean = float(unseeded.data[win, 0].mean())
-    seeded_mean = float(seeded.data[win, 0].mean())
-    assert unseeded_mean < -0.8  # collapsed (running mean anchored high by transient)
-    assert abs(seeded_mean) < 0.5  # de-biased: centered near 0, not collapsed
-    assert seeded_mean - unseeded_mean > 0.8  # seeding clearly de-biases the warmup
-    # NB: seeding fixes the mean-anchor collapse; the transient sample still
-    # enters the variance EWMA (compressing the z-score) until it decays -- that
-    # residual is removed upstream by not producing the transient (edge_scale_zi).
-
-
-def test_scaler_init_seed_per_channel():
-    """Per-channel array init_mean/init_std seed each channel independently, so
-    the first output is a per-channel z-score against that channel's baseline."""
+def test_scaler_matches_exact_windowed_zscore():
+    """The bias-corrected scaler equals the exact windowed z-score reference at
+    every step (no warmup bias)."""
     fs = 100.0
-    rng = np.random.default_rng(3)
-    means = np.array([10.0, -5.0, 0.0])
-    stds = np.array([2.0, 0.5, 1.0])
-    x = rng.standard_normal((500, 3)) * stds + means
+    tau = 0.3
+    rng = np.random.default_rng(5)
+    data = rng.normal(3.0, 2.0, size=200)
+    msg = AxisArray(data[:, None], dims=["time", "ch"], axes=frozendict({"time": AxisArray.TimeAxis(fs=fs)}))
+    out = AdaptiveStandardScalerTransformer(time_constant=tau, axis="time")(msg)
+    np.testing.assert_allclose(out.data[:, 0], _bias_corrected_zscore_1d(data, tau, fs), atol=1e-8)
+
+
+def test_scaler_no_variance_warmup():
+    """On clean zero-mean unit-variance data the scaler is ~N(0,1) early on:
+    bias-correction removes the inflated-variance warmup an un-normalized EWMA
+    produces (early variance biased low -> early z-scores blown up)."""
+    fs = 100.0
+    rng = np.random.default_rng(7)
+    x = rng.standard_normal((3000, 4))
     msg = AxisArray(x, dims=["time", "ch"], axes=frozendict({"time": AxisArray.TimeAxis(fs=fs)}))
-
-    # Large tau (alpha ~ 0) so the first-sample update is negligible and the
-    # first output reflects the seed: (x0 - init_mean) / init_std per channel.
-    seeded = AdaptiveStandardScalerTransformer(
-        time_constant=100.0, axis="time", init_mean=means, init_std=stds
-    )(msg)
-
-    expected0 = (x[0] - means) / stds
-    np.testing.assert_allclose(seeded.data[0], expected0, atol=1e-2)
+    out = AdaptiveStandardScalerTransformer(time_constant=1.0, axis="time")(msg).data
+    win = slice(20, 400)  # early (well inside 3*tau=300 samples), past few-sample noise
+    assert abs(out[win].mean()) < 0.2
+    assert 0.7 < out[win].std() < 1.4
 
 
-def test_scaler_init_seed_accumulate_false():
-    """With accumulate=False the seeded stats are applied but not advanced, so
-    two identical messages produce identical z-scores from the seed (rather
-    than the unseeded var==0 first output of 0)."""
+def test_scaler_bias_correction_survives_chunking():
+    """The cumulative sample count is carried in state, so a chunked stream
+    produces the same z-scores as a single pass."""
     fs = 100.0
-    x = np.full((10, 1), 7.0)
+    tau = 0.3
+    rng = np.random.default_rng(9)
+    data = rng.normal(0.0, 1.0, size=(151, 2))
 
-    def mk() -> AxisArray:
-        return AxisArray(x.copy(), dims=["time", "ch"], axes=frozendict({"time": AxisArray.TimeAxis(fs=fs)}))
+    def mk(d, offset):
+        return AxisArray(d, dims=["time", "ch"], axes=frozendict({"time": AxisArray.TimeAxis(fs=fs, offset=offset / fs)}))
 
-    proc = AdaptiveStandardScalerTransformer(
-        time_constant=100.0, axis="time", accumulate=False, init_mean=0.0, init_std=1.0
-    )
-    out1 = proc(mk())
-    out2 = proc(mk())
-
-    # First output reflects the seed ((x0 - 0)/1 ~= 7), not the unseeded 0...
-    assert out1.data[0, 0] > 5.0
-    # ...and the state is frozen, so a second identical message is identical.
-    assert np.allclose(out1.data, out2.data)
+    single = AdaptiveStandardScalerTransformer(time_constant=tau, axis="time")(mk(data, 0)).data
+    chunked = AdaptiveStandardScalerTransformer(time_constant=tau, axis="time")
+    parts, n = [], 0
+    for c in np.array_split(data, 6, axis=0):
+        parts.append(chunked(mk(c, n)).data)
+        n += c.shape[0]
+    np.testing.assert_allclose(np.concatenate(parts, axis=0), single, atol=1e-10)

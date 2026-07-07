@@ -175,19 +175,13 @@ class EWMASettings(ez.Settings):
     baseline estimate -- passthrough leaves the data untouched. May be toggled
     at runtime without resetting the filter state."""
 
-    init: npt.NDArray | float | None = None
-    """Optional value used to seed the running estimate on the first message,
-    broadcast to the per-sample (non-``axis``) shape. When ``None`` (default)
-    the estimate is seeded from the first sample (matches river's
-    AdaptiveStandardScaler). Provide a known baseline (e.g. a training-session
-    mean) so a transient/outlier first sample does not anchor the estimate for
-    ~3*``time_constant``."""
-
 
 @processor_state
 class EWMAState:
     alpha: float = field(default_factory=lambda: _alpha_from_tau(1.0, 1000.0))
     zi: npt.NDArray | None = None
+    n_seen: int = 0
+    """Cumulative sample count since reset, used to bias-correct the output."""
 
 
 class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray, EWMAState]):
@@ -216,16 +210,15 @@ class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray
         axis = self.settings.axis or message.dims[0]
         axis_idx = message.get_axis_idx(axis)
         self._state.alpha = _alpha_from_tau(self.settings.time_constant, message.axes[axis].gain)
-        # Seed the running estimate. Default: the first sample (river-matched).
-        # If ``init`` is given, seed from it instead so a transient/outlier
-        # first sample cannot anchor the estimate -- broadcast to the first
-        # sample's (per-``axis``-size-1) shape.
+        # Zero-initialize the running estimate; _process bias-corrects the output
+        # (divides by 1-(1-alpha)^t). This gives the exact exponentially-weighted
+        # average of the samples seen so far -- the first output is exactly the
+        # first sample, converging smoothly to the steady-state EWMA -- with no
+        # phantom initial value and no cold-start warmup.
         sub_dat = slice_along_axis(message.data, slice(None, 1, None), axis=axis_idx)
-        if self.settings.init is not None:
-            xp = np if is_numpy_array(message.data) else get_namespace(message.data)
-            init_arr = xp.asarray(self.settings.init, dtype=message.data.dtype)
-            sub_dat = xp.broadcast_to(init_arr, sub_dat.shape)
-        self._state.zi = (1 - self._state.alpha) * sub_dat
+        xp = np if is_numpy_array(message.data) else get_namespace(message.data)
+        self._state.zi = xp.zeros_like(sub_dat)
+        self._state.n_seen = 0
 
     def _process(self, message: AxisArray) -> AxisArray:
         axis = self.settings.axis or message.dims[0]
@@ -258,6 +251,25 @@ class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray
                 axis=axis_idx,
                 zi=self._state.zi,
             )
+
+        # Bias-correction ("Adam trick"): the zero-initialized EWMA under-counts
+        # by a factor of 1-(1-alpha)^t at cumulative sample index t. Dividing by
+        # it yields the exact exponentially-weighted average of the samples seen
+        # so far -- no phantom seed, no cold-start warmup -- and the factor -> 1
+        # so it converges to the steady-state EWMA. The factor depends only on t
+        # (deterministic), so it is a precomputed per-sample vector, not a scan.
+        n = message.data.shape[axis_idx]
+        t = self._state.n_seen + np.arange(1, n + 1)
+        corr = (1.0 - (1.0 - self._state.alpha) ** t).astype(np.float64)
+        corr_shape = [1] * message.data.ndim
+        corr_shape[axis_idx] = n
+        corr = corr.reshape(corr_shape)
+        if xp is np:
+            expected = expected / corr.astype(expected.dtype)
+        else:
+            expected = expected / xp.asarray(corr, dtype=expected.dtype)
+        if self.settings.accumulate:
+            self._state.n_seen += n
         return replace(message, data=expected)
 
 

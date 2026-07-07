@@ -115,16 +115,18 @@ def test_detrend_matches_reference():
     proc = DetrendTransformer(settings=EWMASettings(time_constant=tc, axis="time"))
     result = proc(msg)
 
-    # Compute reference manually
+    # Reference: bias-corrected EWMA baseline (zero-init lfilter divided by
+    # 1-(1-alpha)^t), matching the parent EWMATransformer.
     alpha = _alpha_from_tau(tc, 1.0 / fs)
-    zi = (1 - alpha) * data[:1, :]  # same as _reset_state
-    means, _ = sps.lfilter(
+    raw, _ = sps.lfilter(
         [alpha],
         [1.0, alpha - 1.0],
         data,
         axis=0,
-        zi=zi,
+        zi=np.zeros((1, n_ch)),
     )
+    t = np.arange(1, n_samples + 1)[:, None]
+    means = raw / (1.0 - (1.0 - alpha) ** t)
     expected = data - means
 
     assert np.allclose(result.data, expected, atol=1e-12)
