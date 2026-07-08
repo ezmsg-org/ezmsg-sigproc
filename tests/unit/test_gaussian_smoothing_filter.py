@@ -36,7 +36,7 @@ def test_gaussian_smoothing_filter_function(axis, sigma, width, kernel_size):
 def test_gaussian_smoothing_settings_defaults():
     """Test the GaussianSmoothingSettings class with default values."""
     settings = GaussianSmoothingSettings()
-    assert settings.sigma == 1.0
+    assert settings.sigma == 0.01  # seconds; ~13.2 Hz low-pass (-3 dB)
     assert settings.width == 4
     assert settings.kernel_size is None
 
@@ -136,9 +136,9 @@ def test_gaussian_smoothing_filter_process(data_shape):
 
     msg = AxisArray(data=data, dims=dims, axes=axes, key="test_gaussian_smoothing")
 
-    # Instantiate transformer (not unit)
+    # Instantiate transformer (not unit). sigma is in seconds: 0.02 s @ 100 Hz = 2 samples.
     transformer = GaussianSmoothingFilterTransformer(
-        settings=GaussianSmoothingSettings(axis="time", sigma=2.0, width=4)
+        settings=GaussianSmoothingSettings(axis="time", sigma=0.02, width=4)
     )
 
     # Process message using __call__ method
@@ -152,8 +152,9 @@ def test_gaussian_smoothing_filter_process(data_shape):
 
 def test_gaussian_smoothing_edge_cases():
     """Test edge cases for gaussian smoothing filter."""
-    # Test with very small sigma
-    coefs_small = gaussian_smoothing_filter_design(sigma=0.01)
+    # Sub-sample sigma degenerates to an identity kernel and warns.
+    with pytest.warns(UserWarning, match="identity"):
+        coefs_small = gaussian_smoothing_filter_design(sigma=0.01)
     b_small, a_small = coefs_small
     assert len(b_small) > 0
     assert np.isclose(np.sum(b_small), 1.0)
@@ -206,10 +207,11 @@ def test_gaussian_smoothing_update_settings():
 
     original_variance = _calc_smoothing_effect(msg_in)
 
-    # Initialize filter with small sigma (minimal smoothing)
+    # Initialize filter with small sigma (minimal smoothing).
+    # sigma is in seconds: 0.0025 s @ 200 Hz = 0.5 samples.
     proc = GaussianSmoothingFilterTransformer(
         axis="time",
-        sigma=0.5,
+        sigma=0.0025,
         width=4,
         coef_type="ba",
     )
@@ -221,8 +223,8 @@ def test_gaussian_smoothing_update_settings():
     # Small sigma should have minimal effect
     assert np.allclose(variance1, original_variance, rtol=0.1)
 
-    # Update settings - change to larger sigma (more smoothing)
-    proc.update_settings(sigma=3.0)
+    # Update settings - change to larger sigma (more smoothing): 3 samples @ 200 Hz
+    proc.update_settings(sigma=0.015)
 
     # Process the same message with new settings
     result2 = proc(msg_in)
@@ -234,7 +236,7 @@ def test_gaussian_smoothing_update_settings():
     # Test update_settings with complete new settings object
     new_settings = GaussianSmoothingSettings(
         axis="time",
-        sigma=5.0,  # Even larger sigma
+        sigma=0.025,  # Even larger sigma: 5 samples @ 200 Hz
         width=6,
         kernel_size=None,
         coef_type="ba",
@@ -246,6 +248,40 @@ def test_gaussian_smoothing_update_settings():
 
     # Even larger sigma should reduce variance further
     assert np.all(variance3 < variance2)
+
+
+def test_gaussian_sigma_is_in_seconds():
+    """The same settings must yield the same temporal smoothing at any fs:
+    kernel length in samples scales with the sampling rate."""
+
+    def _kernel_len(fs: float) -> int:
+        proc = GaussianSmoothingFilterTransformer(GaussianSmoothingSettings(sigma=0.02, axis="time"))
+        msg = AxisArray(
+            data=np.zeros((int(fs), 2)),
+            dims=["time", "ch"],
+            axes={
+                "time": AxisArray.TimeAxis(fs=fs, offset=0),
+                "ch": AxisArray.CoordinateAxis(data=np.arange(2).astype(str), dims=["ch"]),
+            },
+            key="test_gaussian_sigma_seconds",
+        )
+        _ = proc(msg)
+        b, _a = proc.state.filter.settings.coefs
+        return len(b)
+
+    len_100 = _kernel_len(100.0)  # sigma = 2 samples
+    len_1000 = _kernel_len(1000.0)  # sigma = 20 samples
+    assert len_100 == int(2 * 4 * 0.02 * 100.0 + 1)
+    assert len_1000 == int(2 * 4 * 0.02 * 1000.0 + 1)
+
+
+def test_gaussian_identity_kernel_warns_and_passes_through():
+    """An explicit single-tap kernel warns and leaves the data unchanged."""
+    proc = GaussianSmoothingFilterTransformer(GaussianSmoothingSettings(sigma=0.02, kernel_size=1, axis="time"))
+    msg = make_msg()
+    with pytest.warns(UserWarning):
+        result = proc(msg)
+    assert np.allclose(result.data, msg.data)
 
 
 def test_gaussian_empty_after_init():
