@@ -19,6 +19,7 @@ non-monotonic reference clock, e.g. from a misbehaving simulator).
 
 import asyncio
 import os
+import time
 import typing
 from pathlib import Path
 
@@ -37,6 +38,17 @@ from tests.helpers.util import get_test_fn
 CHUNK = 30
 N_CHUNKS = 60
 FS = 1000.0
+
+
+class ArmedTerminateOnTimeout(TerminateOnTimeout):
+    """TerminateOnTimeout arms its idle timer only on the first received message;
+    a graph that never produces output therefore never terminates (the hubs stay
+    alive by design, so there is no other exit path and CI hangs). Arm the timer
+    at startup so an all-idle graph still tears down after ``time`` seconds and
+    the test fails on its assertions instead of hanging."""
+
+    async def initialize(self) -> None:
+        self.STATE.last_msg_timestamp = time.time()
 
 
 class HubSettings(ez.Settings):
@@ -103,8 +115,14 @@ def _run(comps: dict, conns: tuple, output_stream, fn: Path) -> tuple[int, int, 
     # stall on a loaded CI runner -- if a transient stall opens an output gap
     # longer than `time` mid-stream, the graph is torn down early and the output
     # is truncated. 2.0 s was too tight on Windows CI; 4.0 s gives headroom.
-    term = TerminateOnTimeout(TerminateOnTimeoutSettings(time=4.0))
-    comps = {**comps, "LOG": log, "TERM": term}
+    # (Armed at startup, so it also covers the zero-output case.)
+    term = ArmedTerminateOnTimeout(TerminateOnTimeoutSettings(time=4.0))
+    # Absolute-deadline watchdog: no input is connected, so its armed timer is
+    # never refreshed and it unconditionally ends the graph after 30 s. A full
+    # run terminates via `term` in well under 10 s, so this only fires if the
+    # graph is wired in a way that defeats the idle terminator.
+    watchdog = ArmedTerminateOnTimeout(TerminateOnTimeoutSettings(time=30.0))
+    comps = {**comps, "LOG": log, "TERM": term, "WATCHDOG": watchdog}
     conns = (
         *conns,
         (output_stream, log.INPUT_MESSAGE),
