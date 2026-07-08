@@ -539,7 +539,9 @@ def test_scaler_bias_correction_survives_chunking():
     data = rng.normal(0.0, 1.0, size=(151, 2))
 
     def mk(d, offset):
-        return AxisArray(d, dims=["time", "ch"], axes=frozendict({"time": AxisArray.TimeAxis(fs=fs, offset=offset / fs)}))
+        return AxisArray(
+            d, dims=["time", "ch"], axes=frozendict({"time": AxisArray.TimeAxis(fs=fs, offset=offset / fs)})
+        )
 
     single = AdaptiveStandardScalerTransformer(time_constant=tau, axis="time")(mk(data, 0)).data
     chunked = AdaptiveStandardScalerTransformer(time_constant=tau, axis="time")
@@ -548,3 +550,44 @@ def test_scaler_bias_correction_survives_chunking():
         parts.append(chunked(mk(c, n)).data)
         n += c.shape[0]
     np.testing.assert_allclose(np.concatenate(parts, axis=0), single, atol=1e-10)
+
+
+def test_scaler_recovers_after_level_shift():
+    """Dual-timescale tracking (issue #168): after a sudden persistent level
+    shift, the scaler's z-scores re-center within a few chunks; without it,
+    they stay biased for ~time_constant."""
+    fs, chunk, n_ch = 100.0, 20, 2
+
+    def _run(fast_tc):
+        proc = AdaptiveStandardScalerTransformer(
+            settings=AdaptiveStandardScalerSettings(time_constant=10.0, axis="time", fast_time_constant=fast_tc)
+        )
+        outs = []
+        for i in range(40):
+            mu = 50.0 if i >= 20 else 0.0
+            d = np.random.default_rng(100 + i).normal(mu, 1.0, size=(chunk, n_ch))
+            msg = AxisArray(
+                data=d,
+                dims=["time", "ch"],
+                axes={
+                    "time": AxisArray.TimeAxis(fs=fs, offset=i * chunk / fs),
+                    "ch": AxisArray.CoordinateAxis(data=np.arange(n_ch).astype(str), dims=["ch"]),
+                },
+                key="test_scaler_shift",
+            )
+            outs.append(proc(msg).data)
+        return np.concatenate(outs, axis=0)
+
+    z_on = _run(0.05)
+    z_off = _run(None)
+
+    # Signed mean z over the last 10 chunks. Without tracking, the lagging mean
+    # biases every z-score in the same direction while the lagging second
+    # moment inflates the std (dominated by the offset^2 mismatch), yielding a
+    # systematic one-sided z ~ +1 -- the PR #166 "feature collapse" signature.
+    # With tracking, both statistics snap and z re-centers on 0.
+    tail = slice(30 * chunk, None)
+    assert np.abs(z_on[tail].mean()) < 0.3, f"expected re-centered z-scores, got mean z {z_on[tail].mean():.2f}"
+    assert (
+        z_off[tail].mean() > 0.7
+    ), f"expected one-sided biased z-scores without tracking, got {z_off[tail].mean():.2f}"

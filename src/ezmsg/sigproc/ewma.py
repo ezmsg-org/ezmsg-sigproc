@@ -175,6 +175,27 @@ class EWMASettings(ez.Settings):
     baseline estimate -- passthrough leaves the data untouched. May be toggled
     at runtime without resetting the filter state."""
 
+    fast_time_constant: float | None = None
+    """Enable dual-timescale level-shift tracking (default None = off). A cheap
+    secondary estimate with this (shorter) time constant is updated once per
+    chunk from the chunk mean; when it diverges from the main estimate by more
+    than ``shift_threshold`` * (within-chunk residual std) for
+    ``shift_hysteresis`` consecutive chunks, the main estimate snaps to it,
+    per channel. This lets the estimate recover from a sudden but persistent
+    level shift (reference change, impedance step) in a couple of chunks
+    instead of ~3*``time_constant``. Detection and snapping are elementwise
+    operations on state at chunk boundaries -- no extra per-sample scan."""
+
+    shift_threshold: float = 4.0
+    """Divergence threshold for the level-shift detector, in multiples of the
+    within-chunk residual standard deviation. Only used when
+    ``fast_time_constant`` is set."""
+
+    shift_hysteresis: int = 2
+    """Number of consecutive divergent chunks required before the main
+    estimate snaps to the fast estimate. Only used when ``fast_time_constant``
+    is set."""
+
 
 @processor_state
 class EWMAState:
@@ -182,6 +203,13 @@ class EWMAState:
     zi: npt.NDArray | None = None
     n_seen: int = 0
     """Cumulative sample count since reset, used to bias-correct the output."""
+
+    alpha_fast: float | None = None
+    fast_est: npt.NDArray | None = None
+    """Chunk-rate fast estimate for the level-shift detector (seeded from the
+    first chunk's mean, so no bias correction is needed)."""
+    shift_run: npt.NDArray | None = None
+    """Per-channel count of consecutive divergent chunks."""
 
 
 class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray, EWMAState]):
@@ -215,6 +243,10 @@ class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray
         xp = np if is_numpy_array(message.data) else get_namespace(message.data)
         self._state.zi = xp.zeros_like(sub_dat)
         self._state.n_seen = 0
+        if self.settings.fast_time_constant is not None:
+            self._state.alpha_fast = _alpha_from_tau(self.settings.fast_time_constant, message.axes[axis].gain)
+            self._state.fast_est = None
+            self._state.shift_run = xp.zeros_like(sub_dat)
 
     def _process(self, message: AxisArray) -> AxisArray:
         axis = self.settings.axis or message.dims[0]
@@ -258,7 +290,41 @@ class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray
         expected = expected / xp.asarray(corr, dtype=expected.dtype)
         if self.settings.accumulate:
             self._state.n_seen += n
+            if self.settings.fast_time_constant is not None:
+                self._update_shift_detector(message.data, expected, axis_idx, xp)
         return replace(message, data=expected)
+
+    def _update_shift_detector(self, data, expected, axis_idx: int, xp) -> None:
+        """Dual-timescale level-shift detection (chunk-boundary state ops only).
+
+        A fast estimate is advanced once per chunk by the chunk's effective
+        forgetting factor. Sustained divergence between the fast and main
+        estimates -- large relative to the chunk's own residual scatter --
+        marks a persistent level shift; the main estimate then snaps to the
+        fast one, per channel, and continues with its own time constant.
+        """
+        n = data.shape[axis_idx]
+        chunk_mean = xp.mean(data, axis=axis_idx, keepdims=True)
+        if self._state.fast_est is None:
+            self._state.fast_est = chunk_mean
+            return
+        beta_fast = (1.0 - self._state.alpha_fast) ** n
+        self._state.fast_est = beta_fast * self._state.fast_est + (1.0 - beta_fast) * chunk_mean
+
+        resid = data - chunk_mean
+        resid_std = xp.sqrt(xp.mean(resid * resid, axis=axis_idx, keepdims=True))
+        slow_est = slice_along_axis(expected, slice(-1, None), axis=axis_idx)
+        diverged = xp.abs(self._state.fast_est - slow_est) > self.settings.shift_threshold * resid_std
+        zeros = xp.zeros_like(self._state.shift_run)
+        self._state.shift_run = xp.where(diverged, self._state.shift_run + 1, zeros)
+
+        snap = self._state.shift_run >= self.settings.shift_hysteresis
+        # Set the scan state such that the bias-corrected main estimate equals
+        # the fast estimate: y_corr = zi / ((1-alpha) * (1-(1-alpha)^t)).
+        corr_t = 1.0 - (1.0 - self._state.alpha) ** self._state.n_seen
+        zi_snap = (1.0 - self._state.alpha) * corr_t * self._state.fast_est
+        self._state.zi = xp.where(snap, zi_snap, self._state.zi)
+        self._state.shift_run = xp.where(snap, zeros, self._state.shift_run)
 
 
 class EWMAUnit(BaseTransformerUnit[EWMASettings, AxisArray, AxisArray, EWMATransformer]):

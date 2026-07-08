@@ -127,16 +127,19 @@ class AdaptiveStandardScalerTransformer(
         super().update_settings(new_settings)
 
     def _reset_state(self, message: AxisArray) -> None:
-        self._state.samps_ewma = EWMATransformer(
+        # Each child gets its own level-shift detector (when enabled): a
+        # persistent shift moves both the mean and E[x^2], and their detectors
+        # operate on their respective inputs (x and x^2).
+        child_kwargs = dict(
             time_constant=self.settings.time_constant,
             axis=self.settings.axis,
             accumulate=self.settings.accumulate,
+            fast_time_constant=self.settings.fast_time_constant,
+            shift_threshold=self.settings.shift_threshold,
+            shift_hysteresis=self.settings.shift_hysteresis,
         )
-        self._state.vars_sq_ewma = EWMATransformer(
-            time_constant=self.settings.time_constant,
-            axis=self.settings.axis,
-            accumulate=self.settings.accumulate,
-        )
+        self._state.samps_ewma = EWMATransformer(**child_kwargs)
+        self._state.vars_sq_ewma = EWMATransformer(**child_kwargs)
 
     @property
     def accumulate(self) -> bool:
