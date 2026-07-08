@@ -101,11 +101,19 @@ def test_butterworth(
         zi = scipy.signal.lfilter_zi(*coefs)
         if n_dims == 3:
             zi = np.tile(zi[None, None, :], (n_freqs, n_chans, 1))
+        if order > 0:
+            # Match FilterTransformer: edge-scale the steady-state initial
+            # conditions by the first sample (scipy filtfilt idiom) so a DC
+            # offset does not ring through as a start-up transient. order==0 is
+            # a passthrough/FIR (history-state zi) and is not edge-scaled.
+            zi = zi * tmp_dat[..., :1]
         out_dat, _ = scipy.signal.lfilter(*coefs, tmp_dat, zi=zi)
     elif coef_type == "sos":
         zi = scipy.signal.sosfilt_zi(coefs)
         if n_dims == 3:
             zi = np.tile(zi[:, None, None, :], (1, n_freqs, n_chans, 1))
+        if order > 0:
+            zi = zi * tmp_dat[..., :1]
         out_dat, _ = scipy.signal.sosfilt(coefs, tmp_dat, zi=zi)
     expected = np.moveaxis(out_dat, -1, time_ax)
 

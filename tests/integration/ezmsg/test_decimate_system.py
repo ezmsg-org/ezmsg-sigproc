@@ -50,7 +50,9 @@ def test_decimate_system(target_rate: float):
     else:
         b, a = scipy.signal.cheby1(8, 0.05, 0.8 / expected_factor)
         b, a = scipy.signal.normalize(b, a)
-        zi = scipy.signal.lfilter_zi(b, a)[:, None]
+        # The anti-alias FilterTransformer edge-scales its steady-state zi by the
+        # first sample, so scale the reference zi by inputs.data[0] (per channel).
+        zi = scipy.signal.lfilter_zi(b, a)[:, None] * inputs.data[0]
         antialiased, _ = scipy.signal.lfilter(b, a, inputs.data, axis=0, zi=zi)
         expected = antialiased[:: int(expected_factor)]
 

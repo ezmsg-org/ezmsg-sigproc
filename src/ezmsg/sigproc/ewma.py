@@ -180,6 +180,8 @@ class EWMASettings(ez.Settings):
 class EWMAState:
     alpha: float = field(default_factory=lambda: _alpha_from_tau(1.0, 1000.0))
     zi: npt.NDArray | None = None
+    n_seen: int = 0
+    """Cumulative sample count since reset, used to bias-correct the output."""
 
 
 class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray, EWMAState]):
@@ -206,9 +208,13 @@ class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray
 
     def _reset_state(self, message: AxisArray) -> None:
         axis = self.settings.axis or message.dims[0]
+        axis_idx = message.get_axis_idx(axis)
         self._state.alpha = _alpha_from_tau(self.settings.time_constant, message.axes[axis].gain)
-        sub_dat = slice_along_axis(message.data, slice(None, 1, None), axis=message.get_axis_idx(axis))
-        self._state.zi = (1 - self._state.alpha) * sub_dat
+        # Start from zero; _process divides out the missing-history bias.
+        sub_dat = slice_along_axis(message.data, slice(None, 1, None), axis=axis_idx)
+        xp = np if is_numpy_array(message.data) else get_namespace(message.data)
+        self._state.zi = xp.zeros_like(sub_dat)
+        self._state.n_seen = 0
 
     def _process(self, message: AxisArray) -> AxisArray:
         axis = self.settings.axis or message.dims[0]
@@ -241,6 +247,17 @@ class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray
                 axis=axis_idx,
                 zi=self._state.zi,
             )
+
+        # The zero-initialized EWMA under-counts by 1-(1-alpha)^t at cumulative
+        # sample t; dividing it out gives the exact exponentially-weighted
+        # average of the samples seen so far (the "Adam" bias correction).
+        n = message.data.shape[axis_idx]
+        t = self._state.n_seen + np.arange(1, n + 1)
+        corr = 1.0 - (1.0 - self._state.alpha) ** t
+        corr = corr.reshape([n if i == axis_idx else 1 for i in range(message.data.ndim)])
+        expected = expected / xp.asarray(corr, dtype=expected.dtype)
+        if self.settings.accumulate:
+            self._state.n_seen += n
         return replace(message, data=expected)
 
 

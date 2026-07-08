@@ -1,6 +1,5 @@
 """Remove linear or constant trends from data along an axis."""
 
-import scipy.signal as sps
 from ezmsg.baseproc import BaseTransformerUnit
 from ezmsg.util.messages.axisarray import AxisArray, replace
 
@@ -14,25 +13,8 @@ class DetrendTransformer(EWMATransformer):
     """
 
     def _process(self, message):
-        axis = self.settings.axis or message.dims[0]
-        axis_idx = message.get_axis_idx(axis)
-        if self.settings.accumulate:
-            means, self._state.zi = sps.lfilter(
-                [self._state.alpha],
-                [1.0, self._state.alpha - 1.0],
-                message.data,
-                axis=axis_idx,
-                zi=self._state.zi,
-            )
-        else:
-            means, _ = sps.lfilter(
-                [self._state.alpha],
-                [1.0, self._state.alpha - 1.0],
-                message.data,
-                axis=axis_idx,
-                zi=self._state.zi,
-            )
-        return replace(message, data=message.data - means)
+        means = super()._process(message)
+        return replace(message, data=message.data - means.data)
 
 
 class DetrendUnit(BaseTransformerUnit[EWMASettings, AxisArray, AxisArray, DetrendTransformer]):

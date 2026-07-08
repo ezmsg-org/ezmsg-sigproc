@@ -796,3 +796,60 @@ def test_butterworthzerophase_benchmark(backend, n_channels, benchmark):
         return outputs
 
     benchmark(process_all_chunks)
+
+
+# ---------------------------------------------------------------------------
+# DC-offset start-up transient suppression (edge-scaled initial conditions)
+# ---------------------------------------------------------------------------
+
+
+def _run_zerophase_streaming(x, fs, *, order=4, coef_type="sos", cuton=250.0, cutoff=5000.0, chunk=600):
+    """Feed ``x`` (time, ch) through ButterworthZeroPhase in fixed chunks and
+    return the concatenated output."""
+    xformer = ButterworthZeroPhaseTransformer(
+        ButterworthZeroPhaseSettings(
+            axis="time",
+            coef_type=coef_type,
+            order=order,
+            cuton=cuton,
+            cutoff=cutoff,
+            wn_hz=True,
+        )
+    )
+    outputs = []
+    for i in range(0, x.shape[0], chunk):
+        msg = _make_message(x[i : i + chunk], ["time", "ch"], fs)
+        result = xformer(msg)
+        if result.data.size > 0:
+            outputs.append(result.data)
+    return np.concatenate(outputs, axis=0)
+
+
+@pytest.mark.parametrize("coef_type", ["ba", "sos"])
+def test_edge_scaling_suppresses_dc_startup_transient(coef_type):
+    """A large DC offset must not ring through the forward filter as a start-up
+    transient: edge-scaling the initial conditions by the first sample makes the
+    opening samples look like steady state."""
+    fs = 30000.0
+    rng = np.random.default_rng(0)
+    noise = rng.normal(0.0, 50.0, size=(int(fs), 4))  # 1 s, zero-mean
+    signal = noise + 5000.0  # large DC offset, like raw broadband
+
+    y = _run_zerophase_streaming(signal, fs, coef_type=coef_type)
+    steady = float(y[2000:].std())
+    first = float(y[:50].std())
+    assert np.isfinite(y).all()
+    assert first < 2.0 * steady, f"transient not suppressed: first={first:.1f} steady={steady:.1f}"
+
+
+def test_edge_scaling_makes_output_dc_invariant():
+    """Band-pass output rejects DC; because there is no start-up transient the
+    output is (near) invariant to a DC offset on the input."""
+    fs = 30000.0
+    rng = np.random.default_rng(1)
+    noise = rng.normal(0.0, 50.0, size=(int(fs), 4))
+
+    y_zero = _run_zerophase_streaming(noise, fs)
+    y_dc = _run_zerophase_streaming(noise + 5000.0, fs)
+    # Adding a DC offset should not change the band-passed output.
+    assert np.max(np.abs(y_zero - y_dc)) < 0.05 * float(y_zero.std())

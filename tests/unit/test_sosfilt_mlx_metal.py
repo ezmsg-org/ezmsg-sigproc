@@ -79,6 +79,8 @@ def test_butterworth_mlx_float32_unstable_highpass_uses_scipy_numpy_state():
 
     sos = scipy.signal.butter(4, 0.3, btype="highpass", fs=fs, output="sos")
     zi = scipy.signal.sosfilt_zi(sos)[:, :, None] + np.zeros((1, 1, n_channels))
+    # FilterTransformer edge-scales the steady-state zi by the first sample.
+    zi = zi * data[0]
     expected, _ = scipy.signal.sosfilt(sos, data, axis=0, zi=zi)
 
     actual = np.asarray(result.data)

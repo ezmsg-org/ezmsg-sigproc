@@ -49,8 +49,27 @@ def test_adaptive_standard_scaler_river(fixture_arrays):
     assert_messages_equal([test_input], backup)
 
 
+def _bias_corrected_zscore_1d(data, tau, fs):
+    """Reference adaptive standard scaler with bias-corrected (adjust=True)
+    EWMAs: at each t, standardize by the exact exponentially-weighted mean and
+    variance of the samples seen so far."""
+    from ezmsg.sigproc.ewma import _alpha_from_tau
+
+    alpha = _alpha_from_tau(tau, 1.0 / fs)
+    data = np.asarray(data, dtype=float)
+    z = np.empty_like(data)
+    for t in range(1, len(data) + 1):
+        k = np.arange(1, t + 1)
+        w = alpha * (1 - alpha) ** (t - k)
+        w = w / w.sum()
+        mean = (w * data[:t]).sum()
+        var = (w * data[:t] ** 2).sum() - mean**2
+        z[t - 1] = (data[t - 1] - mean) / np.sqrt(var) if var > 0 else 0.0
+    return z
+
+
 def test_scaler(fixture_arrays):
-    data, expected_result = fixture_arrays
+    data, _ = fixture_arrays
     chunker = array_chunker(data, 4, fs=100.0)
     test_input = list(chunker)
     backup = copy.deepcopy(test_input)
@@ -61,7 +80,9 @@ def test_scaler(fixture_arrays):
     for chunk in test_input:
         outputs.append(xformer(chunk))
     output = AxisArray.concatenate(*outputs, dim="time")
-    assert np.allclose(output.data, expected_result, atol=1e-3)
+    # Bias-corrected scaler == exact windowed z-score; first output is 0 (var 0).
+    assert np.allclose(output.data, _bias_corrected_zscore_1d(data, tau, fs=100.0), atol=1e-6)
+    assert np.isclose(output.data.flat[0], 0.0)
     assert_messages_equal(test_input, backup)
 
 
@@ -458,3 +479,72 @@ def test_adaptive_scaler_river_empty_first():
     result = proc(empty)
     check_empty_result(result)
     check_state_not_corrupted(proc, normal)
+
+
+# ---------------------------------------------------------------------------
+# Bias-correction: the scaler's child EWMAs zero-initialize and divide by
+# 1-(1-alpha)^t, so the running mean and variance are the exact averages of the
+# samples seen so far -- well-scaled from the first sample, with no cold-start
+# warmup and no seeding required. (A genuine transient *first sample* still
+# enters the windowed stats for ~tau; that is removed upstream at the source by
+# the filter edge-scaling, not by the scaler.)
+# ---------------------------------------------------------------------------
+
+
+def test_scaler_first_output_is_zero():
+    """On the first sample the running mean equals x0 and the variance is 0, so
+    the bias-corrected z-score is 0 -- for any time_constant, even when x0 is a
+    large transient."""
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal((500, 1))
+    x[0, 0] = 100.0  # transient first sample
+    msg = AxisArray(x, dims=["time", "ch"], axes=frozendict({"time": AxisArray.TimeAxis(fs=100.0)}))
+    for tau in (0.05, 1.0, 100.0):
+        out = AdaptiveStandardScalerTransformer(time_constant=tau, axis="time")(msg)
+        assert np.isclose(out.data[0, 0], 0.0)
+
+
+def test_scaler_matches_exact_windowed_zscore():
+    """The bias-corrected scaler equals the exact windowed z-score reference at
+    every step (no warmup bias)."""
+    fs = 100.0
+    tau = 0.3
+    rng = np.random.default_rng(5)
+    data = rng.normal(3.0, 2.0, size=200)
+    msg = AxisArray(data[:, None], dims=["time", "ch"], axes=frozendict({"time": AxisArray.TimeAxis(fs=fs)}))
+    out = AdaptiveStandardScalerTransformer(time_constant=tau, axis="time")(msg)
+    np.testing.assert_allclose(out.data[:, 0], _bias_corrected_zscore_1d(data, tau, fs), atol=1e-8)
+
+
+def test_scaler_no_variance_warmup():
+    """On clean zero-mean unit-variance data the scaler is ~N(0,1) early on:
+    bias-correction removes the inflated-variance warmup an un-normalized EWMA
+    produces (early variance biased low -> early z-scores blown up)."""
+    fs = 100.0
+    rng = np.random.default_rng(7)
+    x = rng.standard_normal((3000, 4))
+    msg = AxisArray(x, dims=["time", "ch"], axes=frozendict({"time": AxisArray.TimeAxis(fs=fs)}))
+    out = AdaptiveStandardScalerTransformer(time_constant=1.0, axis="time")(msg).data
+    win = slice(20, 400)  # early (well inside 3*tau=300 samples), past few-sample noise
+    assert abs(out[win].mean()) < 0.2
+    assert 0.7 < out[win].std() < 1.4
+
+
+def test_scaler_bias_correction_survives_chunking():
+    """The cumulative sample count is carried in state, so a chunked stream
+    produces the same z-scores as a single pass."""
+    fs = 100.0
+    tau = 0.3
+    rng = np.random.default_rng(9)
+    data = rng.normal(0.0, 1.0, size=(151, 2))
+
+    def mk(d, offset):
+        return AxisArray(d, dims=["time", "ch"], axes=frozendict({"time": AxisArray.TimeAxis(fs=fs, offset=offset / fs)}))
+
+    single = AdaptiveStandardScalerTransformer(time_constant=tau, axis="time")(mk(data, 0)).data
+    chunked = AdaptiveStandardScalerTransformer(time_constant=tau, axis="time")
+    parts, n = [], 0
+    for c in np.array_split(data, 6, axis=0):
+        parts.append(chunked(mk(c, n)).data)
+        n += c.shape[0]
+    np.testing.assert_allclose(np.concatenate(parts, axis=0), single, atol=1e-10)

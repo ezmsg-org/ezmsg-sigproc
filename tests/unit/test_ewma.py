@@ -42,15 +42,21 @@ def test_ewma():
         },
     )
 
-    # Expected
-    expected = [data[0]]
+    # Expected: bias-corrected EWMA (zero-init recursion divided by
+    # 1-(1-alpha)^t), i.e. the exact exponentially-weighted average of the
+    # samples seen so far. The first output equals the first sample.
+    raw = np.zeros_like(data)
+    prev = np.zeros_like(data[0])
     for ix, dat in enumerate(data):
-        expected.append(ewma_step(dat, expected[-1], alpha))
-    expected = np.stack(expected)[1:]
+        prev = ewma_step(dat, prev, alpha)
+        raw[ix] = prev
+    t = np.arange(1, n_times + 1).reshape(-1, 1, 1)
+    expected = raw / (1.0 - (1.0 - alpha) ** t)
 
     ewma = EWMATransformer(time_constant=time_constant, axis="time", accumulate=True)
     res = ewma(msg)
     assert np.allclose(res.data, expected)
+    assert np.allclose(res.data[0], data[0])  # first output is exactly the first sample
 
 
 @requires_mlx
@@ -359,3 +365,56 @@ class TestEWMAUpdateSettings:
         alpha_after = proc._state.alpha
         assert alpha_after != alpha_before
         assert np.isclose(alpha_after, _alpha_from_tau(0.5, 1 / 1000.0))
+
+
+def test_ewma_bias_correction_first_output_is_first_sample():
+    """The bias-corrected EWMA has no phantom initial value: the first output is
+    exactly the first sample (independent of time_constant)."""
+    fs = 100.0
+    for tau in (0.05, 1.0, 30.0):
+        data = np.arange(1, 51, dtype=float).reshape(50, 1) * np.array([[1.0, -3.0]])
+        msg = AxisArray(data=data, dims=["time", "ch"], axes={"time": AxisArray.TimeAxis(fs=fs)})
+        out = EWMATransformer(time_constant=tau, axis="time", accumulate=True)(msg)
+        np.testing.assert_allclose(out.data[0], data[0])
+
+
+def test_ewma_bias_correction_matches_windowed_average():
+    """The bias-corrected EWMA equals the exact normalized exponentially-
+    weighted average of the samples seen so far (adjust=True), with no warmup."""
+    fs = 100.0
+    tau = 0.3
+    alpha = _alpha_from_tau(tau, 1 / fs)
+    rng = np.random.default_rng(0)
+    data = rng.normal(5.0, 2.0, size=(80, 4))
+    msg = AxisArray(data=data, dims=["time", "ch"], axes={"time": AxisArray.TimeAxis(fs=fs)})
+
+    out = EWMATransformer(time_constant=tau, axis="time", accumulate=True)(msg)
+
+    # Reference: exact windowed weighted average at each t.
+    expected = np.empty_like(data)
+    for t in range(1, len(data) + 1):
+        k = np.arange(1, t + 1)
+        w = alpha * (1 - alpha) ** (t - k)
+        expected[t - 1] = (w[:, None] * data[:t]).sum(axis=0) / w.sum()
+    np.testing.assert_allclose(out.data, expected, rtol=1e-10, atol=1e-10)
+
+
+def test_ewma_bias_correction_survives_chunking():
+    """Bias-correction uses a cumulative sample count carried in state, so a
+    chunked stream produces the same output as a single pass."""
+    fs = 100.0
+    tau = 0.3
+    rng = np.random.default_rng(1)
+    data = rng.normal(0.0, 1.0, size=(97, 3))
+
+    def mk(d, offset):
+        return AxisArray(data=d, dims=["time", "ch"], axes={"time": AxisArray.TimeAxis(fs=fs, offset=offset / fs)})
+
+    single = EWMATransformer(time_constant=tau, axis="time", accumulate=True)(mk(data, 0)).data
+
+    chunked = EWMATransformer(time_constant=tau, axis="time", accumulate=True)
+    parts, n = [], 0
+    for c in np.array_split(data, 7, axis=0):
+        parts.append(chunked(mk(c, n)).data)
+        n += c.shape[0]
+    np.testing.assert_allclose(np.concatenate(parts, axis=0), single, rtol=1e-10, atol=1e-10)

@@ -314,6 +314,10 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
     def __call__(self, message: AxisArray) -> AxisArray:
         if self.settings.coefs is None:
             return message
+        # Empty chunks can't supply the first sample that zi edge-scaling
+        # needs, so defer state creation until the first non-empty chunk.
+        if message.data.size == 0:
+            return message
         if self._state.zi is None:
             self._reset_state(message)
             self._hash = self._hash_message(message)
@@ -326,23 +330,31 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
         return hash((message.key, samp_shape))
 
     def _reset_state(self, message: AxisArray) -> None:
+        # __call__ guarantees a non-empty message here. Initial conditions are
+        # edge-scaled by the first sample x0 -- the scipy ``lfilter_zi * x[0]``
+        # idiom -- treating the pre-stream signal as constant x0 so that a DC
+        # offset does not ring through as a start-up transient.
         axis = message.dims[0] if self.settings.axis is None else self.settings.axis
         axis_idx = message.get_axis_idx(axis)
         n_tail = message.data.ndim - axis_idx - 1
         _, coefs = _normalize_coefs(self.settings.coefs)
+
+        first_idx = tuple(slice(0, 1) if i == axis_idx else slice(None) for i in range(message.data.ndim))
 
         if self.settings.coef_type == "ba":
             b, a = coefs
             is_fir = len(a) == 1 or np.allclose(a[1:], 0)
 
             if is_fir and not is_numpy_array(message.data):
-                # FIR + non-numpy: use conv_general if available, else FFT
+                # FIR + non-numpy: use conv_general if available, else FFT.
+                # The zi buffer holds the last M input samples; fill with x0.
                 xp = get_namespace(message.data)
                 dev = array_device(message.data)
                 M = len(b) - 1  # filter order
                 zi_shape = list(message.data.shape)
                 zi_shape[axis_idx] = M
-                self.state.zi = xp_create(xp.zeros, tuple(zi_shape), dtype=message.data.dtype, device=dev)
+                zeros = xp_create(xp.zeros, tuple(zi_shape), dtype=message.data.dtype, device=dev)
+                self.state.zi = zeros + message.data[first_idx]
                 # 1D taps for conv path
                 self.state.fir_b_1d = xp_asarray(xp, b, dtype=message.data.dtype, device=dev)
                 # Reshape b to broadcast: (1, ..., M+1, ..., 1) for FFT path
@@ -355,11 +367,11 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
                 self.state.sos_mx = None
                 return
 
-            if is_fir:
-                # FIR + numpy: use lfiltic with zero initial conditions
-                zi = scipy.signal.lfiltic(b, a, [])
+            if max(len(b), len(a)) < 2:
+                # Single-tap filter: zero-length state; lfilter_zi needs len >= 2.
+                zi = np.zeros(0)
             else:
-                # IIR filters...
+                # Constant-unit-input steady state; valid for FIR (a=[1]) and IIR.
                 zi = scipy.signal.lfilter_zi(b, a)
         else:
             # For second-order sections (SOS) filters, use sosfilt_zi
@@ -373,6 +385,8 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
             n_tile = (1,) + n_tile
 
         zi_tiled = np.tile(zi[zi_expand], n_tile)
+        zi_tiled = zi_tiled * np.asarray(message.data[first_idx])  # edge-scale by x0
+
         self.state.fir_method = None
         self.state.fir_b = None
         self.state.fir_b_1d = None
