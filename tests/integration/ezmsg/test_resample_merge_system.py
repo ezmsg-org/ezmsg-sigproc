@@ -218,7 +218,7 @@ def test_resample_merge_seizes_when_recovery_disabled_system(test_name: str | No
     large sustained backward offset jump pushes the reference permanently below the
     resampler's high-water mark and the merged output ceases well before input is exhausted.
     """
-    n_msgs, _, _, last_t = _run_resample_merge(
+    _, _, _, last_t = _run_resample_merge(
         glitch_at=15,
         glitch_back=100.0,
         reset_after=float("inf"),
@@ -228,8 +228,12 @@ def test_resample_merge_seizes_when_recovery_disabled_system(test_name: str | No
     # Output ceases at the chunk-15 glitch, so the last emitted sample sits near
     # 15*30/1000 = 0.45 s; a recovered/healthy run reaches >= 0.799 s. Assert on
     # last sample time (see _run) -- it isolates "output stopped early" from the
-    # variable amount of data dropped. n_msgs > 0 is a liveness sanity.
-    assert n_msgs > 0 and last_t < 0.6, f"Expected output to cease near the chunk-15 glitch, got {last_t:.3f} s."
+    # variable amount of data dropped. Zero output (last_t == -inf) also
+    # satisfies the property under test: on a loaded runner the pipeline's
+    # warmup can lose the race with the seize, so the graph ceases before its
+    # *first* emission. Liveness of the wiring itself is covered by
+    # test_resample_merge_healthy_system on the identical graph.
+    assert last_t < 0.6, f"Expected output to cease near the chunk-15 glitch, got {last_t:.3f} s."
 
 
 def test_resample_merge_recovers_with_output_reference_system(test_name: str | None = None):
