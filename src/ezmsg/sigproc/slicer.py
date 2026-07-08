@@ -1,5 +1,7 @@
 """Select a subset of data along a named axis using slice notation."""
 
+import re
+
 import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
@@ -34,13 +36,17 @@ def parse_slice(
     - "5" (or any integer) -> (5,). Take only that item.
         applying this to a ndarray or AxisArray will drop the dimension.
     - A comma-separated list of the above -> a tuple of slices | ints
-    - A comma-separated list of values and axinfo is provided and is a CoordinateAxis -> a tuple of ints
+    - A comma-separated list of values and axinfo is provided and is a CoordinateAxis -> a tuple of ints.
+      Each value is first compared against the axis labels for an exact match; failing
+      that, it is treated as a regular expression and full-matched against the labels
+      (e.g. "C[34]" or "Ch.*"). Note: tokens containing ":" are parsed as slices, so
+      regexes may not contain ":".
 
     Args:
         s: The string representation of the slice.
         axinfo: (Optional) If provided, and of type CoordinateAxis,
           and `s` is a comma-separated list of values, then the values
-          in s will be checked against the values in axinfo.data.
+          in s will be matched (exactly, then as regex) against the values in axinfo.data.
 
     Returns:
         A tuple of slice objects and/or ints.
@@ -52,7 +58,19 @@ def parse_slice(
         if len(parts) == 1:
             if axinfo is not None and hasattr(axinfo, "data") and parts[0] in axinfo.data:
                 return tuple(np.where(axinfo.data == parts[0])[0])
-            return (int(parts[0]),)
+            try:
+                return (int(parts[0]),)
+            except ValueError:
+                if axinfo is not None and hasattr(axinfo, "data"):
+                    pattern = re.compile(parts[0])
+                    hits = tuple(ix for ix, label in enumerate(axinfo.data) if pattern.fullmatch(str(label)))
+                    if hits:
+                        return hits
+                    raise ValueError(
+                        f"Selection {parts[0]!r} matched no labels on the target axis "
+                        f"(neither exactly nor as a regex)."
+                    ) from None
+                raise
         return (slice(*(int(part.strip()) if part else None for part in parts)),)
     suplist = [parse_slice(_, axinfo=axinfo) for _ in s.split(",")]
     return tuple([item for sublist in suplist for item in sublist])
