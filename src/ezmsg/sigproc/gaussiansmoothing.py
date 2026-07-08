@@ -14,10 +14,13 @@ from .filter import (
 
 
 class GaussianSmoothingSettings(FilterBaseSettings):
-    sigma: float | None = 1.0
+    sigma: float | None = 0.01
     """
     sigma : float
-        Standard deviation of the Gaussian kernel.
+        Standard deviation of the Gaussian kernel, in **seconds**. Converted
+        to samples using the sampling rate of the first message.
+        The -3 dB corner frequency is sqrt(ln 2) / (2 * pi * sigma); the
+        default of 0.01 s is equivalent to a ~13.2 Hz low-pass.
     """
 
     width: int | None = 4
@@ -38,6 +41,8 @@ def gaussian_smoothing_filter_design(
     width: int = 4,
     kernel_size: int | None = None,
 ) -> BACoeffs | None:
+    """Design a normalized Gaussian FIR kernel. ``sigma`` is in **samples**;
+    callers with a time-domain sigma must scale by the sampling rate first."""
     # Parameter checks
     if sigma <= 0:
         raise ValueError(f"sigma must be positive. Received: {sigma}")
@@ -61,6 +66,12 @@ def gaussian_smoothing_filter_design(
             "The kernel may be truncated."
         )
 
+    if kernel_size == 1:
+        warnings.warn(
+            f"kernel_size=1 (sigma={sigma} samples, width={width}) yields an "
+            "identity (single-tap) kernel: no smoothing will be performed."
+        )
+
     from scipy.signal.windows import gaussian
 
     b = gaussian(kernel_size, std=sigma)
@@ -74,10 +85,9 @@ class GaussianSmoothingFilterTransformer(FilterByDesignTransformer[GaussianSmoot
     def get_design_function(
         self,
     ) -> Callable[[float], BACoeffs]:
-        # Create a wrapper function that ignores fs parameter since gaussian smoothing doesn't need it
         def design_wrapper(fs: float) -> BACoeffs:
             return gaussian_smoothing_filter_design(
-                sigma=self.settings.sigma,
+                sigma=self.settings.sigma * fs,  # settings.sigma is in seconds
                 width=self.settings.width,
                 kernel_size=self.settings.kernel_size,
             )
