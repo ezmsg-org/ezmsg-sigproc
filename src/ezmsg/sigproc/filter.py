@@ -380,10 +380,16 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
                 self.state.sos_mx = None
                 return
 
-            # ``lfilter_zi`` gives the steady state for a constant unit input and
-            # works for FIR (a=[1]) as well as IIR; edge-scaling by x0 below then
-            # yields the constant-x0 pre-history for both.
-            zi = scipy.signal.lfilter_zi(b, a)
+            if max(len(b), len(a)) < 2:
+                # Zero-order (single-tap) filter: there is no state to
+                # initialize. ``lfilter`` accepts a zero-length zi;
+                # ``lfilter_zi`` cannot compute one (needs len >= 2).
+                zi = np.zeros(0)
+            else:
+                # ``lfilter_zi`` gives the steady state for a constant unit input and
+                # works for FIR (a=[1]) as well as IIR; edge-scaling by x0 below then
+                # yields the constant-x0 pre-history for both.
+                zi = scipy.signal.lfilter_zi(b, a)
         else:
             # For second-order sections (SOS) filters, use sosfilt_zi. This is
             # the constant-unit-input steady state for both IIR and FIR-as-SOS.
