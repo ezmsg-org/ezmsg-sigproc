@@ -13,10 +13,6 @@ class DetrendTransformer(EWMATransformer):
     """
 
     def _process(self, message):
-        # Subtract the parent's (bias-corrected) EWMA estimate of the mean.
-        # Reusing it keeps the baseline free of the cold-start warmup -- it is
-        # the exact windowed mean from the first sample, so detrending is
-        # well-behaved immediately instead of ramping up from a zero baseline.
         means = super()._process(message)
         return replace(message, data=message.data - means.data)
 

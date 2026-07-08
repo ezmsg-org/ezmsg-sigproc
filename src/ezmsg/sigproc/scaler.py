@@ -85,13 +85,7 @@ class RiverAdaptiveStandardScalerTransformer(
         return replace(message, data=result)
 
 
-class AdaptiveStandardScalerSettings(EWMASettings):
-    """Settings for the vectorized EWMA-based adaptive standard scaler.
-
-    Inherits ``time_constant`` / ``axis`` / ``accumulate`` / ``passthrough``
-    from :class:`EWMASettings`. The mean and second-moment estimates are
-    bias-corrected (see :class:`EWMATransformer`), so the scaler is well-scaled
-    from the first sample with no cold-start warmup and no seeding needed."""
+class AdaptiveStandardScalerSettings(EWMASettings): ...
 
 
 @processor_state
@@ -133,11 +127,6 @@ class AdaptiveStandardScalerTransformer(
         super().update_settings(new_settings)
 
     def _reset_state(self, message: AxisArray) -> None:
-        # The child EWMAs zero-initialize and bias-correct their estimates (see
-        # EWMATransformer), so the running mean and second moment are the exact
-        # averages of the samples seen so far. The first z-score uses the first
-        # sample as the mean (variance 0 -> masked to 0) and converges without a
-        # cold-start warmup, so no seeding is required.
         self._state.samps_ewma = EWMATransformer(
             time_constant=self.settings.time_constant,
             axis=self.settings.axis,
