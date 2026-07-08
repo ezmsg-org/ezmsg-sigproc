@@ -149,3 +149,41 @@ def test_slicer_empty_first():
     result = proc(empty)
     check_empty_result(result)
     check_state_not_corrupted(proc, normal)
+
+
+def test_parse_slice_regex():
+    ax = AxisArray.CoordinateAxis(data=np.array(["Fp1", "Fp2", "C3", "C4", "Cz", "O1", "O2"]), dims=["ch"])
+    # Exact match still wins and returns that single index.
+    assert parse_slice("C3", axinfo=ax) == (2,)
+    # Regex full-match: all central channels.
+    assert parse_slice("C[34z]", axinfo=ax) == (2, 3, 4)
+    # Prefix pattern.
+    assert parse_slice("Fp.*", axinfo=ax) == (0, 1)
+    # Comma-separated mix of exact labels and patterns concatenates in order.
+    assert parse_slice("O.*, C3", axinfo=ax) == (5, 6, 2)
+    # fullmatch semantics: a bare prefix is not a match.
+    with pytest.raises(ValueError, match="matched no labels"):
+        parse_slice("Fp", axinfo=ax)
+    # Without axinfo, non-numeric tokens are still an error (int parse).
+    with pytest.raises(ValueError):
+        parse_slice("C[34z]")
+
+
+def test_slicer_regex_selection():
+    n_times = 20
+    labels = np.array(["Fp1", "Fp2", "C3", "C4", "Cz", "O1", "O2"])
+    n_chans = len(labels)
+    in_dat = np.arange(n_times * n_chans, dtype=float).reshape(n_times, n_chans)
+    msg_in = AxisArray(
+        in_dat,
+        dims=["time", "ch"],
+        axes={
+            "time": AxisArray.TimeAxis(fs=100.0, offset=0.0),
+            "ch": AxisArray.CoordinateAxis(data=labels, dims=["ch"]),
+        },
+        key="test_slicer_regex_selection",
+    )
+    xformer = SlicerTransformer(SlicerSettings(selection="C.*", axis="ch"))
+    msg_out = xformer(msg_in)
+    assert np.array_equal(msg_out.data, in_dat[:, 2:5])
+    assert np.array_equal(msg_out.axes["ch"].data, labels[2:5])
