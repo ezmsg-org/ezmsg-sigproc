@@ -53,6 +53,12 @@ class CWTTransformer(BaseStatefulTransformer[CWTSettings, AxisArray, AxisArray, 
         )
 
     def _reset_state(self, message: AxisArray) -> None:
+        if "freq" in message.dims:
+            raise ValueError(
+                "CWT appends a 'freq' axis to its output, but the input already has one "
+                f"(dims={message.dims}). CWT expects a time-domain input; if the upstream "
+                "node emits spectral data, remove or rename its 'freq' axis first."
+            )
         precision = 10
 
         # Process wavelet

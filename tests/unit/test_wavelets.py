@@ -141,3 +141,50 @@ def test_cwt():
         axes[2, ch_ix].set_yscale("log")
     plt.show()
     """
+
+
+def test_cwt_rejects_input_with_freq_axis():
+    """Regression for #41: an input that already carries a 'freq' dim used to
+    crash with an opaque 'dims contains repeated dim names'."""
+    import pytest
+
+    msg = AxisArray(
+        data=np.zeros((3, 2, 100)),
+        dims=["freq", "ch", "time"],
+        axes={
+            "freq": AxisArray.LinearAxis(unit="Hz", offset=0.0, gain=1.0),
+            "ch": AxisArray.CoordinateAxis(data=np.array(["Ch0", "Ch1"]), dims=["ch"]),
+            "time": AxisArray.TimeAxis(fs=1000.0, offset=0.0),
+        },
+        key="test_cwt_freq_input",
+    )
+    proc = CWTTransformer(CWTSettings(frequencies=None, scales=np.geomspace(4, 64, num=8), wavelet="morl", axis="time"))
+    with pytest.raises(ValueError, match="already has"):
+        proc(msg)
+
+
+def test_cwt_complex_wavelet_min_phase_informative_error():
+    """Regression for #41: complex/analytic wavelet + min_phase used to bubble
+    up scipy's bare 'Complex filters not supported'."""
+    import pytest
+
+    msg = AxisArray(
+        data=np.zeros((2, 100)),
+        dims=["ch", "time"],
+        axes={
+            "ch": AxisArray.CoordinateAxis(data=np.array(["Ch0", "Ch1"]), dims=["ch"]),
+            "time": AxisArray.TimeAxis(fs=1000.0, offset=0.0),
+        },
+        key="test_cwt_cmor_minphase",
+    )
+    proc = CWTTransformer(
+        CWTSettings(
+            frequencies=None,
+            scales=np.geomspace(4, 64, num=8),
+            wavelet="cmor3.0-0.5",
+            min_phase=MinPhaseMode.HOMOMORPHIC,
+            axis="time",
+        )
+    )
+    with pytest.raises(ValueError, match="[Cc]omplex.*min[_ ]phase|min_phase.*complex"):
+        proc(msg)

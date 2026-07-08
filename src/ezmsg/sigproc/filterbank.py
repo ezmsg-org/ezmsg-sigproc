@@ -110,6 +110,13 @@ class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArra
 
         kernels = self.settings.kernels
         if self.settings.min_phase != MinPhaseMode.NONE:
+            if any(np.iscomplexobj(k) for k in kernels):
+                raise ValueError(
+                    "min_phase conversion is not supported for complex kernels: "
+                    "scipy.signal.minimum_phase only accepts real filters. Complex/analytic "
+                    "wavelets (e.g. 'cmor') cannot be min-phased; use MinPhaseMode.NONE or a "
+                    "real wavelet/kernel."
+                )
             method, half = {
                 MinPhaseMode.HILBERT: ("hilbert", False),
                 MinPhaseMode.HOMOMORPHIC: ("homomorphic", False),
