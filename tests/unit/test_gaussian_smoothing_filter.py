@@ -1,3 +1,6 @@
+import asyncio
+import warnings
+
 import numpy as np
 import pytest
 from ezmsg.util.messages.axisarray import AxisArray
@@ -275,13 +278,58 @@ def test_gaussian_sigma_is_in_seconds():
     assert len_1000 == int(2 * 4 * 0.02 * 1000.0 + 1)
 
 
-def test_gaussian_identity_kernel_warns_and_passes_through():
-    """An explicit single-tap kernel warns and leaves the data unchanged."""
-    proc = GaussianSmoothingFilterTransformer(GaussianSmoothingSettings(sigma=0.02, kernel_size=1, axis="time"))
+def test_gaussian_identity_kernel_design_warns():
+    """The standalone design function still warns for a single-tap kernel."""
+    with pytest.warns(UserWarning, match="identity"):
+        gaussian_smoothing_filter_design(sigma=2.0, kernel_size=1)
+
+
+@pytest.mark.parametrize(
+    "settings_kwargs",
+    [
+        {"sigma": None},
+        {"sigma": 0.0},
+        {"sigma": -0.01},
+        {"width": None},
+        {"width": 0},
+        {"width": -2},
+        {"kernel_size": 0},
+        {"kernel_size": 1},
+        {"kernel_size": -1},
+    ],
+)
+def test_gaussian_passthrough_settings(settings_kwargs):
+    """Degenerate settings disable smoothing: input passes through unchanged, silently."""
+    proc = GaussianSmoothingFilterTransformer(GaussianSmoothingSettings(axis="time", **settings_kwargs))
     msg = make_msg()
-    with pytest.warns(UserWarning):
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
         result = proc(msg)
-    assert np.allclose(result.data, msg.data)
+    assert result.data is msg.data
+    assert proc.state.filter.settings.coefs is None
+
+
+def test_gaussian_passthrough_async_path():
+    """The async unit path (__acall__ -> _aprocess) bypasses the sync __call__
+    shortcut, so passthrough must survive it too."""
+    proc = GaussianSmoothingFilterTransformer(GaussianSmoothingSettings(axis="time", sigma=0.0))
+    msg = make_msg()
+    result = asyncio.run(proc.__acall__(msg))
+    assert result.data is msg.data
+
+
+def test_gaussian_passthrough_toggle():
+    """Smoothing can be disabled and re-enabled live via update_settings."""
+    proc = GaussianSmoothingFilterTransformer(GaussianSmoothingSettings(axis="time", sigma=0.0))
+    msg = make_msg()
+    assert proc(msg).data is msg.data
+
+    proc.update_settings(sigma=0.02)  # 2 samples at 100 Hz
+    smoothed = proc(msg)
+    assert not np.allclose(smoothed.data, msg.data)
+
+    proc.update_settings(sigma=0.0)
+    assert proc(msg).data is msg.data
 
 
 def test_gaussian_empty_after_init():

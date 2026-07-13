@@ -84,8 +84,16 @@ def gaussian_smoothing_filter_design(
 class GaussianSmoothingFilterTransformer(FilterByDesignTransformer[GaussianSmoothingSettings, BACoeffs]):
     def get_design_function(
         self,
-    ) -> Callable[[float], BACoeffs]:
-        def design_wrapper(fs: float) -> BACoeffs:
+    ) -> Callable[[float], BACoeffs | None]:
+        def design_wrapper(fs: float) -> BACoeffs | None:
+            if (
+                self.settings.sigma is None
+                or self.settings.sigma <= 0
+                or self.settings.width is None
+                or self.settings.width <= 0
+                or (self.settings.kernel_size is not None and self.settings.kernel_size <= 1)
+            ):
+                return None
             return gaussian_smoothing_filter_design(
                 sigma=self.settings.sigma * fs,  # settings.sigma is in seconds
                 width=self.settings.width,
