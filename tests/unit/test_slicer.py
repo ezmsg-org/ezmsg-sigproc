@@ -169,6 +169,104 @@ def test_parse_slice_regex():
         parse_slice("C[34z]")
 
 
+def _structured_ch_axis(labels: list[str]) -> AxisArray.CoordinateAxis:
+    """Build a ChannelMap-style structured coordinate axis (x/y/label/bank fields)."""
+    dt = np.dtype([("x", float), ("y", float), ("label", "U8"), ("bank", int)])
+    data = np.array([(float(ix % 2), float(ix // 2), lab, ix // 4) for ix, lab in enumerate(labels)], dtype=dt)
+    return AxisArray.CoordinateAxis(data=data, dims=["ch"])
+
+
+def test_parse_slice_structured_axis():
+    ax = _structured_ch_axis(["Fp1", "Fp2", "C3", "C4", "Cz", "O1", "O2"])
+    # Labels come from the "label" field: exact match, then regex.
+    assert parse_slice("C3", axinfo=ax) == (2,)
+    assert parse_slice("C[34z]", axinfo=ax) == (2, 3, 4)
+    assert parse_slice("O.*, C3", axinfo=ax) == (5, 6, 2)
+    # Integer and slice selections must not trip on the structured dtype.
+    assert parse_slice("5", axinfo=ax) == (5,)
+    assert parse_slice("1, 3:5", axinfo=ax) == (1, slice(3, 5))
+    with pytest.raises(ValueError, match="matched no labels"):
+        parse_slice("Fp", axinfo=ax)
+
+    # A structured axis without a "label" field supports only integer/slice selections.
+    dt = np.dtype([("x", float), ("y", float)])
+    ax_nolabel = AxisArray.CoordinateAxis(data=np.zeros(4, dtype=dt), dims=["ch"])
+    assert parse_slice("2", axinfo=ax_nolabel) == (2,)
+    with pytest.raises(ValueError):
+        parse_slice("C3", axinfo=ax_nolabel)
+
+
+def test_parse_slice_explicit_field():
+    # Banks: [0, 0, 0, 0, 1, 1, 1] (see _structured_ch_axis: ix // 4)
+    ax = _structured_ch_axis(["Fp1", "Fp2", "C3", "C4", "Cz", "O1", "O2"])
+    # Tokens match field values (stringified ints), not positions.
+    assert parse_slice("0", axinfo=ax, field="bank") == (0, 1, 2, 3)
+    assert parse_slice("1", axinfo=ax, field="bank") == (4, 5, 6)
+    assert parse_slice("1, 0", axinfo=ax, field="bank") == (4, 5, 6, 0, 1, 2, 3)
+    # With an explicit field there is no positional-int fallback.
+    with pytest.raises(ValueError, match="matched no values in field 'bank'"):
+        parse_slice("5", axinfo=ax, field="bank")
+    # Positional selection is still available via slice syntax.
+    assert parse_slice("3:4", axinfo=ax, field="bank") == (slice(3, 4),)
+    # Regex matches against the stringified field values.
+    assert parse_slice("[01]", axinfo=ax, field="bank") == (0, 1, 2, 3, 4, 5, 6)
+    # A missing field errors and names the available fields.
+    with pytest.raises(ValueError, match="no field 'elec'.*'bank'"):
+        parse_slice("0", axinfo=ax, field="elec")
+    # An unstructured axis errors with an explicit field.
+    ax_flat = AxisArray.CoordinateAxis(data=np.array(["Ch0", "Ch1"]), dims=["ch"])
+    with pytest.raises(ValueError, match="unstructured data"):
+        parse_slice("Ch0", axinfo=ax_flat, field="bank")
+    # A missing axis errors too.
+    with pytest.raises(ValueError, match="no coordinate data"):
+        parse_slice("0", axinfo=None, field="bank")
+
+
+def test_slicer_field_selection():
+    n_times = 20
+    labels = ["Fp1", "Fp2", "C3", "C4", "Cz", "O1", "O2"]
+    n_chans = len(labels)
+    in_dat = np.arange(n_times * n_chans, dtype=float).reshape(n_times, n_chans)
+    ch_axis = _structured_ch_axis(labels)
+    msg_in = AxisArray(
+        in_dat,
+        dims=["time", "ch"],
+        axes={
+            "time": AxisArray.TimeAxis(fs=100.0, offset=0.0),
+            "ch": ch_axis,
+        },
+        key="test_slicer_field_selection",
+    )
+    xformer = SlicerTransformer(SlicerSettings(selection="1", axis="ch", field="bank"))
+    msg_out = xformer(msg_in)
+    assert np.array_equal(msg_out.data, in_dat[:, 4:7])
+    assert msg_out.axes["ch"].data.dtype == ch_axis.data.dtype
+    assert np.array_equal(msg_out.axes["ch"].data, ch_axis.data[4:7])
+
+
+def test_slicer_structured_axis():
+    n_times = 20
+    labels = ["Fp1", "Fp2", "C3", "C4", "Cz", "O1", "O2"]
+    n_chans = len(labels)
+    in_dat = np.arange(n_times * n_chans, dtype=float).reshape(n_times, n_chans)
+    ch_axis = _structured_ch_axis(labels)
+    msg_in = AxisArray(
+        in_dat,
+        dims=["time", "ch"],
+        axes={
+            "time": AxisArray.TimeAxis(fs=100.0, offset=0.0),
+            "ch": ch_axis,
+        },
+        key="test_slicer_structured_axis",
+    )
+    xformer = SlicerTransformer(SlicerSettings(selection="C.*", axis="ch"))
+    msg_out = xformer(msg_in)
+    assert np.array_equal(msg_out.data, in_dat[:, 2:5])
+    # The sliced axis keeps its structured records.
+    assert msg_out.axes["ch"].data.dtype == ch_axis.data.dtype
+    assert np.array_equal(msg_out.axes["ch"].data, ch_axis.data[2:5])
+
+
 def test_slicer_regex_selection():
     n_times = 20
     labels = np.array(["Fp1", "Fp2", "C3", "C4", "Cz", "O1", "O2"])
