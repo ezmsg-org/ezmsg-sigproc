@@ -285,3 +285,42 @@ def test_slicer_regex_selection():
     msg_out = xformer(msg_in)
     assert np.array_equal(msg_out.data, in_dat[:, 2:5])
     assert np.array_equal(msg_out.axes["ch"].data, labels[2:5])
+
+
+def test_parse_slice_allow_empty():
+    ax = AxisArray.CoordinateAxis(data=np.array(["Fp1", "Fp2", "C3", "C4"]), dims=["ch"])
+    # Default: a non-matching selection raises.
+    with pytest.raises(ValueError, match="matched no labels"):
+        parse_slice("XYZ.*", axinfo=ax)
+    # allow_empty: a non-matching token yields no indices instead of raising.
+    assert parse_slice("XYZ.*", axinfo=ax, allow_empty=True) == ()
+    # Comma-separated: non-matching tokens are dropped, matching ones kept, in order.
+    assert parse_slice("XYZ.*, C.*", axinfo=ax, allow_empty=True) == (2, 3)
+    # Every token non-matching -> empty.
+    assert parse_slice("XYZ.*, ABC.*", axinfo=ax, allow_empty=True) == ()
+    # A matching selection is unaffected by allow_empty.
+    assert parse_slice("C.*", axinfo=ax, allow_empty=True) == (2, 3)
+
+
+def test_slicer_allow_empty_emits_empty():
+    data = np.arange(3 * 4).reshape(3, 4).astype(float)
+    msg = AxisArray(
+        data=data,
+        dims=["time", "ch"],
+        axes={
+            "time": AxisArray.TimeAxis(fs=1.0),
+            "ch": AxisArray.CoordinateAxis(data=np.array(["C3", "C4", "O1", "O2"]), dims=["ch"]),
+        },
+        key="allow_empty",
+    )
+    # Default: no match raises.
+    with pytest.raises(ValueError, match="matched no labels"):
+        SlicerTransformer(SlicerSettings(selection="Fp.*", axis="ch"))(msg)
+    # allow_empty: no match -> 0-length along ch, time axis intact.
+    out = SlicerTransformer(SlicerSettings(selection="Fp.*", axis="ch", allow_empty=True))(msg)
+    assert out.data.shape == (3, 0)
+    assert len(out.axes["ch"].data) == 0
+    # allow_empty with a partial match keeps only the matching channels.
+    out2 = SlicerTransformer(SlicerSettings(selection="Fp.*, O.*", axis="ch", allow_empty=True))(msg)
+    assert out2.data.shape == (3, 2)
+    assert [str(x) for x in out2.axes["ch"].data] == ["O1", "O2"]
