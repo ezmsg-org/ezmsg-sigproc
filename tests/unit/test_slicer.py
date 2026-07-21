@@ -1,4 +1,5 @@
 import copy
+import logging
 
 import numpy as np
 import pytest
@@ -285,3 +286,79 @@ def test_slicer_regex_selection():
     msg_out = xformer(msg_in)
     assert np.array_equal(msg_out.data, in_dat[:, 2:5])
     assert np.array_equal(msg_out.axes["ch"].data, labels[2:5])
+
+
+def test_parse_slice_allow_empty():
+    ax = AxisArray.CoordinateAxis(data=np.array(["Fp1", "Fp2", "C3", "C4"]), dims=["ch"])
+    # Default: a non-matching selection raises.
+    with pytest.raises(ValueError, match="matched no labels"):
+        parse_slice("XYZ.*", axinfo=ax)
+    # allow_empty: a non-matching token yields no indices instead of raising.
+    assert parse_slice("XYZ.*", axinfo=ax, allow_empty=True) == ()
+    # Comma-separated: non-matching tokens are dropped, matching ones kept, in order.
+    assert parse_slice("XYZ.*, C.*", axinfo=ax, allow_empty=True) == (2, 3)
+    # Every token non-matching -> empty.
+    assert parse_slice("XYZ.*, ABC.*", axinfo=ax, allow_empty=True) == ()
+    # A matching selection is unaffected by allow_empty.
+    assert parse_slice("C.*", axinfo=ax, allow_empty=True) == (2, 3)
+    # Exact label matches yield Python ints, per the documented return type.
+    assert all(type(ix) is int for ix in parse_slice("Fp1", axinfo=ax))
+
+
+def _make_on_empty_msg() -> AxisArray:
+    return AxisArray(
+        data=np.arange(3 * 4).reshape(3, 4).astype(float),
+        dims=["time", "ch"],
+        axes={
+            "time": AxisArray.TimeAxis(fs=1.0),
+            "ch": AxisArray.CoordinateAxis(data=np.array(["C3", "C4", "O1", "O2"]), dims=["ch"]),
+        },
+        key="on_empty",
+    )
+
+
+def test_slicer_on_empty(caplog):
+    msg = _make_on_empty_msg()
+    # on_empty="raise": no match raises.
+    with pytest.raises(ValueError, match="matched no labels"):
+        SlicerTransformer(SlicerSettings(selection="Fp.*", axis="ch", on_empty="raise"))(msg)
+    # Default ("warn"): no match -> 0-length along ch, time axis intact, and a warning.
+    with caplog.at_level(logging.WARNING, logger="ezmsg"):
+        out = SlicerTransformer(SlicerSettings(selection="Fp.*", axis="ch"))(msg)
+    assert out.data.shape == (3, 0)
+    assert len(out.axes["ch"].data) == 0
+    assert any("matched no entries" in rec.getMessage() for rec in caplog.records)
+    # A partial match keeps only the matching channels and logs the dropped tokens.
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="ezmsg"):
+        out2 = SlicerTransformer(SlicerSettings(selection="Fp.*, O.*", axis="ch"))(msg)
+    assert out2.data.shape == (3, 2)
+    assert [str(x) for x in out2.axes["ch"].data] == ["O1", "O2"]
+    assert any("dropped non-matching" in rec.getMessage() for rec in caplog.records)
+
+
+def test_slicer_single_label_match_keeps_axis():
+    """Output rank must not depend on how many entries match or on on_empty: a
+    label/regex selection resolving to a single entry keeps a length-1 axis
+    instead of dropping the dimension (or crashing, for exact-label matches).
+    Only bare-integer positional selections (e.g. "5") drop the dimension."""
+    msg = _make_on_empty_msg()
+    for selection, on_empty in [
+        ("O1", "raise"),
+        ("O1.*", "raise"),
+        ("Fp.*, O1", "warn"),  # exact single match with a dropped token
+        ("Fp.*, O1.*", "warn"),  # regex single match with a dropped token
+    ]:
+        out = SlicerTransformer(SlicerSettings(selection=selection, axis="ch", on_empty=on_empty))(msg)
+        assert out.data.shape == (3, 1)
+        assert out.dims == ["time", "ch"]
+        assert [str(x) for x in out.axes["ch"].data] == ["O1"]
+    # Bare-integer positional selection still drops the dimension.
+    out = SlicerTransformer(SlicerSettings(selection="1", axis="ch"))(msg)
+    assert out.data.shape == (3,)
+    assert out.dims == ["time"]
+
+
+def test_slicer_on_empty_invalid():
+    with pytest.raises(ValueError, match="on_empty"):
+        SlicerTransformer(SlicerSettings(selection="C.*", axis="ch", on_empty="ignore"))(_make_on_empty_msg())
