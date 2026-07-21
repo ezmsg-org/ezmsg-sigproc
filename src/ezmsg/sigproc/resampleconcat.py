@@ -26,7 +26,6 @@ is new.
 
 from __future__ import annotations
 
-import asyncio
 import typing
 
 import ezmsg.core as ez
@@ -152,19 +151,32 @@ class ResampleConcat(ez.Unit):
     async def initialize(self) -> None:
         self.processor = ResampleConcatProcessor(self.SETTINGS)
 
-    @ez.subscriber(INPUT_REFERENCE)
-    async def on_reference(self, message: AxisArray) -> None:
-        self.processor.push_reference(message)
+    def _drain(self) -> typing.Iterator[AxisArray]:
+        """Yield every chunk the processor can currently produce.
 
-    @ez.subscriber(INPUT_SIGNAL)
-    async def on_signal(self, message: AxisArray) -> None:
-        self.processor.push_signal(message)
-
-    @ez.publisher(OUTPUT_SIGNAL)
-    async def output(self) -> typing.AsyncGenerator:
+        Event-driven draining after each push is lossless here: the composed
+        resampler is always reference-driven (``resample_rate=None``), and in
+        that mode output readiness only ever changes on new input -- the
+        wall-clock ``max_chunk_delay`` extrapolation applies to prescribed-rate
+        mode only. A single ``next()`` consumes all currently-eligible
+        reference values, so this loop runs at most twice.
+        """
         while True:
             result = next(self.processor)
-            if result is not None and np.prod(result.data.shape) > 0:
-                yield self.OUTPUT_SIGNAL, result
-            else:
-                await asyncio.sleep(0)
+            if result is None or np.prod(result.data.shape) == 0:
+                return
+            yield result
+
+    @ez.subscriber(INPUT_REFERENCE)
+    @ez.publisher(OUTPUT_SIGNAL)
+    async def on_reference(self, message: AxisArray) -> typing.AsyncGenerator:
+        self.processor.push_reference(message)
+        for out in self._drain():
+            yield self.OUTPUT_SIGNAL, out
+
+    @ez.subscriber(INPUT_SIGNAL)
+    @ez.publisher(OUTPUT_SIGNAL)
+    async def on_signal(self, message: AxisArray) -> typing.AsyncGenerator:
+        self.processor.push_signal(message)
+        for out in self._drain():
+            yield self.OUTPUT_SIGNAL, out
