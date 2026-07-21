@@ -10,12 +10,20 @@ keep the stream's cadence.
 
 import asyncio
 
+import numpy as np
+from ezmsg.util.messages.axisarray import AxisArray
+
 from ezmsg.sigproc.binned_aggregate import BinnedAggregate, BinnedAggregateSettings
 from ezmsg.sigproc.downsample import Downsample, DownsampleSettings
 from ezmsg.sigproc.resampleconcat import ResampleConcat, ResampleConcatSettings
-from ezmsg.sigproc.util.message import is_empty_along
+from ezmsg.sigproc.util.message import has_samples_along, is_empty_along
 from ezmsg.sigproc.window import Window, WindowSettings
 from tests.helpers.empty_time import make_msg
+
+
+def _null_template() -> AxisArray:
+    """ResampleProcessor's pre-init placeholder: no time axis at all."""
+    return AxisArray(data=np.array([]), dims=[""], axes={}, key="null")
 
 
 def _drive(unit, msg):
@@ -38,6 +46,15 @@ def test_is_empty_along():
     msg = make_msg(n_time=0, n_ch=0)
     assert is_empty_along(msg, ("time",))
     assert is_empty_along(msg, ("ch",))
+
+
+def test_has_samples_along():
+    assert has_samples_along(make_msg(n_time=10, n_ch=0), "time")
+    assert not has_samples_along(make_msg(n_time=10, n_ch=0), "ch")
+    assert not has_samples_along(make_msg(n_time=0, n_ch=3), "time")
+    # A message lacking the dim entirely (e.g. the resample pre-init null
+    # template) has no samples along it.
+    assert not has_samples_along(_null_template(), "time")
 
 
 def test_downsample_gate():
@@ -105,4 +122,8 @@ def test_resampleconcat_drain_gate():
     assert drained[0].data.shape == (5, 0)
     # None also terminates the drain.
     unit.processor = _StubProcessor([None])
+    assert list(unit._drain()) == []
+    # The pre-init null template (no time axis at all) also terminates the
+    # drain instead of being published.
+    unit.processor = _StubProcessor([_null_template()])
     assert list(unit._drain()) == []
