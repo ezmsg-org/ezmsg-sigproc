@@ -19,6 +19,7 @@ from ezmsg.util.messages.util import replace
 
 from .util.axisarray_buffer import HybridAxisArrayBuffer, HybridAxisBuffer
 from .util.buffer import UpdateStrategy
+from .util.message import is_empty_along
 
 
 class ResampleSettings(ez.Settings):
@@ -452,7 +453,10 @@ class ResampleUnit(BaseConsumerUnit[ResampleSettings, AxisArray, ResampleProcess
             self._wake.clear()
             while True:
                 result: AxisArray = next(self.processor)
-                if np.prod(result.data.shape) == 0:
+                # "Nothing ready" is signaled by an empty resample axis; a chunk
+                # that is empty only along other axes (e.g. zero channels) is
+                # still a real output and must be published.
+                if is_empty_along(result, (self.SETTINGS.axis,)):
                     break
                 yield self.OUTPUT_SIGNAL, result
                 ref_out = self.processor.state.reference_output

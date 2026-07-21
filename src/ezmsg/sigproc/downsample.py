@@ -15,6 +15,8 @@ from ezmsg.util.messages.axisarray import (
     slice_along_axis,
 )
 
+from .util.message import is_empty_along
+
 
 class DownsampleSettings(ez.Settings):
     """
@@ -115,9 +117,12 @@ class Downsample(BaseTransformerUnit[DownsampleSettings, AxisArray, AxisArray, D
         period, so ``DownsampleTransformer._process`` returns a payload with
         a zero-length axis. Suppressing the broadcast in that case avoids
         shipping an empty AxisArray across SHM/socket every input chunk.
+        Only emptiness along the downsampled axis is suppressed: a message
+        that is empty along other axes (e.g. all channels sliced away
+        upstream) still flows so downstream consumers keep its cadence.
         """
         result = await self.processor.__acall__(message)
-        if result is not None and result.data.size > 0:
+        if result is not None and not is_empty_along(result, (self.SETTINGS.axis,)):
             yield self.OUTPUT_SIGNAL, result
 
 

@@ -20,6 +20,7 @@ from ezmsg.util.messages.axisarray import (
     sliding_win_oneaxis,
 )
 
+from .util.message import is_empty_along
 from .util.profile import profile_subpub
 from .util.sparse import sliding_win_oneaxis as sparse_sliding_win_oneaxis
 
@@ -289,7 +290,10 @@ class Window(BaseTransformerUnit[WindowSettings, AxisArray, AxisArray, WindowTra
         xp = get_namespace(message.data)
         try:
             ret = self.processor(message)
-            if ret.data.size > 0:
+            # Swallow only when no complete windows (or, in pass-through mode, no
+            # samples) came out; emptiness along other axes (e.g. all channels
+            # sliced away upstream) still flows to preserve stream cadence.
+            if not is_empty_along(ret, (self.SETTINGS.newaxis or "win", self.SETTINGS.axis or ret.dims[0])):
                 if self.SETTINGS.newaxis is not None or self.SETTINGS.window_dur is None:
                     # Multi-win mode or pass-through mode.
                     yield self.OUTPUT_SIGNAL, ret

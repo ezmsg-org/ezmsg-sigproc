@@ -52,6 +52,7 @@ from ezmsg.util.messages.axisarray import (
 
 from .aggregate import AGGREGATORS, AggregationFunction
 from .util.binning import BinSchedule, BinStep
+from .util.message import is_empty_along
 
 
 class BinnedAggregateSettings(ez.Settings):
@@ -192,8 +193,11 @@ class BinnedAggregate(BaseTransformerUnit[BinnedAggregateSettings, AxisArray, Ax
 
         As with :obj:`Downsample`, most input chunks at a high input rate close
         no new bin, yielding a zero-length payload; broadcasting those wastes a
-        round-trip across SHM/socket.
+        round-trip across SHM/socket. Only emptiness along the binned axis is
+        suppressed: a message that is empty along other axes (e.g. all channels
+        sliced away upstream) still flows so downstream consumers keep its
+        cadence.
         """
         result = await self.processor.__acall__(message)
-        if result is not None and result.data.size > 0:
+        if result is not None and not is_empty_along(result, (self.SETTINGS.axis,)):
             yield self.OUTPUT_SIGNAL, result

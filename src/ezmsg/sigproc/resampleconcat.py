@@ -35,6 +35,7 @@ from ezmsg.util.messages.axisarray import AxisArray
 from .concat import ConcatProcessor, ConcatSettings
 from .resample import ResampleProcessor, ResampleSettings
 from .util.buffer import UpdateStrategy
+from .util.message import is_empty_along
 
 
 class ResampleConcatSettings(ez.Settings):
@@ -163,7 +164,10 @@ class ResampleConcat(ez.Unit):
         """
         while True:
             result = next(self.processor)
-            if result is None or np.prod(result.data.shape) == 0:
+            # None / an empty resample axis means "nothing ready"; a chunk that
+            # is empty only along other axes (e.g. the concatenated feature
+            # axis) is still a real output and must be published.
+            if result is None or is_empty_along(result, (self.SETTINGS.axis,)):
                 return
             yield result
 
