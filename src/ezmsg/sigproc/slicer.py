@@ -94,7 +94,7 @@ def parse_slice(
         allow_empty: (Optional) If True, a label/regex token that matches nothing
           returns no indices instead of raising. In a comma-separated selection,
           non-matching tokens are dropped and the matching ones kept; if every
-          token matches nothing the result is an empty tuple (a 0-length slice).
+          token matches nothing the result is an empty tuple.
 
     Returns:
         A tuple of slice objects and/or ints. May be empty when allow_empty is
@@ -107,7 +107,9 @@ def parse_slice(
         if len(parts) == 1:
             labels = _axis_labels(axinfo, field=field)
             if labels is not None and parts[0] in labels:
-                return tuple(np.where(labels == parts[0])[0])
+                # Cast to Python ints: np.int64 fails the `isinstance(_, int)`
+                # check in _reset_state, yielding a 0-d axis-data array.
+                return tuple(int(ix) for ix in np.where(labels == parts[0])[0])
             if field is None:
                 try:
                     return (int(parts[0]),)
@@ -144,14 +146,19 @@ class SlicerSettings(ez.Settings):
     no longer positional indices (use slice syntax like "3:4" for positions) — and
     raises an error if the axis has no such field."""
 
-    allow_empty: bool = False
-    """When False (default), a label/regex selection that matches nothing raises,
-    which catches typos and wrong-axis mistakes. When True, a token that matches
-    nothing is skipped instead; if the whole selection matches nothing the output
-    is empty (0-length along ``axis``) and a warning is logged once per stream
-    configuration. Use this when a hub/stream legitimately may not contain any of
-    the selected entries (e.g. a per-source region selection where a given source
-    carries none of the requested regions)."""
+    on_empty: str = "raise"
+    """What to do when a label/regex selection matches nothing on the target axis.
+
+    - "raise" (default): raise a ValueError, which catches typos and wrong-axis
+      mistakes.
+    - "warn": non-matching tokens are dropped (logged at info level); if the whole
+      selection matches nothing, the output is empty (0-length along ``axis``) and
+      a warning is logged once per stream configuration. In this mode a label
+      selection never drops the sliced dimension — a single matching entry yields
+      a length-1 axis — so output rank is stable no matter how many entries match.
+      Use this when a hub/stream legitimately may not contain any of the selected
+      entries (e.g. a per-source region selection where a given source carries
+      none of the requested regions)."""
 
 
 @processor_state
@@ -168,35 +175,51 @@ class SlicerTransformer(BaseStatefulTransformer[SlicerSettings, AxisArray, AxisA
         return hash((message.key, message.data.shape[axis_idx]))
 
     def _reset_state(self, message: AxisArray) -> None:
+        if self.settings.on_empty not in ("raise", "warn"):
+            raise ValueError(f"on_empty must be 'raise' or 'warn', got {self.settings.on_empty!r}")
         axis = self.settings.axis or message.dims[-1]
         axis_idx = message.get_axis_idx(axis)
+        axinfo = message.axes.get(axis, None)
         self._state.new_axis = None
         self._state.b_change_dims = False
 
         # Calculate the slice
+        allow_empty = self.settings.on_empty == "warn"
         _slices = parse_slice(
             self.settings.selection,
-            message.axes.get(axis, None),
+            axinfo,
             field=self.settings.field,
-            allow_empty=self.settings.allow_empty,
+            allow_empty=allow_empty,
         )
-        if len(_slices) == 1:
+
+        if allow_empty:
+            tokens = [t.strip() for t in self.settings.selection.split(",")]
+            dropped = [t for t in tokens if parse_slice(t, axinfo, field=self.settings.field, allow_empty=True) == ()]
+            if len(dropped) == len(tokens):
+                ez.logger.warning(
+                    "Slicer: selection %r matched no entries on axis %r; emitting "
+                    "an empty (0-length) result (on_empty='warn').",
+                    self.settings.selection,
+                    axis,
+                )
+            elif dropped:
+                ez.logger.info(
+                    "Slicer: dropped non-matching selection tokens %r on axis %r (on_empty='warn').",
+                    dropped,
+                    axis,
+                )
+
+        # In warn mode, integer selections take the indices-array path even when
+        # there is a single hit, so the axis is preserved and output rank does not
+        # depend on how many entries matched.
+        if len(_slices) == 1 and (not allow_empty or isinstance(_slices[0], slice)):
             self._state.slice_ = _slices[0]
             self._state.b_change_dims = isinstance(self._state.slice_, int)
         else:
             indices = np.arange(message.data.shape[axis_idx])
-            if _slices:
-                indices = np.hstack([indices[_] for _ in _slices])
-            else:
-                # allow_empty: nothing matched -> select no entries (0-length),
-                # rather than np.hstack([]) which would raise.
-                indices = indices[:0]
-                ez.logger.warning(
-                    "Slicer: selection %r matched no entries on axis %r; emitting "
-                    "an empty (0-length) result (allow_empty=True).",
-                    self.settings.selection,
-                    axis,
-                )
+            # Empty _slices (nothing matched) -> select no entries (0-length),
+            # rather than np.hstack([]) which would raise.
+            indices = np.hstack([indices[_] for _ in _slices]) if _slices else indices[:0]
             self._state.slice_ = np.s_[indices]
 
         # Create the output axis
@@ -234,7 +257,7 @@ def slicer(
     selection: str = "",
     axis: str | None = None,
     field: str | None = None,
-    allow_empty: bool = False,
+    on_empty: str = "raise",
 ) -> SlicerTransformer:
     """
     Slice along a particular axis.
@@ -244,12 +267,10 @@ def slicer(
         axis: The name of the axis to slice along. If None, the last axis is used.
         field: Which field of a structured coordinate axis to match selection values
           against. See :obj:`SlicerSettings` for details.
-        allow_empty: If True, a selection that matches nothing yields an empty
-          (0-length) result instead of raising. See :obj:`SlicerSettings`.
+        on_empty: "raise" (default) or "warn" — what to do when a label/regex
+          selection matches nothing. See :obj:`SlicerSettings` for details.
 
     Returns:
         :obj:`SlicerTransformer`
     """
-    return SlicerTransformer(
-        SlicerSettings(selection=selection, axis=axis, field=field, allow_empty=allow_empty)
-    )
+    return SlicerTransformer(SlicerSettings(selection=selection, axis=axis, field=field, on_empty=on_empty))
