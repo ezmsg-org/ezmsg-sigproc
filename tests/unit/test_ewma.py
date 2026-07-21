@@ -418,3 +418,103 @@ def test_ewma_bias_correction_survives_chunking():
         parts.append(chunked(mk(c, n)).data)
         n += c.shape[0]
     np.testing.assert_allclose(np.concatenate(parts, axis=0), single, rtol=1e-10, atol=1e-10)
+
+
+# ---------------------------------------------------------------------------
+# Dual-timescale level-shift tracking (issue #168)
+# ---------------------------------------------------------------------------
+
+_SHIFT_FS = 100.0
+_SHIFT_CHUNK = 20
+
+
+def _stream_shift(proc, mu_fn, sd_fn, n_chunks=30, n_ch=2, seed=0):
+    """Feed chunks with per-chunk per-channel mean/std; return (time, ch) output."""
+    rng = np.random.default_rng(seed)
+    outs = []
+    for i in range(n_chunks):
+        mu = np.broadcast_to(np.asarray(mu_fn(i), dtype=float), (n_ch,))
+        sd = np.broadcast_to(np.asarray(sd_fn(i), dtype=float), (n_ch,))
+        d = rng.normal(mu, sd, size=(_SHIFT_CHUNK, n_ch))
+        msg = AxisArray(
+            data=d,
+            dims=["time", "ch"],
+            axes={
+                "time": AxisArray.TimeAxis(fs=_SHIFT_FS, offset=i * _SHIFT_CHUNK / _SHIFT_FS),
+                "ch": AxisArray.CoordinateAxis(data=np.arange(n_ch).astype(str), dims=["ch"]),
+            },
+            key="test_shift",
+        )
+        outs.append(proc(msg).data)
+    return np.concatenate(outs, axis=0)
+
+
+def _shift_proc(fast_tc):
+    return EWMATransformer(time_constant=10.0, axis="time", accumulate=True, fast_time_constant=fast_tc)
+
+
+def test_ewma_level_shift_snap():
+    """A sustained level shift snaps the estimate to the new level within a few
+    chunks; with the detector off, the estimate lags for ~time_constant."""
+
+    def mu(i):
+        return 10.0 if i >= 10 else 0.0
+
+    def sd(i):
+        return 0.1
+
+    out_on = _stream_shift(_shift_proc(0.05), mu, sd)
+    out_off = _stream_shift(_shift_proc(None), mu, sd)
+
+    # Detector on: recovered to the new level within 3 chunks of the shift.
+    assert np.all(np.abs(out_on[13 * _SHIFT_CHUNK :] - 10.0) < 0.5)
+    # Detector off: still far from the new level at the end of the stream.
+    assert np.all(np.abs(out_off[-1] - 10.0) > 2.0)
+
+
+def test_ewma_level_shift_snap_per_channel():
+    """Only the shifted channel snaps; the other channel's output is untouched
+    (bit-identical to a detector-off run on the same data)."""
+
+    def mu(i):
+        return [0.0, 10.0] if i >= 10 else [0.0, 0.0]
+
+    def sd(i):
+        return 0.1
+
+    out_on = _stream_shift(_shift_proc(0.05), mu, sd)
+    out_off = _stream_shift(_shift_proc(None), mu, sd)
+
+    np.testing.assert_array_equal(out_on[:, 0], out_off[:, 0])
+    assert np.abs(out_on[-1, 1] - 10.0) < 0.5
+    assert np.abs(out_off[-1, 1] - 10.0) > 2.0
+
+
+def test_ewma_no_snap_when_stationary():
+    """With no shift, the detector never fires: output is bit-identical to the
+    detector-off output."""
+
+    def mu(i):
+        return 0.0
+
+    def sd(i):
+        return 0.5
+
+    out_on = _stream_shift(_shift_proc(0.05), mu, sd)
+    out_off = _stream_shift(_shift_proc(None), mu, sd)
+    np.testing.assert_array_equal(out_on, out_off)
+
+
+def test_ewma_no_snap_on_variance_burst():
+    """A variance-only artifact (no level change) inflates the within-chunk
+    residual std, so the detector does not fire."""
+
+    def mu(i):
+        return 0.0
+
+    def sd(i):
+        return 5.0 if i >= 10 else 0.1
+
+    out_on = _stream_shift(_shift_proc(0.05), mu, sd)
+    out_off = _stream_shift(_shift_proc(None), mu, sd)
+    np.testing.assert_array_equal(out_on, out_off)
