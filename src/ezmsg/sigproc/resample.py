@@ -416,19 +416,45 @@ class ResampleUnit(BaseConsumerUnit[ResampleSettings, AxisArray, ResampleProcess
     :class:`~ezmsg.sigproc.resampleconcat.ResampleConcat`, which fuses both steps).
     """
 
+    async def initialize(self) -> None:
+        await super().initialize()
+        self._wake = asyncio.Event()
+
+    @ez.subscriber(BaseConsumerUnit.INPUT_SIGNAL)
+    async def on_signal(self, message: AxisArray) -> None:
+        await self.processor.__acall__(message)
+        self._wake.set()
+
     @ez.subscriber(INPUT_REFERENCE)
     async def on_reference(self, message: AxisArray):
         self.processor.push_reference(message)
+        self._wake.set()
 
     @ez.publisher(OUTPUT_SIGNAL)
     @ez.publisher(OUTPUT_REFERENCE)
     async def gen_resampled(self):
         while True:
-            result: AxisArray = next(self.processor)
-            if np.prod(result.data.shape) > 0:
+            # Wake on a push from either input. In prescribed-rate mode with a
+            # finite max_chunk_delay, also wake when the delay budget elapses so
+            # the wall-clock extrapolation in `__next__` can fire without input.
+            # Reference-driven mode never becomes ready by wall-clock, so there
+            # a pure event wait suffices.
+            timeout = self.SETTINGS.max_chunk_delay if self.SETTINGS.resample_rate is not None else np.inf
+            if np.isfinite(timeout):
+                try:
+                    await asyncio.wait_for(self._wake.wait(), timeout=timeout)
+                except asyncio.TimeoutError:
+                    pass
+            else:
+                await self._wake.wait()
+            # Clear before draining: a set() landing mid-drain re-arms the event
+            # so the next wait() returns immediately instead of losing the push.
+            self._wake.clear()
+            while True:
+                result: AxisArray = next(self.processor)
+                if np.prod(result.data.shape) == 0:
+                    break
                 yield self.OUTPUT_SIGNAL, result
                 ref_out = self.processor.state.reference_output
                 if ref_out is not None:
                     yield self.OUTPUT_REFERENCE, ref_out
-            else:
-                await asyncio.sleep(0)
