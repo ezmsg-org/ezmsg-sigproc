@@ -146,6 +146,7 @@ def adaptive_lnc(
     num_harmonics: int = 1,
     adapt_time_constant: float = 0.1,
     freq_time_constant: float | None = 0.5,
+    max_freq_deviation: float | None = 2.0,
     cancel_method: str = "notch",
     axis: str = "time",
 ) -> AdaptiveLNCTransformer:
@@ -156,6 +157,7 @@ def adaptive_lnc(
             num_harmonics=num_harmonics,
             adapt_time_constant=adapt_time_constant,
             freq_time_constant=freq_time_constant,
+            max_freq_deviation=max_freq_deviation,
             cancel_method=cancel_method,
             axis=axis,
         )
@@ -244,6 +246,28 @@ def test_line_freq_change_reseeds_nco():
 
     assert omega_60 == pytest.approx(2 * np.pi * 60.0 / FS)
     assert omega_50 == pytest.approx(2 * np.pi * 50.0 / FS)
+
+
+def test_frequency_tracking_is_bounded_around_nominal():
+    max_deviation = 0.25
+    proc = adaptive_lnc(
+        line_freq=LINE_FREQ,
+        freq_time_constant=0.1,
+        max_freq_deviation=max_deviation,
+    )
+    proc(_make_axisarray(np.zeros((1, 1), dtype=np.float32)))
+
+    # A quarter-cycle phasor rotation would request a many-Hz correction in a
+    # single FLL step. Both directions must clamp at the configured bounds.
+    proc._state.z_phasor_prev = np.ones(1, dtype=np.complex128)
+    proc._fll_step(np.full(1, 1j, dtype=np.complex128), beta=1.0)
+    freq = proc._state.omega * FS / (2.0 * np.pi)
+    assert freq == pytest.approx(LINE_FREQ + max_deviation)
+
+    proc._state.z_phasor_prev = np.ones(1, dtype=np.complex128)
+    proc._fll_step(np.full(1, -1j, dtype=np.complex128), beta=1.0)
+    freq = proc._state.omega * FS / (2.0 * np.pi)
+    assert freq == pytest.approx(LINE_FREQ - max_deviation)
 
 
 # --------------------------------------------------------------------------- #

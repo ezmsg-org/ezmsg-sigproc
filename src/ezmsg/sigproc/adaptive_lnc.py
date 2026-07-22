@@ -149,6 +149,12 @@ class AdaptiveLNCSettings(ez.Settings):
     loops do not fight. Independent of chunk size (the per-update gain is
     derived from elapsed time). Read live each chunk."""
 
+    max_freq_deviation: float | None = 2.0
+    """Maximum tracked deviation from ``line_freq`` in Hz. The default ±2 Hz
+    range is deliberately generous for mains tracking while preventing a weak
+    or absent line estimate from random-walking the FLL toward DC. ``None``
+    permits unbounded tracking."""
+
     cancel_method: CancelMethod = CancelMethod.NOTCH
     """How to remove the line; see :class:`CancelMethod`. ``NOTCH`` (default)
     applies the SOS notch cascade -- a perfect null that also removes any signal
@@ -169,6 +175,12 @@ class AdaptiveLNCState:
 
     omega: float = 0.0
     """Current NCO angular frequency in rad/sample (tracked by the FLL)."""
+
+    omega_min: float | None = None
+    """Lower FLL bound in rad/sample, or ``None`` when tracking is unbounded."""
+
+    omega_max: float | None = None
+    """Upper FLL bound in rad/sample, or ``None`` when tracking is unbounded."""
 
     phase: float = 0.0
     """NCO phase (rad) for the first sample of the next chunk; accumulates so
@@ -288,6 +300,17 @@ class AdaptiveLNCTransformer(
         fs = 1.0 / message.axes[self.settings.axis].gain
         # Seed the NCO at the nominal normalised frequency; the FLL refines it.
         self._state.omega = 2.0 * np.pi * self.settings.line_freq / fs
+        max_deviation = self.settings.max_freq_deviation
+        if max_deviation is not None:
+            if max_deviation < 0:
+                raise ValueError("max_freq_deviation must be non-negative or None")
+            min_freq = max(0.0, self.settings.line_freq - max_deviation)
+            max_freq = min(fs / 2.0, self.settings.line_freq + max_deviation)
+            self._state.omega_min = 2.0 * np.pi * min_freq / fs
+            self._state.omega_max = 2.0 * np.pi * max_freq / fs
+        else:
+            self._state.omega_min = None
+            self._state.omega_max = None
         self._state.phase = 0.0
 
         # Frequency-update window: one mains period, inferred from line_freq/fs.
@@ -366,7 +389,10 @@ class AdaptiveLNCTransformer(
         if st.z_phasor_prev is not None:
             cross = np.sum(z_fund * np.conj(st.z_phasor_prev))
             if cross != 0:
-                st.omega = st.omega + beta * float(np.angle(cross)) / st.block_len
+                omega = st.omega + beta * float(np.angle(cross)) / st.block_len
+                if st.omega_min is not None and st.omega_max is not None:
+                    omega = float(np.clip(omega, st.omega_min, st.omega_max))
+                st.omega = omega
         st.z_phasor_prev = z_fund
 
     def _freq_update(self, beta: float) -> None:
