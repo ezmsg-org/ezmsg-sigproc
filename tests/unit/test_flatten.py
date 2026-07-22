@@ -126,6 +126,33 @@ class TestCartesianProductLabels:
         time_ax = out.axes["time"]
         assert time_ax.gain == pytest.approx(1.0 / 200.0)
 
+    def test_output_axis_cached_across_preserve_axis_sizes_and_owned(self):
+        """Variable time chunks reuse one processor-owned merged axis."""
+        shared_axes = {
+            "ch": CoordinateAxis(data=np.array(["c1", "c2", "c3"]), dims=["ch"]),
+            "feature": CoordinateAxis(data=np.array(["spk", "sbp"]), dims=["feature"]),
+        }
+        messages = [
+            AxisArray(
+                data=np.arange(n_time * 3 * 2, dtype=float).reshape(n_time, 3, 2),
+                dims=["time", "ch", "feature"],
+                axes={
+                    "time": AxisArray.TimeAxis(fs=50.0, offset=offset),
+                    **shared_axes,
+                },
+            )
+            for n_time, offset in ((3, 0.00), (9, 0.06), (5, 0.24))
+        ]
+        for axis_name in shared_axes:
+            assert all(message.axes[axis_name] is messages[0].axes[axis_name] for message in messages)
+
+        proc = FlattenTransformer(FlattenSettings())
+        outputs = [proc(message) for message in messages]
+
+        assert [output.data.shape for output in outputs] == [(3, 6), (9, 6), (5, 6)]
+        assert all(output.axes["ch"] is outputs[0].axes["ch"] for output in outputs)
+        assert all(output.axes["ch"] is not message.axes["ch"] for output, message in zip(outputs, messages))
+
 
 class TestStructFieldPassthrough:
     def test_struct_axis_propagates_all_fields(self):
