@@ -1,6 +1,7 @@
 """Continuous wavelet transform (CWT) for streaming time-frequency analysis."""
 
 import typing
+from copy import deepcopy
 
 import ezmsg.core as ez
 import numpy as np
@@ -110,7 +111,7 @@ class CWTTransformer(BaseStatefulTransformer[CWTSettings, AxisArray, AxisArray, 
             axis=self.settings.axis,
         )
 
-        # Create output template
+        # Create output template.
         ax_idx = message.get_axis_idx(self.settings.axis)
         in_shape = message.data.shape[:ax_idx] + message.data.shape[ax_idx + 1 :]
         freqs = pywt.scale2frequency(wavelet, scales, precision) / message.axes[self.settings.axis].gain
@@ -119,7 +120,7 @@ class CWTTransformer(BaseStatefulTransformer[CWTSettings, AxisArray, AxisArray, 
             np.zeros(dummy_shape, dtype=dt_cplx if wavelet.complex_cwt else dt_data),
             dims=message.dims[:ax_idx] + message.dims[ax_idx + 1 :] + ["freq", self.settings.axis],
             axes={
-                **message.axes,
+                **{k: deepcopy(v) for k, v in message.axes.items()},
                 "freq": AxisArray.CoordinateAxis(unit="Hz", data=freqs, dims=["freq"]),
             },
             key=message.key,

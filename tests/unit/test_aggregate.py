@@ -532,3 +532,63 @@ def test_ranged_aggregate_benchmark(backend, n_channels, benchmark):
         import mlx.core as mx
 
         assert isinstance(result.data, mx.array)
+
+
+def test_ranged_aggregate_coordinate_axis_vector_owned():
+    """The cached coordinate vector and output axis must not alias input axis memory."""
+    freq_data = np.arange(8, dtype=float)
+    shared_freq_axis = AxisArray.CoordinateAxis(data=freq_data, dims=["freq"])
+    messages = [
+        AxisArray(
+            data=np.arange(4 * 2 * 8, dtype=float).reshape(4, 2, 8),
+            dims=["time", "ch", "freq"],
+            axes={
+                "time": AxisArray.TimeAxis(fs=100.0, offset=offset),
+                "freq": shared_freq_axis,
+            },
+            key="test_owned_ax_vec",
+        )
+        for offset in (0.0, 0.04)
+    ]
+
+    xformer = RangedAggregateTransformer(
+        RangedAggregateSettings(
+            axis="freq",
+            bands=[(1.0, 3.0), (4.0, 6.0)],
+            operation=AggregationFunction.TRAPEZOID,
+        )
+    )
+    out_first = xformer(messages[0])
+    assert not np.shares_memory(xformer._state.ax_vec, freq_data)
+    assert np.array_equal(out_first.axes["freq"].data, np.array([2.0, 5.0]))
+
+    # Simulate transport-buffer reuse: the first message's axis memory is overwritten.
+    freq_data[:] = -1.0
+    out_second = xformer(messages[1])
+
+    assert out_second.axes["freq"] is out_first.axes["freq"]
+    assert np.array_equal(out_second.data, out_first.data)
+
+
+def test_ranged_aggregate_coordinate_axis_string_labels():
+    """String coordinate axes get 'first - last' labels from the matched entries."""
+    label_axis = AxisArray.CoordinateAxis(data=np.array(["a", "b", "c", "d"]), dims=["ch"])
+    msg = AxisArray(
+        data=np.arange(3 * 4, dtype=float).reshape(3, 4),
+        dims=["time", "ch"],
+        axes={
+            "time": AxisArray.TimeAxis(fs=100.0, offset=0.0),
+            "ch": label_axis,
+        },
+        key="test_str_labels",
+    )
+    xformer = RangedAggregateTransformer(
+        RangedAggregateSettings(
+            axis="ch",
+            bands=[("a", "b"), ("c", "d")],
+            operation=AggregationFunction.MEAN,
+        )
+    )
+    out = xformer(msg)
+    assert list(out.axes["ch"].data) == ["a - b", "c - d"]
+    assert np.array_equal(out.data, np.stack([msg.data[:, :2].mean(axis=1), msg.data[:, 2:].mean(axis=1)], axis=1))

@@ -3,6 +3,7 @@
 import math
 import typing
 import warnings
+from copy import deepcopy
 
 import numpy as np
 from array_api_compat import get_namespace
@@ -289,11 +290,11 @@ class HybridAxisArrayBuffer:
 
     def _initialize(self, first_msg: AxisArray) -> None:
         # Create a template message that has everything except the data are length 0
-        #  and the target axis is missing.
+        # and the target axis is missing.
         self._template_msg = replace(
             first_msg,
             data=first_msg.data[:0],
-            axes={k: v for k, v in first_msg.axes.items() if k != self._axis},
+            axes={k: deepcopy(v) for k, v in first_msg.axes.items() if k != self._axis},
         )
 
         in_axis = first_msg.axes[self._axis]

@@ -114,8 +114,9 @@ class FlattenState:
     # None means input dims already match (preserve, *flatten, *rest).
     perm: tuple[int, ...] | None = None
 
-    # Final shape after permute_dims + reshape: (n_preserve, n_flat, *rest_shape).
-    target_shape: tuple[int, ...] = ()
+    # Shape after the preserve axis: (n_flat, *rest_shape). The preserve-axis
+    # length is supplied from each live message because chunk sizes may vary.
+    target_inner_shape: tuple[int, ...] = ()
 
     # Precomputed merged-axis CoordinateAxis (structured array).
     output_axis_obj: CoordinateAxis | None = None
@@ -240,7 +241,9 @@ def _build_merged_axis(
 
 class FlattenTransformer(BaseStatefulTransformer[FlattenSettings, AxisArray, AxisArray, FlattenState]):
     def _hash_message(self, message: AxisArray) -> int:
-        return hash((tuple(message.dims), tuple(message.data.shape)))
+        preserve_axis = self.settings.preserve_axis or message.dims[0]
+        non_preserve_shape = tuple(size for dim, size in zip(message.dims, message.data.shape) if dim != preserve_axis)
+        return hash((tuple(message.dims), non_preserve_shape))
 
     def _reset_state(self, message: AxisArray) -> None:
         preserve_axis = self.settings.preserve_axis or message.dims[0]
@@ -271,11 +274,10 @@ class FlattenTransformer(BaseStatefulTransformer[FlattenSettings, AxisArray, Axi
             perm = None
             permuted_shape = tuple(message.data.shape)
 
-        n_preserve = permuted_shape[0]
         flatten_sizes = permuted_shape[1 : 1 + len(flatten_axes)]
         n_flat = int(math.prod(flatten_sizes)) if flatten_sizes else 1
         rest_shape = permuted_shape[1 + len(flatten_axes) :]
-        target_shape = (n_preserve, n_flat, *rest_shape)
+        target_inner_shape = (n_flat, *rest_shape)
 
         output_axis_obj = _build_merged_axis(
             message,
@@ -292,7 +294,7 @@ class FlattenTransformer(BaseStatefulTransformer[FlattenSettings, AxisArray, Axi
         st.flatten_axes = flatten_axes
         st.rest_axes = rest_axes
         st.perm = perm
-        st.target_shape = target_shape
+        st.target_inner_shape = target_inner_shape
         st.output_axis_obj = output_axis_obj
         st.output_dims = (sample_axis, output_axis, *rest_axes)
 
@@ -304,7 +306,7 @@ class FlattenTransformer(BaseStatefulTransformer[FlattenSettings, AxisArray, Axi
             data = xp.permute_dims(message.data, st.perm)
         else:
             data = message.data
-        data = xp.reshape(data, st.target_shape)
+        data = xp.reshape(data, (data.shape[0], *st.target_inner_shape))
 
         # Carry the live preserve axis through (its gain/offset/data may
         # advance per message).  Rename to sample_axis on the output if

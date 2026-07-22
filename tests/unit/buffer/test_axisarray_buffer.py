@@ -431,6 +431,39 @@ def test_deferred_initialization_coordinate(coordinate_axis_message):
     assert buf._axis_buffer.capacity == 100
 
 
+def test_template_axes_are_cached_and_owned():
+    """The output template reuses owned non-time axes across messages."""
+    shared_axes = {
+        "ch": CoordinateAxis(data=np.array([1, 2]), dims=["ch"]),
+        "feature": CoordinateAxis(data=np.array(["spk", "sbp"]), dims=["feature"]),
+    }
+    messages = [
+        AxisArray(
+            data=np.full((n_samples, 2, 2), fill, dtype=np.float64),
+            dims=["time", "ch", "feature"],
+            axes={
+                "time": LinearAxis(gain=0.01, offset=offset, unit="s"),
+                **shared_axes,
+            },
+        )
+        for n_samples, fill, offset in ((3, 1.0, 0.00), (9, 2.0, 0.03), (5, 3.0, 0.12))
+    ]
+    for axis_name in shared_axes:
+        assert all(message.axes[axis_name] is messages[0].axes[axis_name] for message in messages)
+
+    buffer = HybridAxisArrayBuffer(duration=1.0, axis="time", update_strategy="immediate")
+    outputs = []
+    for message in messages:
+        buffer.write(message)
+        output = buffer.read()
+        assert output is not None
+        outputs.append(output)
+
+    for axis_name in shared_axes:
+        assert all(output.axes[axis_name] is outputs[0].axes[axis_name] for output in outputs)
+        assert all(output.axes[axis_name] is not message.axes[axis_name] for output, message in zip(outputs, messages))
+
+
 def test_add_and_get_linear(linear_axis_message):
     buf = HybridAxisArrayBuffer(duration=1.0, update_strategy="immediate")
     msg1 = linear_axis_message(samples=10, fs=100.0, offset=0.0)

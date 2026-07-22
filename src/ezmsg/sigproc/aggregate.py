@@ -125,7 +125,7 @@ class RangedAggregateTransformer(
         ax_idx = message.get_axis_idx(axis)
 
         if hasattr(target_axis, "data"):
-            self._state.ax_vec = target_axis.data
+            self._state.ax_vec = np.array(target_axis.data)
         else:
             self._state.ax_vec = target_axis.value(np.arange(message.data.shape[ax_idx]))
 
@@ -136,9 +136,9 @@ class RangedAggregateTransformer(
             slices.append(slice(int(inds[0]), int(inds[-1]) + 1))
             if hasattr(target_axis, "data"):
                 if self._state.ax_vec.dtype.type is np.str_:
-                    sl_dat = f"{self._state.ax_vec[start]} - {self._state.ax_vec[stop]}"
+                    sl_dat = f"{self._state.ax_vec[inds[0]]} - {self._state.ax_vec[inds[-1]]}"
                 else:
-                    ax_dat.append(np.mean(self._state.ax_vec[inds]))
+                    sl_dat = np.mean(self._state.ax_vec[inds])
             else:
                 sl_dat = target_axis.value(np.mean(inds))
             ax_dat.append(sl_dat)

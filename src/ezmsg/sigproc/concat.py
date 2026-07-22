@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import typing
+from copy import deepcopy
 from dataclasses import dataclass, field
 
 import ezmsg.core as ez
@@ -332,7 +333,12 @@ def _build_cached_axes(
     align_dim: str | None,
     merged_concat_axis: CoordinateAxis | None,
 ) -> dict[str, AxisBase]:
-    """Build the output axes dict (everything except the alignment axis)."""
+    """Build an owned output-axis cache (everything except the alignment axis).
+
+    Input axes may be views into an ezmsg transport buffer whose lifetime ends
+    after the current subscriber callback. Axes kept across calls must therefore
+    be copied into processor-owned memory.
+    """
     axes: dict[str, AxisBase] = {}
     for name, ax in a.axes.items():
         if name == align_dim:
@@ -340,7 +346,7 @@ def _build_cached_axes(
         if name == concat_dim and merged_concat_axis is not None:
             axes[name] = merged_concat_axis
         else:
-            axes[name] = ax
+            axes[name] = deepcopy(ax)
     if concat_dim not in axes and merged_concat_axis is not None:
         axes[concat_dim] = merged_concat_axis
     return axes

@@ -188,3 +188,29 @@ def test_cwt_complex_wavelet_min_phase_informative_error():
     )
     with pytest.raises(ValueError, match="[Cc]omplex.*min[_ ]phase|min_phase.*complex"):
         proc(msg)
+
+
+def test_template_axes_cached_and_owned():
+    """CWT reuses processor-owned non-target axes across messages."""
+    fs = 200.0
+    n_time = 32
+    shared_ch_axis = AxisArray.CoordinateAxis(data=np.array(["Ch0", "Ch1"]), dims=["ch"])
+    messages = [
+        AxisArray(
+            data=np.arange(2 * n_time, dtype=float).reshape(2, n_time) + i,
+            dims=["ch", "time"],
+            axes={
+                "ch": shared_ch_axis,
+                "time": AxisArray.TimeAxis(fs=fs, offset=i * n_time / fs),
+            },
+            key="test_cwt_axes",
+        )
+        for i in range(3)
+    ]
+    assert all(message.axes["ch"] is shared_ch_axis for message in messages)
+
+    proc = CWTTransformer(CWTSettings(frequencies=np.array([10.0, 20.0, 40.0]), wavelet="morl", axis="time"))
+    outputs = [proc(message) for message in messages]
+
+    assert all(output.axes["ch"] is outputs[0].axes["ch"] for output in outputs)
+    assert all(output.axes["ch"] is not message.axes["ch"] for output, message in zip(outputs, messages))
