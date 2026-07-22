@@ -426,7 +426,11 @@ class HybridBuffer:
             # policy with no byte cap -- avoids dividing by 0 bytes/sample.
             new_capacity = max(self._capacity * 2, min_capacity)
         else:
-            max_capacity = self._max_size / bytes_per_sample
+            # Floor-divide: the byte budget bounds capacity to a whole number of
+            # samples. True division would yield a float, which then flows into
+            # both the xp_empty shape below and self._capacity -- array dims must
+            # be ints, and a non-int capacity corrupts the ring-buffer arithmetic.
+            max_capacity = self._max_size // bytes_per_sample
             if min_capacity > max_capacity:
                 raise OverflowError(
                     f"Cannot grow buffer to {min_capacity} samples, "
