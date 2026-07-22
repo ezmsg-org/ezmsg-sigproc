@@ -104,3 +104,30 @@ def test_filterbank(mode: str, kernel_type: str):
             axes[1, ch_ix].imshow(tmp[ch_ix], aspect="auto", origin="lower")
             axes[2, ch_ix].imshow(np.abs(tmp[ch_ix]), aspect="auto", origin="lower")
         plt.show()
+
+
+def test_template_axes_cached_and_owned():
+    """Filterbank reuses processor-owned non-target axes across messages."""
+    fs = 100.0
+    n_time = 20
+    shared_ch_axis = AxisArray.CoordinateAxis(data=np.array(["Ch0", "Ch1"]), dims=["ch"])
+    messages = [
+        AxisArray(
+            data=np.arange(2 * n_time, dtype=float).reshape(2, n_time) + i,
+            dims=["ch", "time"],
+            axes={
+                "ch": shared_ch_axis,
+                "time": AxisArray.TimeAxis(fs=fs, offset=i * n_time / fs),
+            },
+            key="test_filterbank_axes",
+        )
+        for i in range(3)
+    ]
+    assert all(message.axes["ch"] is shared_ch_axis for message in messages)
+
+    kernels = [np.array([0.5, 0.5]), np.array([1.0, -1.0])]
+    proc = FilterbankTransformer(settings=FilterbankSettings(kernels=kernels, mode=FilterbankMode.CONV, axis="time"))
+    outputs = [proc(message) for message in messages]
+
+    assert all(output.axes["ch"] is outputs[0].axes["ch"] for output in outputs)
+    assert all(output.axes["ch"] is not message.axes["ch"] for output, message in zip(outputs, messages))

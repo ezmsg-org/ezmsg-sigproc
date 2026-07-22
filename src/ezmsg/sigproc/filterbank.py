@@ -3,6 +3,7 @@
 import functools
 import math
 import typing
+from copy import deepcopy
 
 import ezmsg.core as ez
 import numpy as np
@@ -137,12 +138,12 @@ class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArra
         tail_shape = in_shape + (len(kernels), self._state.overlap)
         self._state.tail = np.zeros(tail_shape, dtype="complex" if b_complex else "float")
 
-        # Prepare output template -- kernels axis immediately before the target axis
+        # Prepare output template -- kernels axis immediately before the target axis.
         dummy_shape = in_shape + (len(kernels), 0)
         self._state.template = AxisArray(
             data=np.zeros(dummy_shape, dtype="complex" if b_complex else "float"),
             dims=message.dims[:targ_ax_ix] + message.dims[targ_ax_ix + 1 :] + [self.settings.new_axis, axis],
-            axes=message.axes.copy(),
+            axes={k: deepcopy(v) for k, v in message.axes.items()},
             key=message.key,
         )
 

@@ -517,6 +517,44 @@ class TestCachedAxes:
         proc._concat(msg_a2, msg_b1)
         assert proc.state.cached_axes is not first_cache
 
+    def test_cached_axes_are_reused_and_owned(self):
+        """Concat reuses owned non-time output axes across messages."""
+        shared_feature_axis = CoordinateAxis(data=np.array(["spk", "sbp"]), dims=["feature"])
+        shared_ch_a = CoordinateAxis(data=np.array(["A"]), dims=["ch"])
+        shared_ch_b = CoordinateAxis(data=np.array(["B"]), dims=["ch"])
+
+        def _messages(fill: float, ch_axis: CoordinateAxis) -> list[AxisArray]:
+            return [
+                AxisArray(
+                    data=np.full((3, 1, 2), fill + index, dtype=np.float64),
+                    dims=["time", "ch", "feature"],
+                    axes={
+                        "time": AxisArray.TimeAxis(fs=100.0, offset=index * 0.03),
+                        "ch": ch_axis,
+                        "feature": shared_feature_axis,
+                    },
+                )
+                for index in range(3)
+            ]
+
+        messages_a = _messages(1.0, shared_ch_a)
+        messages_b = _messages(2.0, shared_ch_b)
+        for messages in (messages_a, messages_b):
+            for axis_name in ("ch", "feature"):
+                assert all(message.axes[axis_name] is messages[0].axes[axis_name] for message in messages)
+
+        proc = ConcatProcessor(ConcatSettings(axis="ch", relabel_axis=False, align_axis="time"))
+        outputs = [proc._concat(message_a, message_b) for message_a, message_b in zip(messages_a, messages_b)]
+
+        for axis_name in ("ch", "feature"):
+            assert all(output.axes[axis_name] is outputs[0].axes[axis_name] for output in outputs)
+            assert all(
+                output.axes[axis_name] is not message.axes[axis_name] for output, message in zip(outputs, messages_a)
+            )
+            assert all(
+                output.axes[axis_name] is not message.axes[axis_name] for output, message in zip(outputs, messages_b)
+            )
+
 
 # ---------------------------------------------------------------------------
 # Attrs merge + promotion
