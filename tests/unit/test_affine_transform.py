@@ -15,7 +15,7 @@ from ezmsg.sigproc.affinetransform import (
     _merge_small_clusters,
 )
 from tests.helpers.empty_time import N_CH, check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
-from tests.helpers.util import assert_messages_equal
+from tests.helpers.util import assert_messages_equal, requires_mlx
 
 
 def test_affine_transform():
@@ -1107,3 +1107,48 @@ def test_common_rereference_empty_first():
     result = proc(empty)
     check_empty_result(result)
     check_state_not_corrupted(proc, normal)
+
+
+@requires_mlx
+def test_affine_empty_block_diagonal_mlx():
+    """MLX scatter (indexed assignment) rejects zero-size updates; an empty
+    message through the block-diagonal path must short-circuit the cluster
+    writes and return a correctly shaped empty result."""
+    import mlx.core as mx
+
+    rng = np.random.default_rng(42)
+    n_ch = 64
+    weights = _make_block_diagonal_weights([32, 32], rng=rng)
+
+    def _mlx_msg(n_time: int) -> AxisArray:
+        return AxisArray(
+            data=mx.array(rng.standard_normal((n_time, n_ch)).astype(np.float32)),
+            dims=["time", "ch"],
+            axes={
+                "time": AxisArray.TimeAxis(fs=100.0),
+                "ch": AxisArray.CoordinateAxis(data=np.arange(n_ch).astype(str), dims=["ch"]),
+            },
+            key="test_affine_empty_block_diagonal_mlx",
+        )
+
+    proc = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch"))
+
+    # Empty startup message arrives first; state initializes from it.
+    empty_result = proc(_mlx_msg(0))
+    assert proc._state.clusters is not None and len(proc._state.clusters) == 2
+    assert isinstance(empty_result.data, mx.array)
+    assert empty_result.data.shape == (0, n_ch)
+    assert empty_result.data.dtype == mx.float32
+    assert empty_result.dims == ["time", "ch"]
+    assert np.array_equal(np.asarray(empty_result.axes["ch"].data), np.arange(n_ch).astype(str))
+    check_empty_result(empty_result)
+
+    # Non-empty messages through the same processor still compute correctly.
+    normal = _mlx_msg(4)
+    out = proc(normal)
+    assert isinstance(out.data, mx.array)
+    expected = np.asarray(normal.data) @ weights
+    assert np.allclose(np.asarray(out.data), expected, atol=1e-4)
+
+    # And another empty message after real data also passes through.
+    check_empty_result(proc(_mlx_msg(0)))
