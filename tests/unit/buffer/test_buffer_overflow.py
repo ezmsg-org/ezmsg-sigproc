@@ -90,6 +90,26 @@ class TestHybridBufferOverflow:
         with pytest.raises(OverflowError):
             buf.write(np.zeros((11, 2)))
 
+    def test_overflow_strategy_grow_zero_channel(self, buffer_params):
+        """Growing a 0-channel buffer must not divide by zero.
+
+        A 0-size non-sample dim (e.g. a stream from a source sliced to no
+        channels) makes each sample 0 bytes, so the max_size byte budget can't
+        bound -- or divide -- capacity. Regression for a 0-channel stream
+        reaching a growing buffer (e.g. the feature Merge's Align).
+        """
+        buf = HybridBuffer(**{**buffer_params, "overflow_strategy": "grow", "other_shape": (0,)})
+        assert buf.capacity == 100
+        buf.write(np.zeros((80, 0), dtype=np.float32))
+        assert buf.capacity == 100
+        # 110 > capacity -> must grow (previously raised ZeroDivisionError,
+        # dividing max_size by 0 bytes/sample).
+        buf.write(np.zeros((30, 0), dtype=np.float32))
+        assert buf.capacity > 100
+        assert buf.available() == 110
+        out = buf.read(110)
+        assert out.shape == (110, 0)
+
     def test_read_prevent_overwrite(self, buffer_params):
         """
         This test ensures that the read method can prevent an overwrite by reading
