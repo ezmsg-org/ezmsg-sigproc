@@ -305,7 +305,7 @@ class AffineTransformTransformer(
                 all_in = np.concatenate([np.asarray(group) for group in self.settings.channel_clusters])
                 if np.any((all_in < 0) | (all_in >= n_in)):
                     raise ValueError(
-                        "channel_clusters contains out-of-range input indices " f"(valid range: 0..{n_in - 1})"
+                        f"channel_clusters contains out-of-range input indices (valid range: 0..{n_in - 1})"
                     )
 
                 # Derive output indices from non-zero weights for each input cluster
@@ -371,9 +371,13 @@ class AffineTransformTransformer(
         out_shape = data.shape[:-1] + (self._state.n_out,)
         result = xp_create(xp.zeros, out_shape, dtype=data.dtype, device=array_device(data))
 
-        for in_idx, out_idx, sub_weights in self._state.clusters:
-            chunk = xp.take(data, in_idx, axis=data.ndim - 1)
-            result[..., out_idx] = xp.matmul(chunk, sub_weights)
+        # Empty input: every cluster write would be zero-size, and MLX's scatter
+        # (indexed assignment) rejects zero-size updates. The zeros allocation is
+        # already the correct result, so skip the assignments.
+        if 0 not in data.shape:
+            for in_idx, out_idx, sub_weights in self._state.clusters:
+                chunk = xp.take(data, in_idx, axis=data.ndim - 1)
+                result[..., out_idx] = xp.matmul(chunk, sub_weights)
 
         if needs_permute:
             inv_dim_perm = list(range(result.ndim))
