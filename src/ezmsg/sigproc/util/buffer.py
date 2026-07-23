@@ -418,14 +418,25 @@ class HybridBuffer:
             return
 
         other_shape = self._buffer.shape[1:]
-        max_capacity = self._max_size / (xp_itemsize(self._buffer.dtype) * math.prod(other_shape))
-        if min_capacity > max_capacity:
-            raise OverflowError(
-                f"Cannot grow buffer to {min_capacity} samples, "
-                f"maximum capacity is {max_capacity} samples ({self._max_size} bytes)."
-            )
-
-        new_capacity = min(max_capacity, max(self._capacity * 2, min_capacity))
+        bytes_per_sample = xp_itemsize(self._buffer.dtype) * math.prod(other_shape)
+        if bytes_per_sample == 0:
+            # A 0-size non-sample dim (e.g. a 0-channel stream from a source
+            # sliced to no channels) makes each sample 0 bytes, so the max_size
+            # byte budget never bounds capacity. Grow by the normal doubling
+            # policy with no byte cap -- avoids dividing by 0 bytes/sample.
+            new_capacity = max(self._capacity * 2, min_capacity)
+        else:
+            # Floor-divide: the byte budget bounds capacity to a whole number of
+            # samples. True division would yield a float, which then flows into
+            # both the xp_empty shape below and self._capacity -- array dims must
+            # be ints, and a non-int capacity corrupts the ring-buffer arithmetic.
+            max_capacity = self._max_size // bytes_per_sample
+            if min_capacity > max_capacity:
+                raise OverflowError(
+                    f"Cannot grow buffer to {min_capacity} samples, "
+                    f"maximum capacity is {max_capacity} samples ({self._max_size} bytes)."
+                )
+            new_capacity = min(max_capacity, max(self._capacity * 2, min_capacity))
         new_buffer = xp_empty(self.xp, (new_capacity, *other_shape), dtype=self._buffer.dtype)
 
         # Copy existing data to new buffer
