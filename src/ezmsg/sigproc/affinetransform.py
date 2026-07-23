@@ -25,7 +25,8 @@ from ezmsg.util.messages.axisarray import AxisArray, AxisBase
 from ezmsg.util.messages.util import replace
 
 from ezmsg.sigproc.util.array import array_device, is_float_dtype, xp_asarray, xp_create
-from ezmsg.sigproc.util.channels import channel_clusters_from_field
+from ezmsg.sigproc.util.channels import channel_clusters_from_field, validate_channel_clusters
+from ezmsg.sigproc.util.rereference import RereferenceKind, rereference_matrix
 
 
 def _find_block_diagonal_clusters(weights: np.ndarray) -> list[tuple[np.ndarray, np.ndarray]] | None:
@@ -144,9 +145,21 @@ class AffineTransformSettings(ez.Settings):
     Settings for :obj:`AffineTransform`.
     """
 
-    weights: np.ndarray | str | Path | Callable[[int], np.ndarray]
-    """An array of weights, a path to a file with weights compatible with np.loadtxt,
-    or a callable that accepts ``n_in: int`` and returns an ndarray of shape ``(n_in, n_out)``."""
+    weights: np.ndarray | str | Path | RereferenceKind | Callable[[int], np.ndarray]
+    """An array of weights; a path to a file with weights compatible with np.loadtxt;
+    a :class:`~ezmsg.sigproc.util.rereference.RereferenceKind` or its string value
+    (e.g. ``"car"``) to build a deterministic rereference matrix over
+    ``channel_clusters``; or a callable that accepts ``n_in: int`` and returns an
+    ndarray of shape ``(n_in, n_out)``.
+
+    Note: if you simply want streaming CAR, :obj:`CommonRereference` in this module
+    is usually the better choice (per-sample mean subtraction instead of a matmul,
+    plus ``median`` support). Kind-based weights are useful for discovering the
+    available deterministic transforms and for workflows that start from such a
+    matrix and later replace it externally via
+    :meth:`AffineTransformTransformer.set_weights`. For variants (leave-one-out,
+    minimum cluster size) pass a callable, e.g.
+    ``lambda n: car_matrix(n, clusters=..., include_current=False)``."""
 
     axis: str | None = None
     """The name of the axis to apply the transformation to. Defaults to the leading (0th) axis in the array."""
@@ -213,11 +226,21 @@ class AffineTransformTransformer(
 
     def _reset_state(self, message: AxisArray) -> None:
         weights = self.settings.weights
-        if callable(weights):
+        if isinstance(weights, str):
+            # Bare strings may name a RereferenceKind (e.g. "car" from config);
+            # anything else is treated as a weights file path below.
+            try:
+                weights = RereferenceKind(weights)
+            except ValueError:
+                pass
+        if isinstance(weights, RereferenceKind) or callable(weights):
             axis = self.settings.axis or message.dims[-1]
             axis_idx = message.get_axis_idx(axis)
             n_in = message.data.shape[axis_idx]
-            weights = weights(n_in)
+            if isinstance(weights, RereferenceKind):
+                weights = rereference_matrix(weights, n_in, clusters=self.settings.channel_clusters)
+            else:
+                weights = weights(n_in)
         if isinstance(weights, str):
             weights = Path(os.path.abspath(os.path.expanduser(weights)))
         if isinstance(weights, Path):
@@ -301,12 +324,7 @@ class AffineTransformTransformer(
             w_np = np.ascontiguousarray(weights)
             n_in, n_out = w_np.shape
             if self.settings.channel_clusters is not None:
-                # Validate input index bounds
-                all_in = np.concatenate([np.asarray(group) for group in self.settings.channel_clusters])
-                if np.any((all_in < 0) | (all_in >= n_in)):
-                    raise ValueError(
-                        f"channel_clusters contains out-of-range input indices (valid range: 0..{n_in - 1})"
-                    )
+                validate_channel_clusters(self.settings.channel_clusters, n_in)
 
                 # Derive output indices from non-zero weights for each input cluster
                 clusters = []
@@ -427,7 +445,7 @@ class AffineTransform(BaseTransformerUnit[AffineTransformSettings, AxisArray, Ax
 
 
 def affine_transform(
-    weights: np.ndarray | str | Path | Callable[[int], np.ndarray],
+    weights: np.ndarray | str | Path | RereferenceKind | Callable[[int], np.ndarray],
     axis: str | None = None,
     right_multiply: bool = True,
     channel_clusters: list[list[int]] | None = None,
@@ -438,7 +456,10 @@ def affine_transform(
 
     Args:
         weights: An array of weights, a path to a file with weights compatible with np.loadtxt,
+            a :class:`~ezmsg.sigproc.util.rereference.RereferenceKind` (or its string value),
             or a callable that accepts ``n_in`` and returns an ndarray of shape ``(n_in, n_out)``.
+            See :attr:`AffineTransformSettings.weights`; for streaming CAR prefer
+            :func:`common_rereference`.
         axis: The name of the axis to apply the transformation to. Defaults to the leading (0th) axis in the array.
         right_multiply: Set False to transpose the weights before applying.
         channel_clusters: Optional explicit channel cluster specification. See

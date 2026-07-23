@@ -611,7 +611,7 @@ def test_block_diagonal_invalid_clusters():
     n_chans = 64
     weights = np.eye(n_chans)
 
-    with pytest.raises(ValueError, match="out-of-range input indices"):
+    with pytest.raises(ValueError, match="out-of-range indices"):
         xformer = AffineTransformTransformer(
             AffineTransformSettings(
                 weights=weights,
@@ -622,7 +622,7 @@ def test_block_diagonal_invalid_clusters():
         msg_in = AxisArray(data=np.zeros((10, n_chans)), dims=["time", "ch"])
         xformer(msg_in)
 
-    with pytest.raises(ValueError, match="out-of-range input indices"):
+    with pytest.raises(ValueError, match="out-of-range indices"):
         xformer = AffineTransformTransformer(
             AffineTransformSettings(
                 weights=weights,
