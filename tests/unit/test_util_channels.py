@@ -1,7 +1,8 @@
 import numpy as np
+import pytest
 from ezmsg.util.messages.axisarray import AxisArray
 
-from ezmsg.sigproc.util.channels import channel_clusters_from_field
+from ezmsg.sigproc.util.channels import channel_clusters_from_field, validate_channel_clusters
 
 
 def _msg(banks: list[str], n_data: int | None = None, field: str = "bank") -> AxisArray:
@@ -79,3 +80,21 @@ def test_linear_axis_returns_none():
 def test_length_mismatch_returns_none():
     """Coord length != channel-dim size is treated as unusable metadata."""
     assert channel_clusters_from_field(_msg(["A", "A"], n_data=4), "ch", "bank") is None
+
+
+class TestValidateChannelClusters:
+    def test_valid_clusters_pass(self):
+        validate_channel_clusters([[0, 1], [2, 3]], 4)
+
+    def test_empty_spec_passes(self):
+        validate_channel_clusters([], 4)
+        validate_channel_clusters([[]], 4)
+        validate_channel_clusters([], 0)
+
+    def test_out_of_range_raises(self):
+        with pytest.raises(ValueError, match="out-of-range"):
+            validate_channel_clusters([[0, 1, 4]], 4)
+
+    def test_negative_raises(self):
+        with pytest.raises(ValueError, match="out-of-range"):
+            validate_channel_clusters([[-1, 0]], 4)

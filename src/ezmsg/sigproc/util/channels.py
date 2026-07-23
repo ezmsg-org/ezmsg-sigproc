@@ -11,7 +11,20 @@ can become "bank aware" by reading metadata that already rides on the stream.
 
 from __future__ import annotations
 
+import numpy as np
 from ezmsg.util.messages.axisarray import AxisArray
+
+
+def validate_channel_clusters(clusters: list[list[int]], n_channels: int) -> None:
+    """Raise ``ValueError`` if any cluster index falls outside ``0..n_channels-1``.
+
+    An empty *clusters* list (or empty groups within it) validates trivially;
+    whether an empty spec is permitted at all is caller policy.
+    """
+    for cluster in clusters:
+        idx = np.asarray(cluster, dtype=np.intp)
+        if idx.size and (np.any(idx < 0) or np.any(idx >= n_channels)):
+            raise ValueError(f"channel_clusters contains out-of-range indices (valid range: 0..{n_channels - 1})")
 
 
 def channel_clusters_from_field(
