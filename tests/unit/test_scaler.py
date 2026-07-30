@@ -548,3 +548,102 @@ def test_scaler_bias_correction_survives_chunking():
         parts.append(chunked(mk(c, n)).data)
         n += c.shape[0]
     np.testing.assert_allclose(np.concatenate(parts, axis=0), single, atol=1e-10)
+
+
+def test_scaler_variance_floor_bounds_near_constant_channel():
+    """A positive ``variance_floor`` bounds the output on a near-constant channel
+    (no divide-by-~0 blow-up)."""
+    fs, tau = 1000.0, 0.5
+    rng = np.random.default_rng(11)
+    # Near-constant channel: variance far below the floor -> normalized by the
+    # floor rather than by ~0.
+    near_const = (5.0 + rng.normal(0.0, 1e-3, size=(2000, 1))).astype(np.float32)
+    s = AdaptiveStandardScalerTransformer(
+        settings=AdaptiveStandardScalerSettings(time_constant=tau, axis="time", variance_floor=1e-2)
+    )
+    msg = AxisArray(near_const, dims=["time", "ch"], axes=frozendict({"time": AxisArray.TimeAxis(fs=fs)}))
+    out = np.asarray(s(msg).data)
+    assert np.all(np.isfinite(out))
+    assert np.max(np.abs(out[200:])) < 1.0
+
+
+@requires_mlx
+def test_scaler_variance_floor_backend_invariant_low_variance():
+    """On a near-constant channel, ``E[x²] - E[x]²`` cancellation makes the
+    z-score disagree between float64 (numpy) and float32 (mlx). A variance floor
+    removes the blow-up and makes the result backend-invariant."""
+    mx = pytest.importorskip("mlx.core")
+    fs, tau = 1000.0, 0.5
+    rng = np.random.default_rng(7)
+    strong = rng.normal(0.0, 1.0, size=(2000, 1))            # well-conditioned
+    weak = 5.0 + rng.normal(0.0, 1e-3, size=(2000, 1))       # moderate DC, tiny variance
+    data64 = np.concatenate([strong, weak], axis=1).astype(np.float64)
+    data32 = data64.astype(np.float32)
+
+    def run(floor):
+        s_np = AdaptiveStandardScalerTransformer(
+            settings=AdaptiveStandardScalerSettings(time_constant=tau, axis="time", variance_floor=floor)
+        )
+        s_mx = AdaptiveStandardScalerTransformer(
+            settings=AdaptiveStandardScalerSettings(time_constant=tau, axis="time", variance_floor=floor)
+        )
+        msg_np = AxisArray(data64.copy(), dims=["time", "ch"], axes=frozendict({"time": AxisArray.TimeAxis(fs=fs)}))
+        msg_mx = AxisArray(mx.array(data32), dims=["time", "ch"], axes=frozendict({"time": AxisArray.TimeAxis(fs=fs)}))
+        return np.asarray(s_np(msg_np).data), np.asarray(s_mx(msg_mx).data)
+
+    # Without a floor, the near-constant channel diverges between backends.
+    np0, mx0 = run(0.0)
+    weak_diff_unfloored = np.max(np.abs(np0[:, 1] - mx0[:, 1]))
+
+    # With a floor above the channel's true variance, both backends agree.
+    npf, mxf = run(1e-2)
+    np.testing.assert_allclose(mxf, npf, rtol=1e-2, atol=2e-3)
+
+    # The floor is what closed the gap on the weak channel.
+    weak_diff_floored = np.max(np.abs(npf[:, 1] - mxf[:, 1]))
+    assert weak_diff_floored < weak_diff_unfloored
+
+
+def test_scaler_variance_floor_precision_invariant_low_variance():
+    """MLX-free analog of the backend test: the same cancellation makes the
+    low-variance z-score diverge between float32 and float64, and a variance
+    floor makes them agree. Exercises the core motivation in plain numpy so it
+    runs everywhere (the MLX test above is skipped without MLX)."""
+    fs, tau = 1000.0, 0.5
+    rng = np.random.default_rng(7)
+    strong = rng.normal(0.0, 1.0, size=(2000, 1))          # well-conditioned
+    weak = 5.0 + rng.normal(0.0, 1e-3, size=(2000, 1))     # moderate DC, tiny variance
+    d64 = np.concatenate([strong, weak], axis=1).astype(np.float64)
+    d32 = d64.astype(np.float32)
+
+    def run(data, floor):
+        s = AdaptiveStandardScalerTransformer(
+            settings=AdaptiveStandardScalerSettings(time_constant=tau, axis="time", variance_floor=floor)
+        )
+        msg = AxisArray(data.copy(), dims=["time", "ch"], axes=frozendict({"time": AxisArray.TimeAxis(fs=fs)}))
+        return np.asarray(s(msg).data, dtype=np.float64)
+
+    # Without a floor, the near-constant channel diverges between f32 and f64.
+    weak_diff_unfloored = np.max(np.abs(run(d64, 0.0)[200:, 1] - run(d32, 0.0)[200:, 1]))
+
+    # With a floor above the channel's true variance, both precisions agree.
+    npf, f32f = run(d64, 1e-2), run(d32, 1e-2)
+    np.testing.assert_allclose(f32f[:, 1], npf[:, 1], rtol=1e-2, atol=2e-3)
+
+    weak_diff_floored = np.max(np.abs(npf[200:, 1] - f32f[200:, 1]))
+    assert weak_diff_floored < weak_diff_unfloored
+
+
+def test_scaler_variance_floor_default_matches_unfloored_low_variance():
+    """``variance_floor=0.0`` (the default) reproduces the prior unfloored
+    behavior on the near-constant channel this feature targets -- guards the
+    default path directly (not just via structural equivalence)."""
+    fs, tau = 1000.0, 0.5
+    rng = np.random.default_rng(3)
+    data = (5.0 + rng.normal(0.0, 1e-3, size=800)).astype(np.float64)
+    s = AdaptiveStandardScalerTransformer(
+        settings=AdaptiveStandardScalerSettings(time_constant=tau, axis="time", variance_floor=0.0)
+    )
+    msg = AxisArray(data[:, None], dims=["time", "ch"], axes=frozendict({"time": AxisArray.TimeAxis(fs=fs)}))
+    out = np.asarray(s(msg).data)[:, 0]
+    np.testing.assert_allclose(out, _bias_corrected_zscore_1d(data, tau, fs), atol=1e-6)

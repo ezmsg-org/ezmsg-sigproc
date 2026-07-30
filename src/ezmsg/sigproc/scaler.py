@@ -85,7 +85,26 @@ class RiverAdaptiveStandardScalerTransformer(
         return replace(message, data=result)
 
 
-class AdaptiveStandardScalerSettings(EWMASettings): ...
+class AdaptiveStandardScalerSettings(EWMASettings):
+    variance_floor: float = 0.0
+    """Lower bound on the estimated variance before it is used as the divisor,
+    in the data's squared units.
+
+    The moving variance is computed as ``E[x²] - E[x]²``. On low-variance
+    ("near-constant") channels both terms are large and nearly equal, so the
+    tiny difference is dominated by float rounding (catastrophic cancellation).
+    The reciprocal standard deviation then both blows up and becomes sensitive
+    to precision / array backend (e.g. float32 vs float64), which can flip a
+    channel between being zeroed and being amplified. Flooring the variance
+    bounds the gain on such channels and makes the output numerically stable and
+    backend-invariant.
+
+    This is scale-dependent, so choose it in your data's units -- e.g. the
+    smallest variance you would consider real signal, such as your
+    quantization/noise floor (``LSB² / 12`` or ``rms_noise²``). The default
+    ``0.0`` preserves the historical behavior (no floor; exactly-constant
+    channels output 0). Any value ``<= 0`` is equivalent to no floor, since the
+    variance is already clamped to ``>= 0`` before the floor is applied."""
 
 
 @processor_state
@@ -164,14 +183,23 @@ class AdaptiveStandardScalerTransformer(
         mean_message = self._state.samps_ewma(message)
         var_sq_message = self._state.vars_sq_ewma(replace(message, data=message.data**2))
 
-        # Get step: safe division avoids warnings from zero/negative variance
+        # Get step: variance from the moving second moment. ``E[x²] - E[x]²`` is
+        # subject to catastrophic cancellation on low-variance channels, so clamp
+        # negatives to 0 and floor the variance (see ``variance_floor``) before
+        # taking the reciprocal std. A positive floor bounds the gain on
+        # near-constant channels and makes the result robust to float precision /
+        # array backend; the default floor of 0.0 reproduces the historical
+        # behavior exactly (constant channels output 0).
         varis = var_sq_message.data - mean_message.data**2
-        mask = varis > 0
-        safe_varis = xp.where(mask, varis, xp.asarray(0.0, dtype=varis.dtype))
-        std = safe_varis**0.5
-        safe_std = xp.where(mask, std, xp.asarray(1.0, dtype=std.dtype))
+        varis = xp.where(varis > 0, varis, xp.asarray(0.0, dtype=varis.dtype))
+        floor = xp.asarray(self.settings.variance_floor, dtype=varis.dtype)
+        safe_varis = xp.maximum(varis, floor)
+        # After flooring, variance is 0 only when floor <= 0 and the channel is
+        # exactly constant; output 0 there rather than dividing by zero.
+        nonzero = safe_varis > 0
+        safe_std = xp.where(nonzero, safe_varis**0.5, xp.asarray(1.0, dtype=safe_varis.dtype))
         result = xp.where(
-            mask, (message.data - mean_message.data) / safe_std, xp.asarray(0.0, dtype=message.data.dtype)
+            nonzero, (message.data - mean_message.data) / safe_std, xp.asarray(0.0, dtype=message.data.dtype)
         )
         return replace(message, data=result)
 
