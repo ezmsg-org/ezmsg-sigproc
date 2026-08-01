@@ -109,7 +109,8 @@ class HybridBuffer:
             raise OverflowError(
                 f"Buffer overflow: {new_len} samples awaiting in deque exceeds buffer capacity {self._capacity}."
             )
-        elif new_len * xp_itemsize(block.dtype) > self._max_size:
+        bytes_per_sample = xp_itemsize(block.dtype) * math.prod(other_shape)
+        if new_len * bytes_per_sample > self._max_size:
             raise OverflowError(
                 f"deque contents would exceed max_size ({self._max_size}) on subsequent flush."
                 "Are you reading samples frequently enough?"
