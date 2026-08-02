@@ -70,7 +70,10 @@ def parse_slice(
     - "{start}:{stop}" or {start}:{stop}:{step} -> slice(start, stop, step)
     - "5" (or any integer) -> (5,). Take only that item.
         applying this to a ndarray or AxisArray will drop the dimension.
-    - A comma-separated list of the above -> a tuple of slices | ints
+    - A comma-separated list of the above -> a tuple of slices | ints. Per-token
+      results are concatenated in token order, duplicates included; note that
+      :obj:`SlicerTransformer` normalizes the resolved indices per its ``order``
+      setting (deduplicated, and by default sorted into axis order).
     - A comma-separated list of values and axinfo is provided and is a CoordinateAxis -> a tuple of ints.
       Each value is first compared against the axis labels for an exact match; failing
       that, it is treated as a regular expression and full-matched against the labels
@@ -137,7 +140,9 @@ class SlicerSettings(ez.Settings):
     """selection: See :obj:`ezmsg.sigproc.slicer.parse_slice` for details.
     Label/regex selections always preserve the sliced axis — a single matching
     entry yields a length-1 axis. Only a bare-integer positional selection
-    (e.g. "5") drops the dimension."""
+    (e.g. "5") drops the dimension. Comma-separated selections are normalized
+    per ``order``: duplicates from overlapping tokens are always removed, and
+    by default the result follows axis order regardless of token order."""
 
     axis: str | None = None
     """The name of the axis to slice along. If None, the last axis is used."""
@@ -148,6 +153,22 @@ class SlicerSettings(ez.Settings):
     this explicitly makes selection tokens mean field values only — bare integers are
     no longer positional indices (use slice syntax like "3:4" for positions) — and
     raises an error if the axis has no such field."""
+
+    order: str = "axis"
+    """How to order the entries a comma-separated selection resolves to.
+
+    - "axis" (default): the resolved indices are deduplicated and sorted into
+      axis order — a selection is a *filter*, so selections naming the same
+      entries in a different token order (e.g. ``".*-aip-.*,.*-m1-.*"`` vs
+      ``".*-m1-.*,.*-aip-.*"``) produce identical output. An info message is
+      logged when this reorders relative to token order.
+    - "selection": entries follow token order, so a positional selection like
+      "3,1,2" is an intentional permutation.
+
+    In both modes duplicate indices from overlapping tokens (e.g. "0:3,1") are
+    removed — first occurrence wins — with a warning, so a coordinate axis of
+    unique labels stays unique. A single non-comma slice token (e.g. "::-1") is
+    applied as-is and is not normalized."""
 
     on_empty: str = "warn"
     """What to do when a label/regex selection matches nothing on the target axis.
@@ -190,9 +211,38 @@ class SlicerTransformer(BaseStatefulTransformer[SlicerSettings, AxisArray, AxisA
             return False
         return True
 
+    def _normalize_indices(self, indices: npt.NDArray, axis: str) -> npt.NDArray:
+        """Deduplicate the resolved indices and, with order="axis", sort them into
+        axis order, logging when normalization changes anything. Keeps the
+        coordinate axis a set of unique entries even when selection tokens overlap,
+        and (by default) makes the output independent of token order."""
+        _, first_pos = np.unique(indices, return_index=True)
+        deduped = indices[np.sort(first_pos)]
+        if len(deduped) < len(indices):
+            ez.logger.warning(
+                "Slicer: selection %r has overlapping tokens on axis %r; removed "
+                "%d duplicate(s), keeping the first occurrence.",
+                self.settings.selection,
+                axis,
+                len(indices) - len(deduped),
+            )
+        if self.settings.order == "selection":
+            return deduped
+        in_axis_order = np.sort(deduped)
+        if not np.array_equal(in_axis_order, deduped):
+            ez.logger.info(
+                "Slicer: selection %r tokens are not in axis order on axis %r; output "
+                "follows axis order (order='axis'). Set order='selection' to keep token order.",
+                self.settings.selection,
+                axis,
+            )
+        return in_axis_order
+
     def _reset_state(self, message: AxisArray) -> None:
         if self.settings.on_empty not in ("raise", "warn"):
             raise ValueError(f"on_empty must be 'raise' or 'warn', got {self.settings.on_empty!r}")
+        if self.settings.order not in ("axis", "selection"):
+            raise ValueError(f"order must be 'axis' or 'selection', got {self.settings.order!r}")
         axis = self.settings.axis or message.dims[-1]
         axis_idx = message.get_axis_idx(axis)
         axinfo = message.axes.get(axis, None)
@@ -237,7 +287,7 @@ class SlicerTransformer(BaseStatefulTransformer[SlicerSettings, AxisArray, AxisA
             # Empty _slices (nothing matched) -> select no entries (0-length),
             # rather than np.hstack([]) which would raise.
             indices = np.hstack([indices[_] for _ in _slices]) if _slices else indices[:0]
-            self._state.slice_ = np.s_[indices]
+            self._state.slice_ = np.s_[self._normalize_indices(indices, axis)]
 
         # Create the output axis
         if axis in message.axes and hasattr(message.axes[axis], "data") and len(message.axes[axis].data) > 0:
@@ -274,6 +324,7 @@ def slicer(
     selection: str = "",
     axis: str | None = None,
     field: str | None = None,
+    order: str = "axis",
     on_empty: str = "warn",
 ) -> SlicerTransformer:
     """
@@ -284,10 +335,14 @@ def slicer(
         axis: The name of the axis to slice along. If None, the last axis is used.
         field: Which field of a structured coordinate axis to match selection values
           against. See :obj:`SlicerSettings` for details.
+        order: "axis" (default) or "selection" — how to order the entries a
+          comma-separated selection resolves to. See :obj:`SlicerSettings` for details.
         on_empty: "warn" (default) or "raise" — what to do when a label/regex
           selection matches nothing. See :obj:`SlicerSettings` for details.
 
     Returns:
         :obj:`SlicerTransformer`
     """
-    return SlicerTransformer(SlicerSettings(selection=selection, axis=axis, field=field, on_empty=on_empty))
+    return SlicerTransformer(
+        SlicerSettings(selection=selection, axis=axis, field=field, order=order, on_empty=on_empty)
+    )

@@ -362,3 +362,88 @@ def test_slicer_single_label_match_keeps_axis():
 def test_slicer_on_empty_invalid():
     with pytest.raises(ValueError, match="on_empty"):
         SlicerTransformer(SlicerSettings(selection="C.*", axis="ch", on_empty="ignore"))(_make_on_empty_msg())
+
+
+def _make_order_msg() -> AxisArray:
+    n_chans = 12
+    return AxisArray(
+        data=np.arange(2 * n_chans, dtype=float).reshape(2, n_chans),
+        dims=["time", "ch"],
+        axes={
+            "time": AxisArray.TimeAxis(fs=10.0),
+            "ch": AxisArray.CoordinateAxis(data=np.array([f"ch{i:02d}" for i in range(n_chans)]), dims=["ch"]),
+        },
+        key="order",
+    )
+
+
+def test_slicer_order_axis_default(caplog):
+    """Default order="axis": a selection is a filter — overlapping tokens are
+    deduplicated and the output follows axis order regardless of token order,
+    with logs signaling that normalization changed something (issue #188)."""
+    msg = _make_order_msg()
+    with caplog.at_level(logging.INFO, logger="ezmsg"):
+        out = SlicerTransformer(SlicerSettings(selection="3:10,1,7", axis="ch"))(msg)
+    expected = [1, 3, 4, 5, 6, 7, 8, 9]
+    assert np.array_equal(out.data, msg.data[:, expected])
+    assert [str(x) for x in out.axes["ch"].data] == [f"ch{i:02d}" for i in expected]
+    assert any("removed 1 duplicate" in rec.getMessage() for rec in caplog.records)
+    assert any("not in axis order" in rec.getMessage() for rec in caplog.records)
+
+    # An already-normalized selection is untouched and logs nothing.
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="ezmsg"):
+        out = SlicerTransformer(SlicerSettings(selection="1,3:10", axis="ch"))(msg)
+    assert np.array_equal(out.data, msg.data[:, expected])
+    assert not caplog.records
+
+
+def test_slicer_order_axis_label_tokens():
+    """Regex/label selections naming the same channels in a different token order
+    produce identical output (issue #188)."""
+    labels = np.array(["elec1-m1-1", "elec1-m1-2", "elec2-aip-1", "elec2-aip-2"])
+    msg = AxisArray(
+        data=np.arange(2 * 4, dtype=float).reshape(2, 4),
+        dims=["time", "ch"],
+        axes={
+            "time": AxisArray.TimeAxis(fs=10.0),
+            "ch": AxisArray.CoordinateAxis(data=labels, dims=["ch"]),
+        },
+        key="order_labels",
+    )
+    out_fwd = SlicerTransformer(SlicerSettings(selection=".*-m1-.*,.*-aip-.*", axis="ch"))(msg)
+    out_rev = SlicerTransformer(SlicerSettings(selection=".*-aip-.*,.*-m1-.*", axis="ch"))(msg)
+    assert [str(x) for x in out_fwd.axes["ch"].data] == list(labels)
+    assert [str(x) for x in out_rev.axes["ch"].data] == list(labels)
+    assert np.array_equal(out_fwd.data, out_rev.data)
+    # Overlapping positional/label tokens do not duplicate a channel.
+    out_dup = SlicerTransformer(SlicerSettings(selection="0:3,1", axis="ch"))(msg)
+    assert [str(x) for x in out_dup.axes["ch"].data] == list(labels[:3])
+
+
+def test_slicer_order_selection():
+    """order="selection" keeps token order (intentional permutation) but still
+    removes duplicates, keeping the first occurrence."""
+    msg = _make_order_msg()
+    out = SlicerTransformer(SlicerSettings(selection="3,1,2", axis="ch", order="selection"))(msg)
+    assert np.array_equal(out.data, msg.data[:, [3, 1, 2]])
+    assert [str(x) for x in out.axes["ch"].data] == ["ch03", "ch01", "ch02"]
+
+    out = SlicerTransformer(SlicerSettings(selection="3:10,1,7", axis="ch", order="selection"))(msg)
+    expected = [3, 4, 5, 6, 7, 8, 9, 1]
+    assert np.array_equal(out.data, msg.data[:, expected])
+    assert [str(x) for x in out.axes["ch"].data] == [f"ch{i:02d}" for i in expected]
+
+
+def test_slicer_order_single_slice_untouched():
+    """A single non-comma slice token bypasses normalization: an explicit
+    reverse slice remains a reverse."""
+    msg = _make_order_msg()
+    out = SlicerTransformer(SlicerSettings(selection="::-1", axis="ch"))(msg)
+    assert np.array_equal(out.data, msg.data[:, ::-1])
+    assert [str(x) for x in out.axes["ch"].data] == [f"ch{i:02d}" for i in range(11, -1, -1)]
+
+
+def test_slicer_order_invalid():
+    with pytest.raises(ValueError, match="order"):
+        SlicerTransformer(SlicerSettings(selection="0:2", axis="ch", order="token"))(_make_order_msg())
