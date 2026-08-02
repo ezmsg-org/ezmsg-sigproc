@@ -129,6 +129,41 @@ def test_ewma_mlx_accepts_numpy_initialized_state():
     np.testing.assert_allclose(np.asarray(actual.data), expected.data, rtol=1e-4, atol=1e-5)
 
 
+@requires_mlx
+def test_ewma_mlx_dispatches_component_chunk_sizes(monkeypatch):
+    mx = pytest.importorskip("mlx.core")
+    import ezmsg.sigproc.util.ewma_mlx_metal as ewma_metal_module
+
+    fs = 30_000.0
+    time_constant = 0.25
+    rng = np.random.default_rng(3)
+    settings = EWMASettings(
+        time_constant=time_constant,
+        axis="time",
+        mlx_metal_chunk_sizes=(32, 128),
+    )
+    proc_np = EWMATransformer(settings=settings)
+    proc_mx = EWMATransformer(settings=settings)
+
+    launches = []
+    original_launch = ewma_metal_module._launch_kernel
+
+    def recording_launch(x_chunk, coef, state, n_channels, cs, valid_length):
+        launches.append((cs, int(valid_length.item())))
+        return original_launch(x_chunk, coef, state, n_channels, cs, valid_length)
+
+    monkeypatch.setattr(ewma_metal_module, "_launch_kernel", recording_launch)
+    for n_samples in (30, 300):
+        data = rng.normal(size=(n_samples, 8)).astype(np.float32)
+        msg_np = AxisArray(data=data, dims=["time", "ch"], axes={"time": AxisArray.TimeAxis(fs=fs)})
+        msg_mx = replace_axisarray_data(msg_np, mx.array(data))
+        expected = proc_np(msg_np)
+        actual = proc_mx(msg_mx)
+        np.testing.assert_allclose(np.asarray(actual.data), expected.data, rtol=1e-4, atol=1e-5)
+
+    assert launches == [(32, 30), (128, 128), (128, 128), (128, 44)]
+
+
 def replace_axisarray_data(message: AxisArray, data) -> AxisArray:
     return AxisArray(data=data, dims=message.dims, axes=message.axes, key=message.key)
 
@@ -237,6 +272,7 @@ def test_ewma_settings_default_accumulate():
     """Test that EWMASettings defaults to accumulate=True."""
     settings = EWMASettings(time_constant=1.0)
     assert settings.accumulate is True
+    assert settings.mlx_metal_chunk_sizes == (32, 1024)
 
 
 def test_ewma_settings_accumulate_false():
@@ -315,6 +351,17 @@ def test_ewma_passthrough_toggle_preserves_state():
 
 class TestEWMAUpdateSettings:
     """Live settings updates via BaseProcessor.update_settings."""
+
+    def test_mlx_chunk_size_update_preserves_state(self):
+        proc = EWMATransformer(settings=EWMASettings(time_constant=0.1))
+        _ = proc(_make_ewma_test_msg(np.ones((10, 2))))
+        zi_before = proc._state.zi.copy()
+
+        proc.update_settings(EWMASettings(time_constant=0.1, mlx_metal_chunk_sizes=(64, 512)))
+
+        assert proc._hash != -1
+        assert np.array_equal(proc._state.zi, zi_before)
+        assert proc.settings.mlx_metal_chunk_sizes == (64, 512)
 
     def test_accumulate_toggle_preserves_state(self):
         proc = EWMATransformer(settings=EWMASettings(time_constant=0.1, accumulate=True))

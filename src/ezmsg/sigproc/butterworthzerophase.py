@@ -277,7 +277,13 @@ class ButterworthBackwardFilterTransformer(FilterByDesignTransformer[Butterworth
         if use_mlx_metal:
             if self._sos_mx is None:
                 self._sos_mx = _mx.array(np.asarray(self._coefs_cache).astype(np.float32))
-            y_bwd_rev, _ = _sosfilt_mlx_metal_xp(self._sos_mx, combined_rev, buffer_ax_idx, backward_zi)
+            y_bwd_rev, _ = _sosfilt_mlx_metal_xp(
+                self._sos_mx,
+                combined_rev,
+                buffer_ax_idx,
+                backward_zi,
+                self.settings.mlx_metal_chunk_sizes,
+            )
         elif self.settings.coef_type == "ba":
             b, a = self._coefs_cache
             y_bwd_rev, _ = scipy.signal.lfilter(b, a, combined_rev, axis=buffer_ax_idx, zi=backward_zi)
