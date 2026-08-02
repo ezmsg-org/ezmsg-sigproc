@@ -697,7 +697,7 @@ def _sosfilt_mlx_metal_unfused(sos, x, zi=None, chunk_size=MAX_CHUNK_SIZE, *, ch
         sos_row = sos_f32[s]
         state = zi_per_section[s]
 
-        def launch(x_chunk, section_state, cs, valid_length):
+        def launch(x_chunk, section_state, cs, valid_length, sos_row=sos_row):
             return _launch_unfused_kernel(x_chunk, sos_row, section_state, cs, valid_length)
 
         y_current, state = chunked_scan(y_current, n_samples, allowed_chunk_sizes, state, launch)

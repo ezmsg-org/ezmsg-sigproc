@@ -292,6 +292,29 @@ def test_firfilter_kaiser_width():
     assert result.data.shape == in_dat.shape
 
 
+def test_firfilter_update_settings_with_array_cutoff():
+    """Live settings updates must tolerate array-valued settings fields."""
+    settings = FIRFilterSettings(
+        axis="time",
+        order=51,
+        cutoff=np.array([10.0, 40.0]),
+        pass_zero=False,
+        wn_hz=True,
+        coef_type="ba",
+    )
+    transformer = FIRFilterTransformer(settings=settings)
+    _ = transformer(make_msg())
+    assert transformer.state.filter is not None
+
+    transformer.update_settings(order=63)
+    assert transformer.state.needs_redesign
+
+    transformer.state.needs_redesign = False
+    transformer.update_settings(mlx_metal_chunk_sizes=(32, 256))
+    assert not transformer.state.needs_redesign
+    assert transformer.state.filter.settings.mlx_metal_chunk_sizes == (32, 256)
+
+
 def test_fir_empty_after_init():
     from ezmsg.sigproc.firfilter import FIRFilterSettings, FIRFilterTransformer
 

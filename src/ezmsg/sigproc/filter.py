@@ -33,6 +33,29 @@ except ImportError:
     _HAS_MLX_METAL = False
 
 
+_MISSING = object()
+
+
+def _changed_settings_fields(old_settings, new_settings) -> set[str]:
+    """Names of settings fields that differ between two settings instances.
+
+    Equivalent to ``ezmsg.baseproc``'s private helper, but tolerant of
+    array-valued fields (e.g. ``cutoff`` as a sequence of band edges), whose
+    ``!=`` yields an array rather than a bool.
+    """
+    changed = set()
+    for settings_field in dataclasses.fields(new_settings):
+        old_value = getattr(old_settings, settings_field.name, _MISSING)
+        new_value = getattr(new_settings, settings_field.name)
+        try:
+            differs = bool(old_value != new_value)
+        except (TypeError, ValueError):
+            differs = not np.array_equal(old_value, new_value)
+        if differs:
+            changed.add(settings_field.name)
+    return changed
+
+
 @dataclass
 class FilterCoefficients:
     b: np.ndarray = field(default_factory=lambda: np.array([1.0, 0.0]))
@@ -587,11 +610,7 @@ class FilterByDesignTransformer(
         else:
             self.settings = replace(self.settings, **kwargs)
 
-        changed = {
-            settings_field.name
-            for settings_field in dataclasses.fields(self.settings)
-            if getattr(old_settings, settings_field.name) != getattr(self.settings, settings_field.name)
-        }
+        changed = _changed_settings_fields(old_settings, self.settings)
 
         if self.state.filter is not None:
             if changed <= {"mlx_metal_chunk_sizes"}:
