@@ -1,5 +1,6 @@
 """Core IIR/FIR filtering infrastructure with BA and SOS coefficient support."""
 
+import dataclasses
 import typing
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -24,7 +25,6 @@ from .util.array import array_device, xp_asarray, xp_create
 try:
     import mlx.core as _mx
 
-    from .util.sosfilt_mlx_metal import MAX_CHUNK_SIZE as _MLX_MAX_CHUNK_SIZE
     from .util.sosfilt_mlx_metal import sos_float32_stable as _sos_float32_stable
     from .util.sosfilt_mlx_metal import sosfilt_mlx_metal as _sosfilt_mlx_metal_fn
 
@@ -159,7 +159,7 @@ def _sosfilt_xp(sos, x, axis_idx, zi, xp):
     return x, zi_out
 
 
-def _sosfilt_mlx_metal_xp(sos_mx, data, axis_idx, zi):
+def _sosfilt_mlx_metal_xp(sos_mx, data, axis_idx, zi, chunk_sizes):
     """Apply SOS filtering via the on-device Metal kernel.
 
     The kernel requires time as the last axis of its input; ``zi`` is kept
@@ -170,8 +170,7 @@ def _sosfilt_mlx_metal_xp(sos_mx, data, axis_idx, zi):
     """
     x_mx = _mx.moveaxis(data, axis_idx, -1) if axis_idx != data.ndim - 1 else data
     zi_mx = _mx.moveaxis(zi, axis_idx + 1, -1) if axis_idx + 1 != zi.ndim - 1 else zi
-    cs = min(x_mx.shape[-1], _MLX_MAX_CHUNK_SIZE)
-    y_mx, zf_mx = _sosfilt_mlx_metal_fn(sos_mx, x_mx, zi=zi_mx, chunk_size=cs)
+    y_mx, zf_mx = _sosfilt_mlx_metal_fn(sos_mx, x_mx, zi=zi_mx, chunk_sizes=chunk_sizes)
     y = _mx.moveaxis(y_mx, -1, axis_idx) if axis_idx != data.ndim - 1 else y_mx
     zf = _mx.moveaxis(zf_mx, -1, axis_idx + 1) if axis_idx + 1 != zi.ndim - 1 else zf_mx
     return y, zf
@@ -288,6 +287,12 @@ class FilterBaseSettings(ez.Settings):
     through scipy. Set to False to fall back to the scipy path (bit-exact
     with numpy at the cost of CPU round-trips and ~5-8x slowdown)."""
 
+    mlx_metal_chunk_sizes: tuple[int, ...] = (512,)
+    """Allowable compile-time chunk sizes for SOS Metal kernels. The smallest
+    size that fits the remaining samples is selected on each launch; otherwise
+    the largest size is repeated. Specializations compile lazily on first use.
+    Values must be in ``[1, 512]``."""
+
 
 class FilterSettings(FilterBaseSettings):
     coefs: FilterCoefficients | None = None
@@ -310,6 +315,8 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
     """
     Filter data using the provided coefficients.
     """
+
+    NONRESET_SETTINGS_FIELDS = frozenset({"mlx_metal_chunk_sizes"})
 
     def __call__(self, message: AxisArray) -> AxisArray:
         if self.settings.coefs is None:
@@ -488,7 +495,13 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
                 if self.state.sos_mx is None:
                     _, coefs = _normalize_coefs(self.settings.coefs)
                     self.state.sos_mx = _mx.array(np.asarray(coefs[0]).astype(np.float32))
-                dat_out, self.state.zi = _sosfilt_mlx_metal_xp(self.state.sos_mx, message.data, axis_idx, self.state.zi)
+                dat_out, self.state.zi = _sosfilt_mlx_metal_xp(
+                    self.state.sos_mx,
+                    message.data,
+                    axis_idx,
+                    self.state.zi,
+                    self.settings.mlx_metal_chunk_sizes,
+                )
             elif self.state.sos_method == "scipy_numpy":
                 _, coefs = _normalize_coefs(self.settings.coefs)
                 filt_func = {"ba": scipy.signal.lfilter, "sos": scipy.signal.sosfilt}[self.settings.coef_type]
@@ -568,15 +581,26 @@ class FilterByDesignTransformer(
             new_settings: Complete new settings object to replace current settings
             **kwargs: Individual settings to update
         """
-        # Update settings
+        old_settings = self.settings
         if new_settings is not None:
             self.settings = new_settings
         else:
             self.settings = replace(self.settings, **kwargs)
 
-        # Set flag to trigger recalculation on next message
+        changed = {
+            settings_field.name
+            for settings_field in dataclasses.fields(self.settings)
+            if getattr(old_settings, settings_field.name) != getattr(self.settings, settings_field.name)
+        }
+
         if self.state.filter is not None:
-            self.state.needs_redesign = True
+            if changed <= {"mlx_metal_chunk_sizes"}:
+                self.state.filter.settings = replace(
+                    self.state.filter.settings,
+                    mlx_metal_chunk_sizes=self.settings.mlx_metal_chunk_sizes,
+                )
+            else:
+                self.state.needs_redesign = True
 
     def __call__(self, message: AxisArray) -> AxisArray:
         # Offer a shortcut when there is no design function or order is 0.
@@ -629,6 +653,7 @@ class FilterByDesignTransformer(
             coef_type=self.settings.coef_type,
             coefs=coefs,
             use_mlx_metal=self.settings.use_mlx_metal,
+            mlx_metal_chunk_sizes=self.settings.mlx_metal_chunk_sizes,
         )
         self.state.filter = FilterTransformer(settings=new_settings)
         self.state.needs_redesign = False

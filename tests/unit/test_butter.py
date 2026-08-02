@@ -260,6 +260,27 @@ def test_butterworth_update_settings():
     assert power4[1][1] / power0[1][1] < 0.1  # 40Hz should be attenuated
 
 
+def test_butterworth_chunk_size_update_preserves_filter_state():
+    proc = ButterworthFilterTransformer(
+        ButterworthFilterSettings(
+            axis="time",
+            order=4,
+            cutoff=30.0,
+            coef_type="sos",
+        )
+    )
+    _ = proc(make_msg())
+    inner_filter = proc.state.filter
+    zi_before = inner_filter.state.zi.copy()
+
+    proc.update_settings(mlx_metal_chunk_sizes=(32, 256))
+
+    assert proc.state.filter is inner_filter
+    assert not proc.state.needs_redesign
+    assert np.array_equal(inner_filter.state.zi, zi_before)
+    assert inner_filter.settings.mlx_metal_chunk_sizes == (32, 256)
+
+
 def test_butterworth_empty_after_init_ba():
     from ezmsg.sigproc.butterworthfilter import ButterworthFilterSettings, ButterworthFilterTransformer
 

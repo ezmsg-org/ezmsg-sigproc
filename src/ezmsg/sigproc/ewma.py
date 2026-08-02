@@ -13,19 +13,18 @@ from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
 from ezmsg.util.messages.util import replace
 
 
-def _ewma_mlx_metal_xp(data, axis_idx: int, zi, alpha: float):
+def _ewma_mlx_metal_xp(data, axis_idx: int, zi, alpha: float, chunk_sizes: tuple[int, ...]):
     """Run EWMA through the MLX Metal helper while preserving scipy zi layout."""
     import mlx.core as mx
 
-    from .util.ewma_mlx_metal import MAX_CHUNK_SIZE, ewma_mlx_metal
+    from .util.ewma_mlx_metal import ewma_mlx_metal
 
     zi = mx.asarray(zi, dtype=data.dtype)
     last_data_axis = data.ndim - 1
     last_zi_axis = zi.ndim - 1
     x_mx = mx.moveaxis(data, axis_idx, last_data_axis) if axis_idx != last_data_axis else data
     zi_mx = mx.moveaxis(zi, axis_idx, last_zi_axis) if axis_idx != last_zi_axis else zi
-    cs = min(x_mx.shape[-1], MAX_CHUNK_SIZE)
-    y_mx, zf_mx = ewma_mlx_metal(x_mx, alpha, zi_mx, chunk_size=cs)
+    y_mx, zf_mx = ewma_mlx_metal(x_mx, alpha, zi_mx, chunk_sizes=chunk_sizes)
     y = mx.moveaxis(y_mx, last_data_axis, axis_idx) if axis_idx != last_data_axis else y_mx
     zf = mx.moveaxis(zf_mx, last_zi_axis, axis_idx) if axis_idx != last_zi_axis else zf_mx
     return y, zf
@@ -175,6 +174,12 @@ class EWMASettings(ez.Settings):
     baseline estimate -- passthrough leaves the data untouched. May be toggled
     at runtime without resetting the filter state."""
 
+    mlx_metal_chunk_sizes: tuple[int, ...] = (32, 1024)
+    """Allowable compile-time chunk sizes for EWMA Metal kernels. The smallest
+    size that fits the remaining samples is selected on each launch; otherwise
+    the largest size is repeated. Specializations compile lazily on first use.
+    Values must be in ``[1, 1024]``."""
+
 
 @processor_state
 class EWMAState:
@@ -188,7 +193,7 @@ class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray
     # `accumulate` is read live in `_process` to gate state updates and
     # `passthrough` is read live in `__call__`/`__acall__`; other fields are
     # cached into state (alpha, zi) during `_reset_state`.
-    NONRESET_SETTINGS_FIELDS = frozenset({"accumulate", "passthrough"})
+    NONRESET_SETTINGS_FIELDS = frozenset({"accumulate", "passthrough", "mlx_metal_chunk_sizes"})
 
     def __call__(self, message: AxisArray) -> AxisArray:
         if self.settings.passthrough or np.prod(message.data.shape) == 0:
@@ -222,7 +227,13 @@ class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray
 
         xp = np if is_numpy_array(message.data) else get_namespace(message.data)
         if xp is not np and xp.__name__ == "mlx.core":
-            expected, zf = _ewma_mlx_metal_xp(message.data, axis_idx, self._state.zi, self._state.alpha)
+            expected, zf = _ewma_mlx_metal_xp(
+                message.data,
+                axis_idx,
+                self._state.zi,
+                self._state.alpha,
+                self.settings.mlx_metal_chunk_sizes,
+            )
             if self.settings.accumulate:
                 self._state.zi = zf
         elif self.settings.accumulate:
