@@ -64,7 +64,7 @@ import weakref
 import mlx.core as mx
 import numpy as np
 
-from .mlx_metal_common import chunked_scan, flatten_batch, restore_batch, to_float32
+from .mlx_metal_common import chunked_scan, flatten_batch, normalize_chunk_sizes, restore_batch, to_float32
 
 # ---------------------------------------------------------------------------
 # Module constants
@@ -132,7 +132,7 @@ def _cached_sos_float32_max_pole_radius(sos) -> float:
 # ---------------------------------------------------------------------------
 
 
-def sosfilt_mlx_metal(sos, x, zi=None, chunk_size=MAX_CHUNK_SIZE):
+def sosfilt_mlx_metal(sos, x, zi=None, chunk_size=MAX_CHUNK_SIZE, *, chunk_sizes=None):
     """Apply an SOS biquad filter cascade on-device.
 
     One fused Metal kernel launch per chunk handles typical biquad sections
@@ -152,7 +152,13 @@ def sosfilt_mlx_metal(sos, x, zi=None, chunk_size=MAX_CHUNK_SIZE):
             ``(n_sections, *batch, 2)``. ``None`` is equivalent to zeros.
         chunk_size: Maximum samples per kernel invocation. Longer signals
             are chunked automatically with state carried between chunks.
-            Must be in ``[1, MAX_CHUNK_SIZE]``.
+            Must be in ``[1, MAX_CHUNK_SIZE]``. Ignored when ``chunk_sizes``
+            is provided. Retained for backward compatibility.
+        chunk_sizes: Allowable compile-time kernel sizes. For each launch, the
+            smallest size that fits the remaining samples is selected. If no
+            size fits, the largest size is launched repeatedly. Each selected
+            specialization is compiled lazily and cached by MLX. Defaults to
+            ``(chunk_size,)``.
 
     Returns:
         Tuple ``(y, zf)``:
@@ -162,25 +168,21 @@ def sosfilt_mlx_metal(sos, x, zi=None, chunk_size=MAX_CHUNK_SIZE):
           suitable to pass as ``zi`` for the next chunk in streaming use.
 
     Raises:
-        ValueError: if ``sos`` has the wrong shape, if ``chunk_size`` is out
-            of range, or if the float32 SOS denominator would be unstable.
+        ValueError: if ``sos`` has the wrong shape, if a chunk size is out of
+            range, or if the float32 SOS denominator would be unstable.
 
     Notes:
         The kernel is compiled once per distinct
-        ``(chunk_size, n_sections, n_channels)`` combination and cached
-        by MLX. The first call with any new combination pays a one-time
-        compile cost of ~60–150 ms.
+        ``(selected_chunk_size, n_sections, n_channels)`` combination and
+        cached by MLX. A short chunk uses the selected specialization with its
+        valid length supplied at runtime.
     """
     if sos.ndim != 2 or sos.shape[1] != 6:
         raise ValueError(f"sos must have shape (n_sections, 6); got {tuple(sos.shape)}")
-    if chunk_size > MAX_CHUNK_SIZE:
-        raise ValueError(
-            f"chunk_size={chunk_size} exceeds MAX_CHUNK_SIZE={MAX_CHUNK_SIZE}. "
-            f"Raising this requires verifying threadgroup memory fits on "
-            f"your hardware."
-        )
-    if chunk_size < 1:
-        raise ValueError(f"chunk_size must be >= 1; got {chunk_size}")
+    allowed_chunk_sizes = normalize_chunk_sizes(
+        (chunk_size,) if chunk_sizes is None else chunk_sizes,
+        MAX_CHUNK_SIZE,
+    )
     if x.ndim < 1:
         raise ValueError(f"x must have at least 1 dimension; got {x.ndim}")
 
@@ -214,10 +216,10 @@ def sosfilt_mlx_metal(sos, x, zi=None, chunk_size=MAX_CHUNK_SIZE):
 
     launch_one = _launch_serial_kernel if use_serial_kernel else _launch_fused_kernel
 
-    def launch(x_chunk, state, cs):
-        return launch_one(x_chunk, sos_flat, state, n_channels, n_sections, cs)
+    def launch(x_chunk, state, cs, valid_length):
+        return launch_one(x_chunk, sos_flat, state, n_channels, n_sections, cs, valid_length)
 
-    y_combined, zi_flat = chunked_scan(x_flat, n_samples, chunk_size, zi_flat, launch)
+    y_combined, zi_flat = chunked_scan(x_flat, n_samples, allowed_chunk_sizes, zi_flat, launch)
 
     y_out = restore_batch(y_combined, batch_shape, n_samples)
     zf_out = zi_flat.reshape(n_sections, *batch_shape, 2) if batch_shape else zi_flat.reshape(n_sections, 2)
@@ -262,6 +264,7 @@ def sosfilt_mlx_metal(sos, x, zi=None, chunk_size=MAX_CHUNK_SIZE):
 _FUSED_KERNEL_SOURCE = r"""
     uint t  = thread_position_in_threadgroup.x;
     uint ch = threadgroup_position_in_grid.x;
+    uint valid = valid_length[0];
 
     // Ping-pong shared buffers for (M, v), plus an inter-section y stash.
     threadgroup float s_M00[2 * CS];
@@ -371,8 +374,8 @@ _FUSED_KERNEL_SOURCE = r"""
         }
         s_y[t] = y_val;
 
-        // Write this section's final state (last thread only).
-        if (t == CS - 1) {
+        // Write this section's final state at the valid tail boundary.
+        if (t == valid - 1) {
             zf_all[zi_base + 0] = s_v0[src * CS + t];
             zf_all[zi_base + 1] = s_v1[src * CS + t];
         }
@@ -391,26 +394,28 @@ _FUSED_KERNEL_SOURCE = r"""
     }
 
     // Final section's y for this thread.
-    y_out[ch * CS + t] = x_val;
+    if (t < valid) {
+        y_out[ch * CS + t] = x_val;
+    }
 """
 
 
 _fused_kernel = mx.fast.metal_kernel(
     name="sosfilt_biquad_fused",
-    input_names=["x_in", "sos_all", "zi_all"],
+    input_names=["x_in", "sos_all", "zi_all", "valid_length"],
     output_names=["y_out", "zf_all"],
     source=_FUSED_KERNEL_SOURCE,
 )
 
 
-def _launch_fused_kernel(x_chunk, sos_flat, zi_flat, n_channels, n_sections, cs):
+def _launch_fused_kernel(x_chunk, sos_flat, zi_flat, n_channels, n_sections, cs, valid_length):
     """One kernel dispatch covering all sections for one chunk.
 
     Returns ``(y_chunk, zf_flat)`` both as ``float32`` MLX arrays. The
     caller rebinds ``zi_flat = zf_flat`` between chunks for streaming.
     """
     y_chunk, zf_flat = _fused_kernel(
-        inputs=[x_chunk, sos_flat, zi_flat],
+        inputs=[x_chunk, sos_flat, zi_flat, valid_length],
         template=[
             ("T", mx.float32),
             ("CS", cs),
@@ -441,6 +446,7 @@ def _launch_fused_kernel(x_chunk, sos_flat, zi_flat, n_channels, n_sections, cs)
 
 _SERIAL_KERNEL_SOURCE = r"""
     uint ch = thread_position_in_grid.x;
+    uint valid = valid_length[0];
 
     float z0[N_SECTIONS];
     float z1[N_SECTIONS];
@@ -450,7 +456,7 @@ _SERIAL_KERNEL_SOURCE = r"""
         z1[sec] = zi_all[zi_base + 1];
     }
 
-    for (uint t = 0; t < CS; t++) {
+    for (uint t = 0; t < valid; t++) {
         float x_val = x_in[ch * CS + t];
 
         for (uint sec = 0; sec < N_SECTIONS; sec++) {
@@ -483,16 +489,16 @@ _SERIAL_KERNEL_SOURCE = r"""
 
 _serial_kernel = mx.fast.metal_kernel(
     name="sosfilt_biquad_serial",
-    input_names=["x_in", "sos_all", "zi_all"],
+    input_names=["x_in", "sos_all", "zi_all", "valid_length"],
     output_names=["y_out", "zf_all"],
     source=_SERIAL_KERNEL_SOURCE,
 )
 
 
-def _launch_serial_kernel(x_chunk, sos_flat, zi_flat, n_channels, n_sections, cs):
+def _launch_serial_kernel(x_chunk, sos_flat, zi_flat, n_channels, n_sections, cs, valid_length):
     """One serial DF-II-T kernel dispatch for numerically delicate SOS filters."""
     y_chunk, zf_flat = _serial_kernel(
-        inputs=[x_chunk, sos_flat, zi_flat],
+        inputs=[x_chunk, sos_flat, zi_flat, valid_length],
         template=[
             ("T", mx.float32),
             ("CS", cs),
@@ -523,6 +529,7 @@ def _launch_serial_kernel(x_chunk, sos_flat, zi_flat, n_channels, n_sections, cs
 _UNFUSED_KERNEL_SOURCE = r"""
     uint t  = thread_position_in_threadgroup.x;
     uint ch = threadgroup_position_in_grid.x;
+    uint valid = valid_length[0];
 
     // Unpack single-section SOS row and derive affine form.
     float b0 = sos_row[0];
@@ -610,9 +617,11 @@ _UNFUSED_KERNEL_SOURCE = r"""
     } else {
         y_val = c0 * x_val + s_v0[src * CS + t - 1];
     }
-    y_out[ch * CS + t] = y_val;
+    if (t < valid) {
+        y_out[ch * CS + t] = y_val;
+    }
 
-    if (t == CS - 1) {
+    if (t == valid - 1) {
         zf_out[ch * 2 + 0] = s_v0[src * CS + t];
         zf_out[ch * 2 + 1] = s_v1[src * CS + t];
     }
@@ -621,18 +630,18 @@ _UNFUSED_KERNEL_SOURCE = r"""
 
 _unfused_kernel = mx.fast.metal_kernel(
     name="sosfilt_biquad_unfused",
-    input_names=["x_in", "sos_row", "zi"],
+    input_names=["x_in", "sos_row", "zi", "valid_length"],
     output_names=["y_out", "zf_out"],
     source=_UNFUSED_KERNEL_SOURCE,
 )
 
 
-def _launch_unfused_kernel(x_chunk, sos_row, state):
+def _launch_unfused_kernel(x_chunk, sos_row, state, cs, valid_length):
     """Single-section kernel dispatch. Used by
     :func:`_sosfilt_mlx_metal_unfused`."""
-    n_channels, cs = x_chunk.shape
+    n_channels = x_chunk.shape[0]
     y_chunk, zf = _unfused_kernel(
-        inputs=[x_chunk, sos_row, state],
+        inputs=[x_chunk, sos_row, state, valid_length],
         template=[("T", mx.float32), ("CS", cs)],
         grid=(n_channels * cs, 1, 1),
         threadgroup=(cs, 1, 1),
@@ -642,7 +651,7 @@ def _launch_unfused_kernel(x_chunk, sos_row, state):
     return y_chunk, zf
 
 
-def _sosfilt_mlx_metal_unfused(sos, x, zi=None, chunk_size=MAX_CHUNK_SIZE):
+def _sosfilt_mlx_metal_unfused(sos, x, zi=None, chunk_size=MAX_CHUNK_SIZE, *, chunk_sizes=None):
     """Unfused variant: one kernel launch per (section, chunk).
 
     Identical public signature and output to :func:`sosfilt_mlx_metal`,
@@ -654,10 +663,10 @@ def _sosfilt_mlx_metal_unfused(sos, x, zi=None, chunk_size=MAX_CHUNK_SIZE):
     """
     if sos.ndim != 2 or sos.shape[1] != 6:
         raise ValueError(f"sos must have shape (n_sections, 6); got {tuple(sos.shape)}")
-    if chunk_size > MAX_CHUNK_SIZE:
-        raise ValueError(f"chunk_size={chunk_size} > MAX_CHUNK_SIZE")
-    if chunk_size < 1:
-        raise ValueError("chunk_size must be >= 1")
+    allowed_chunk_sizes = normalize_chunk_sizes(
+        (chunk_size,) if chunk_sizes is None else chunk_sizes,
+        MAX_CHUNK_SIZE,
+    )
 
     sos_f32 = sos.astype(mx.float32) if sos.dtype != mx.float32 else sos
     x_f32 = x.astype(mx.float32) if x.dtype != mx.float32 else x
@@ -687,13 +696,11 @@ def _sosfilt_mlx_metal_unfused(sos, x, zi=None, chunk_size=MAX_CHUNK_SIZE):
     for s in range(n_sections):
         sos_row = sos_f32[s]
         state = zi_per_section[s]
-        y_chunks = []
-        for start in range(0, n_samples, chunk_size):
-            end = min(start + chunk_size, n_samples)
-            x_chunk = y_current[:, start:end]
-            y_chunk, state = _launch_unfused_kernel(x_chunk, sos_row, state)
-            y_chunks.append(y_chunk)
-        y_current = y_chunks[0] if len(y_chunks) == 1 else mx.concatenate(y_chunks, axis=-1)
+
+        def launch(x_chunk, section_state, cs, valid_length, sos_row=sos_row):
+            return _launch_unfused_kernel(x_chunk, sos_row, section_state, cs, valid_length)
+
+        y_current, state = chunked_scan(y_current, n_samples, allowed_chunk_sizes, state, launch)
         zf_list.append(state)
 
     if batch_shape:
