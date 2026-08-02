@@ -52,6 +52,38 @@ def coordinate_axis_message():
 
 
 class TestHybridBufferOverflow:
+    def test_write_max_size_counts_non_sample_dimensions(self, buffer_params):
+        """The queued byte budget includes every element in each sample."""
+        buf = HybridBuffer(
+            **{
+                **buffer_params,
+                "capacity": 4,
+                "update_strategy": "on_demand",
+                "overflow_strategy": "grow",
+                "max_size": 4 * 2 * 4,  # 4 samples * 2 channels * 4 bytes/float32
+            }
+        )
+
+        buf.write(np.zeros((4, 2), dtype=np.float32))
+        with pytest.raises(OverflowError, match="deque contents would exceed max_size"):
+            buf.write(np.zeros((1, 2), dtype=np.float32))
+
+    def test_write_max_size_allows_zero_byte_samples(self, buffer_params):
+        """A zero-size non-sample dimension makes queued samples zero bytes."""
+        buf = HybridBuffer(
+            **{
+                **buffer_params,
+                "capacity": 2,
+                "other_shape": (0,),
+                "update_strategy": "on_demand",
+                "overflow_strategy": "grow",
+                "max_size": 1,
+            }
+        )
+
+        buf.write(np.zeros((100, 0), dtype=np.float32))
+        assert buf.available() == 100
+
     def test_overflow_strategy_raise(self, buffer_params):
         buf = HybridBuffer(**{**buffer_params, "overflow_strategy": "raise"})
         buf.write(np.zeros((100, 2)))
