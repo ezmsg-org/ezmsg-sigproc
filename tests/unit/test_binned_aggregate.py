@@ -255,3 +255,137 @@ def test_unit_suppresses_empty_publishes():
     assert len(published) == 1
     _, msg_out = published[0]
     assert msg_out.data.shape[0] > 0
+
+
+# ---- multi-operation (trailing metric axis) --------------------------------
+
+MINMAX = (AggregationFunction.MIN, AggregationFunction.MAX)
+
+
+def test_tuple_operation_stacks_on_a_trailing_axis():
+    fs = 1000.0
+    rng = np.random.default_rng(0)
+    sig = rng.standard_normal((100, 2))
+    proc = BinnedAggregateTransformer(axis="time", bin_duration=0.02, operation=MINMAX, fractional=True)
+    out = proc(_sig_msgs(sig, fs, 100)[0])
+
+    # spb = 20 -> 5 bins, 2 channels, 2 metrics.
+    assert out.dims == ["time", "ch", "metric"]
+    assert out.data.shape == (5, 2, 2)
+    np.testing.assert_allclose(out.data[..., 0], _ref_binned(sig, 20.0, np.min))
+    np.testing.assert_allclose(out.data[..., 1], _ref_binned(sig, 20.0, np.max))
+
+
+def test_metric_axis_is_labelled_from_the_enum():
+    """Consumers read names, not positions -- and the names are the enum values."""
+    proc = BinnedAggregateTransformer(axis="time", bin_duration=0.02, operation=MINMAX)
+    out = proc(_sig_msgs(np.ones((100, 2)), 1000.0, 100)[0])
+    metric = out.axes["metric"]
+    assert list(metric.data) == ["min", "max"]
+    assert metric.dims == ["metric"]
+
+
+def test_newaxis_is_configurable():
+    proc = BinnedAggregateTransformer(axis="time", bin_duration=0.02, operation=MINMAX, newaxis="bound")
+    out = proc(_sig_msgs(np.ones((100, 2)), 1000.0, 100)[0])
+    assert out.dims == ["time", "ch", "bound"]
+    assert list(out.axes["bound"].data) == ["min", "max"]
+
+
+def test_scalar_operation_shape_is_unchanged():
+    """The trailing axis appears only for a tuple, so existing streams are
+    untouched."""
+    proc = BinnedAggregateTransformer(axis="time", bin_duration=0.02, operation=AggregationFunction.MEAN)
+    out = proc(_sig_msgs(np.ones((100, 2)), 1000.0, 100)[0])
+    assert out.dims == ["time", "ch"]
+    assert out.data.shape == (5, 2)
+    assert "metric" not in out.axes
+
+
+def test_single_element_tuple_still_produces_the_axis():
+    """Shape follows the type of `operation`, not the count, so a caller that
+    builds its tuple programmatically gets a stable shape."""
+    proc = BinnedAggregateTransformer(axis="time", bin_duration=0.02, operation=(AggregationFunction.MAX,))
+    out = proc(_sig_msgs(np.ones((100, 2)), 1000.0, 100)[0])
+    assert out.dims == ["time", "ch", "metric"]
+    assert out.data.shape == (5, 2, 1)
+    assert list(out.axes["metric"].data) == ["max"]
+
+
+def test_multi_op_matches_running_each_op_separately():
+    """The whole point of a tuple is that the bins are identical; prove they are
+    by comparing against separate single-op transformers on the same chunking."""
+    fs = 1000.0
+    rng = np.random.default_rng(1)
+    sig = rng.standard_normal((503, 3))
+    msgs = _sig_msgs(sig, fs, 37)  # chunk size coprime with the bin size
+
+    multi = BinnedAggregateTransformer(axis="time", bin_duration=0.02, operation=MINMAX)
+    only_min = BinnedAggregateTransformer(axis="time", bin_duration=0.02, operation=AggregationFunction.MIN)
+    only_max = BinnedAggregateTransformer(axis="time", bin_duration=0.02, operation=AggregationFunction.MAX)
+
+    got = np.concatenate([m.data for m in _run(multi, copy.deepcopy(msgs))], axis=0)
+    exp_min = np.concatenate([m.data for m in _run(only_min, copy.deepcopy(msgs))], axis=0)
+    exp_max = np.concatenate([m.data for m in _run(only_max, copy.deepcopy(msgs))], axis=0)
+
+    np.testing.assert_allclose(got[..., 0], exp_min)
+    np.testing.assert_allclose(got[..., 1], exp_max)
+
+
+def test_multi_op_carries_partial_bins_across_chunks():
+    """A peak in a bin split across two messages must survive.
+
+    This is the property that makes the envelope usable for spike-bearing data:
+    the extremes are exact regardless of where the message boundary falls.
+    """
+    fs = 1000.0
+    sig = np.zeros((60, 1))
+    sig[25, 0] = 9.0  # bin 1 (samples 20..39), and chunk boundary is at 30
+    sig[35, 0] = -4.0
+
+    proc = BinnedAggregateTransformer(axis="time", bin_duration=0.02, operation=MINMAX)
+    out = np.concatenate([m.data for m in _run(proc, _sig_msgs(sig, fs, 30))], axis=0)
+
+    assert out.shape == (3, 1, 2)
+    np.testing.assert_allclose(out[1, 0, 0], -4.0)  # min of the split bin
+    np.testing.assert_allclose(out[1, 0, 1], 9.0)  # max of the split bin
+
+
+def test_multi_op_empty_message_keeps_the_metric_width():
+    """An empty payload must still be the right shape, or it will not
+    concatenate with the messages around it."""
+    proc = BinnedAggregateTransformer(axis="time", bin_duration=0.02, operation=MINMAX)
+    out = proc(_sig_msgs(np.ones((5, 2)), 1000.0, 5)[0])  # < one bin -> empty
+    assert out.data.shape == (0, 2, 2)
+    assert out.dims == ["time", "ch", "metric"]
+
+
+def test_multi_op_axis_gain_matches_single_op():
+    """The metric axis must not disturb the bin rate."""
+    msgs = _sig_msgs(np.ones((100, 2)), 1000.0, 100)
+    multi = BinnedAggregateTransformer(axis="time", bin_duration=0.02, operation=MINMAX)(copy.deepcopy(msgs[0]))
+    single = BinnedAggregateTransformer(axis="time", bin_duration=0.02)(copy.deepcopy(msgs[0]))
+    assert multi.axes["time"].gain == single.axes["time"].gain
+    assert multi.axes["time"].offset == single.axes["time"].offset
+
+
+def test_multi_op_non_time_axis():
+    """Binning a non-leading axis must still append the metric axis at the end."""
+    proc = BinnedAggregateTransformer(axis="ch", bin_duration=2.0, operation=MINMAX, fractional=False)
+    msg = AxisArray(
+        data=np.arange(40, dtype=float).reshape(4, 10),
+        dims=["time", "ch"],
+        axes=frozendict(
+            {
+                "time": AxisArray.TimeAxis(fs=10.0, offset=0.0),
+                "ch": AxisArray.TimeAxis(fs=1.0, offset=0.0),
+            }
+        ),
+        key="test_binned_aggregate_ch",
+    )
+    out = proc(msg)
+    assert out.dims == ["time", "ch", "metric"]
+    # 10 channels binned 2 at a time -> 5 bins.
+    assert out.data.shape == (4, 5, 2)
+    np.testing.assert_allclose(out.data[0, :, 0], [0, 2, 4, 6, 8])
+    np.testing.assert_allclose(out.data[0, :, 1], [1, 3, 5, 7, 9])

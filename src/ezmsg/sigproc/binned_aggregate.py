@@ -16,9 +16,11 @@ At a clean rate (e.g. 30000 Hz) those coincide, but at an off-nominal rate
 (e.g. 30012 Hz) they diverge in both gain and bin count, so two such streams
 never share a grid.
 
-:obj:`BinnedAggregateTransformer` applies an arbitrary :obj:`AggregationFunction`
-per bin instead of only counting, but it does *not* define its own bin
-boundaries: it drives them through the shared :obj:`ezmsg.sigproc.util.binning.BinSchedule`,
+:obj:`BinnedAggregateTransformer` applies one or more arbitrary
+:obj:`AggregationFunction`\\ s per bin instead of only counting -- a tuple of
+functions stacks its results on a trailing axis, e.g. ``(MIN, MAX)`` for a
+display envelope -- but it does *not* define its own bin boundaries: it drives
+them through the shared :obj:`ezmsg.sigproc.util.binning.BinSchedule`,
 the single source of truth for the grid. Any consumer that goes through the same
 schedule at the same ``bin_duration`` lands on the same grid by construction, so
 two such streams align downstream (e.g. with :obj:`ezmsg.sigproc.merge.Merge`).
@@ -64,8 +66,23 @@ class BinnedAggregateSettings(ez.Settings):
     bin_duration: float = 0.02
     """Output bin duration in seconds."""
 
-    operation: AggregationFunction = AggregationFunction.MEAN
-    """:obj:`AggregationFunction` applied within each bin."""
+    operation: AggregationFunction | tuple[AggregationFunction, ...] = AggregationFunction.MEAN
+    """:obj:`AggregationFunction` applied within each bin.
+
+    A tuple applies several aggregations to the same bins and stacks the results
+    on a new trailing axis named by ``newaxis``, coordinate-labelled with each
+    function's value (``"min"``, ``"max"``, ...). ``(MIN, MAX)`` is the envelope
+    used to put a high-rate signal on a screen without stride-decimation
+    clipping the peaks: it keeps each bin's extremes exactly, so a spike shows
+    at full amplitude no matter where in the bin it fell.
+
+    A one-element tuple still produces the trailing axis -- the output shape
+    follows the *type* of this field, not the number of functions, so a caller
+    that builds its tuple programmatically gets a stable shape.
+    """
+
+    newaxis: str = "metric"
+    """Name of the trailing axis added when ``operation`` is a tuple."""
 
     fractional: bool = True
     """If True (default), bins span a *fractional* ``bin_duration * fs`` samples
@@ -99,6 +116,12 @@ class BinnedAggregateTransformer(
     :obj:`RangedAggregateTransformer` (which aggregates static coordinate
     bands), this reduces a high-rate axis to a regularly-binned lower-rate
     axis, carrying the open partial bin across message boundaries.
+
+    ``settings.operation`` may be a tuple, in which case every function is
+    applied to the same bins and the results stack on a trailing ``newaxis``.
+    The bins are computed once and sliced once, so N aggregations cost far less
+    than N copies of this transformer, and -- more importantly -- they are
+    guaranteed to describe the same bins.
     """
 
     def _hash_message(self, message: AxisArray) -> int:
@@ -114,8 +137,18 @@ class BinnedAggregateTransformer(
         self._state.schedule = schedule
         self._state.carry = None
 
-    def _aggregate(self, xp, segment, axis_idx: int):
+    @property
+    def _operations(self) -> tuple[AggregationFunction, ...]:
+        """``operation`` as a tuple, regardless of how it was given."""
         op = self.settings.operation
+        return op if isinstance(op, tuple) else (op,)
+
+    @property
+    def _multi(self) -> bool:
+        """Whether to emit a trailing metric axis."""
+        return isinstance(self.settings.operation, tuple)
+
+    def _apply_one(self, xp, op: AggregationFunction, segment, axis_idx: int):
         func_name = op.value
         if hasattr(xp, func_name):
             return getattr(xp, func_name)(segment, axis=axis_idx)
@@ -123,15 +156,50 @@ class BinnedAggregateTransformer(
         result = AGGREGATORS[op](np.asarray(segment), axis=axis_idx)
         return xp.asarray(result) if xp is not np else result
 
-    def _empty_like(self, message: AxisArray, axis_idx: int, step: BinStep) -> AxisArray:
+    def _aggregate(self, xp, segment, axis_idx: int):
+        """Reduce one bin. Multi-op results stack on a new *trailing* axis.
+
+        Trailing rather than in place, so the binned axis keeps its position and
+        every existing consumer of a single-op stream sees an unchanged shape.
+        """
+        if not self._multi:
+            return self._apply_one(xp, self.settings.operation, segment, axis_idx)
+        return xp.stack([self._apply_one(xp, op, segment, axis_idx) for op in self._operations], axis=-1)
+
+    def _metric_axis(self) -> AxisArray.CoordinateAxis:
+        """Label the trailing axis so consumers read names, not positions."""
+        return AxisArray.CoordinateAxis(
+            data=np.array([op.value for op in self._operations]),
+            dims=[self.settings.newaxis],
+        )
+
+    def _out_dims(self, message: AxisArray) -> list[str]:
+        dims = list(message.dims)
+        return dims + [self.settings.newaxis] if self._multi else dims
+
+    def _out_axes(self, message: AxisArray, step: BinStep) -> dict:
         axis_info = message.get_axis(self.settings.axis)
+        axes = {
+            **message.axes,
+            self.settings.axis: replace(axis_info, gain=step.output_gain, offset=step.output_offset),
+        }
+        if self._multi:
+            axes[self.settings.newaxis] = self._metric_axis()
+        return axes
+
+    def _empty_like(self, message: AxisArray, axis_idx: int, step: BinStep) -> AxisArray:
+        xp = get_namespace(message.data)
+        data = slice_along_axis(message.data, slice(0, 0), axis=axis_idx)
+        if self._multi:
+            # Zero-length along the binned axis, but the metric axis must still
+            # be its full width or the empty message would not match the shape
+            # of the ones around it.
+            data = xp.stack([data] * len(self._operations), axis=-1)
         return replace(
             message,
-            data=slice_along_axis(message.data, slice(0, 0), axis=axis_idx),
-            axes={
-                **message.axes,
-                self.settings.axis: replace(axis_info, gain=step.output_gain, offset=step.output_offset),
-            },
+            data=data,
+            dims=self._out_dims(message),
+            axes=self._out_axes(message, step),
         )
 
     def _process(self, message: AxisArray) -> AxisArray:
@@ -176,10 +244,8 @@ class BinnedAggregateTransformer(
         return replace(
             message,
             data=stacked,
-            axes={
-                **message.axes,
-                axis: replace(axis_info, gain=step.output_gain, offset=step.output_offset),
-            },
+            dims=self._out_dims(message),
+            axes=self._out_axes(message, step),
         )
 
 
