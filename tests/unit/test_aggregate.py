@@ -592,3 +592,58 @@ def test_ranged_aggregate_coordinate_axis_string_labels():
     out = xformer(msg)
     assert list(out.axes["ch"].data) == ["a - b", "c - d"]
     assert np.array_equal(out.data, np.stack([msg.data[:, :2].mean(axis=1), msg.data[:, 2:].mean(axis=1)], axis=1))
+
+
+# ---- shared slice runner ----------------------------------------------------
+
+
+def test_aggregate_slices_requires_coordinates_when_the_op_needs_them():
+    """Silently integrating against sample indices, or returning a bare index,
+    is worse than refusing: both produce a plausible number that is wrong."""
+    from ezmsg.sigproc.aggregate import aggregate_slices, needs_coordinates
+
+    data = np.ones((10, 2))
+    for op in (AggregationFunction.TRAPEZOID, AggregationFunction.ARGMIN, AggregationFunction.ARGMAX):
+        assert needs_coordinates(op)
+        with pytest.raises(ValueError, match="needs the axis coordinates"):
+            aggregate_slices(data, [slice(0, 5)], 0, op)
+
+    assert not needs_coordinates(AggregationFunction.MEAN)
+    assert needs_coordinates((AggregationFunction.MEAN, AggregationFunction.ARGMAX))
+    assert not needs_coordinates((AggregationFunction.MEAN, AggregationFunction.MAX))
+    # A value-only op needs nothing.
+    aggregate_slices(data, [slice(0, 5)], 0, AggregationFunction.MEAN)
+
+
+def test_aggregate_slices_rejects_mismatched_coordinates():
+    from ezmsg.sigproc.aggregate import aggregate_slices
+
+    with pytest.raises(ValueError, match="entries but data spans"):
+        aggregate_slices(
+            np.ones((10, 2)),
+            [slice(0, 5)],
+            0,
+            AggregationFunction.ARGMAX,
+            coordinates=np.arange(3.0),
+        )
+
+
+def test_aggregate_slices_index_conversion_can_be_disabled():
+    """AggregateTransformer's contract is a raw index; the flag preserves it."""
+    from ezmsg.sigproc.aggregate import aggregate_slices
+
+    data = np.zeros((10, 1))
+    data[7, 0] = 1.0
+    coords = np.arange(10) * 0.1
+
+    converted = aggregate_slices(data, [slice(0, 10)], 0, AggregationFunction.ARGMAX, coordinates=coords)
+    raw = aggregate_slices(data, [slice(0, 10)], 0, AggregationFunction.ARGMAX, index_to_coordinate=False)
+    np.testing.assert_allclose(converted[0, 0], 0.7)
+    assert raw[0, 0] == 7
+
+
+def test_aggregate_slices_empty_slice_list():
+    from ezmsg.sigproc.aggregate import aggregate_slices
+
+    out = aggregate_slices(np.ones((10, 2)), [], 0, AggregationFunction.MEAN)
+    assert out.shape == (0, 2)

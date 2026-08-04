@@ -40,6 +40,7 @@ import typing
 
 import ezmsg.core as ez
 import numpy as np
+import numpy.typing as npt
 from array_api_compat import get_namespace
 from ezmsg.baseproc import (
     BaseStatefulTransformer,
@@ -52,7 +53,7 @@ from ezmsg.util.messages.axisarray import (
     slice_along_axis,
 )
 
-from .aggregate import AGGREGATORS, AggregationFunction
+from .aggregate import AggregationFunction, aggregate_slices, needs_coordinates
 from .util.binning import BinSchedule, BinStep
 from .util.message import is_empty_along
 
@@ -163,23 +164,30 @@ class BinnedAggregateTransformer(
         """Whether to emit a trailing metric axis."""
         return isinstance(self.settings.operation, tuple)
 
-    def _apply_one(self, xp, op: AggregationFunction, segment, axis_idx: int):
-        func_name = op.value
-        if hasattr(xp, func_name):
-            return getattr(xp, func_name)(segment, axis=axis_idx)
-        # nan-variants etc. are not in the Array API; fall back to numpy.
-        result = AGGREGATORS[op](np.asarray(segment), axis=axis_idx)
-        return xp.asarray(result) if xp is not np else result
+    def _work_coordinates(self, work, axis_idx: int, axis_info, carry_len: int) -> npt.NDArray:
+        """Coordinate value of every sample in the ``[carry ++ new]`` work array.
 
-    def _aggregate(self, xp, segment, axis_idx: int):
-        """Reduce one bin. Multi-op results stack on a new *trailing* axis.
+        The carried samples precede this message, so the vector starts
+        ``carry_len`` samples *before* the message's own offset. This is why the
+        work array cannot use :func:`aggregate_slices`' message-based helper: it
+        spans more than the message does.
+        """
+        n = work.shape[axis_idx]
+        return axis_info.value(np.arange(n) - carry_len)
+
+    def _aggregate(self, work, slices, axis_idx: int, coordinates):
+        """Reduce every bin. Multi-op results stack on a new *trailing* axis.
 
         Trailing rather than in place, so the binned axis keeps its position and
         every existing consumer of a single-op stream sees an unchanged shape.
         """
+        xp = get_namespace(work)
         if not self._multi:
-            return self._apply_one(xp, self.settings.operation, segment, axis_idx)
-        return xp.stack([self._apply_one(xp, op, segment, axis_idx) for op in self._operations], axis=-1)
+            return aggregate_slices(work, slices, axis_idx, self.settings.operation, coordinates=coordinates)
+        return xp.stack(
+            [aggregate_slices(work, slices, axis_idx, op, coordinates=coordinates) for op in self._operations],
+            axis=-1,
+        )
 
     def _out_dims(self, message: AxisArray) -> list[str]:
         dims = list(message.dims)
@@ -232,15 +240,18 @@ class BinnedAggregateTransformer(
             return self._empty_like(message, axis_idx, step)
 
         # Prepend the carried partial-bin samples so bin 0 spans carry + current.
+        carry_len = 0 if carry is None else carry.shape[axis_idx]
         work = message.data if carry is None else xp.concat((carry, message.data), axis=axis_idx)
         ends_work = step.cut_points
         starts_work = [0] + ends_work[:-1]
+        slices = [slice(s, e) for s, e in zip(starts_work, ends_work)]
 
-        bins = [
-            self._aggregate(xp, slice_along_axis(work, slice(s, e), axis=axis_idx), axis_idx)
-            for s, e in zip(starts_work, ends_work)
-        ]
-        stacked = xp.stack(bins, axis=axis_idx)
+        coordinates = (
+            self._work_coordinates(work, axis_idx, axis_info, carry_len)
+            if needs_coordinates(self._operations)
+            else None
+        )
+        stacked = self._aggregate(work, slices, axis_idx, coordinates)
 
         # Leftover after the last completed bin becomes the next chunk's carry
         # (its length is step.carry_count, tracked by the schedule).
