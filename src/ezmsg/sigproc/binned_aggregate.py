@@ -106,6 +106,13 @@ class BinnedAggregateState:
     aggregation works for any operation (not just sums). Its length is kept in
     sync with ``schedule.carry_count``."""
 
+    metric_axis: AxisArray.CoordinateAxis | None = None
+    """The trailing axis attached to every multi-operation output.
+
+    It depends only on settings, so it is built once here rather than rebuilt
+    per message -- and since it is the same object every time, downstream
+    identity checks on the axis stay cheap. ``None`` for a scalar operation."""
+
 
 class BinnedAggregateTransformer(
     BaseStatefulTransformer[BinnedAggregateSettings, AxisArray, AxisArray, BinnedAggregateState]
@@ -135,6 +142,14 @@ class BinnedAggregateTransformer(
         )
         schedule.reset(1.0 / axis_info.gain)
         self._state.schedule = schedule
+        self._state.metric_axis = (
+            AxisArray.CoordinateAxis(
+                data=np.array([op.value for op in self._operations]),
+                dims=[self.settings.newaxis],
+            )
+            if self._multi
+            else None
+        )
         self._state.carry = None
 
     @property
@@ -166,13 +181,6 @@ class BinnedAggregateTransformer(
             return self._apply_one(xp, self.settings.operation, segment, axis_idx)
         return xp.stack([self._apply_one(xp, op, segment, axis_idx) for op in self._operations], axis=-1)
 
-    def _metric_axis(self) -> AxisArray.CoordinateAxis:
-        """Label the trailing axis so consumers read names, not positions."""
-        return AxisArray.CoordinateAxis(
-            data=np.array([op.value for op in self._operations]),
-            dims=[self.settings.newaxis],
-        )
-
     def _out_dims(self, message: AxisArray) -> list[str]:
         dims = list(message.dims)
         return dims + [self.settings.newaxis] if self._multi else dims
@@ -184,7 +192,7 @@ class BinnedAggregateTransformer(
             self.settings.axis: replace(axis_info, gain=step.output_gain, offset=step.output_offset),
         }
         if self._multi:
-            axes[self.settings.newaxis] = self._metric_axis()
+            axes[self.settings.newaxis] = self._state.metric_axis
         return axes
 
     def _empty_like(self, message: AxisArray, axis_idx: int, step: BinStep) -> AxisArray:

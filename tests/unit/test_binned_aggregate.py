@@ -389,3 +389,14 @@ def test_multi_op_non_time_axis():
     assert out.data.shape == (4, 5, 2)
     np.testing.assert_allclose(out.data[0, :, 0], [0, 2, 4, 6, 8])
     np.testing.assert_allclose(out.data[0, :, 1], [1, 3, 5, 7, 9])
+
+
+def test_metric_axis_is_built_once_not_per_message():
+    """It depends only on settings, so every output should carry the same
+    object -- both to avoid rebuilding it per message and so a downstream
+    identity check on the axis stays cheap."""
+    proc = BinnedAggregateTransformer(axis="time", bin_duration=0.02, operation=MINMAX)
+    outs = _run(proc, _sig_msgs(np.ones((200, 2)), 1000.0, 40))
+    assert len(outs) > 1
+    first = outs[0].axes["metric"]
+    assert all(o.axes["metric"] is first for o in outs)
