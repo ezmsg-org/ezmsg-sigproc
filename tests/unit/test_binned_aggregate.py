@@ -400,3 +400,90 @@ def test_metric_axis_is_built_once_not_per_message():
     assert len(outs) > 1
     first = outs[0].axes["metric"]
     assert all(o.axes["metric"] is first for o in outs)
+
+
+# ---- operations that need the axis coordinates ------------------------------
+#
+# These three used to be wrong here, because BinnedAggregate ran the raw numpy
+# function with no x-coordinates while its sibling RangedAggregate handled them.
+# Both now go through aggregate_slices.
+
+
+def test_trapezoid_integrates_against_the_axis_not_sample_counts():
+    """Previously returned 19.0 for this input -- an integral in samples."""
+    fs = 1000.0
+    proc = BinnedAggregateTransformer(
+        axis="time", bin_duration=0.02, operation=AggregationFunction.TRAPEZOID, fractional=True
+    )
+    out = proc(_sig_msgs(np.ones((100, 2)), fs, 100)[0])
+
+    assert out.data.shape == (5, 2)
+    # 20 samples at 1 ms spacing spans 19 intervals; amplitude 1 -> 0.019 s.
+    np.testing.assert_allclose(out.data, 0.019)
+
+
+def test_argmax_returns_a_time_not_a_within_bin_index():
+    """Previously returned 0..spb-1. The useful answer is when the peak was."""
+    fs = 1000.0
+    sig = np.zeros((60, 1))
+    sig[5, 0] = 1.0  # bin 0
+    sig[27, 0] = 1.0  # bin 1
+    sig[59, 0] = 1.0  # bin 2
+
+    proc = BinnedAggregateTransformer(axis="time", bin_duration=0.02, operation=AggregationFunction.ARGMAX)
+    out = proc(_sig_msgs(sig, fs, 60)[0])
+
+    np.testing.assert_allclose(out.data[:, 0], [0.005, 0.027, 0.059])
+
+
+def test_argmax_time_is_correct_across_a_message_boundary():
+    """The coordinate vector has to span the carry, which starts *before* this
+    message's offset -- otherwise a peak in a split bin is reported late."""
+    fs = 1000.0
+    sig = np.zeros((60, 1))
+    sig[32, 0] = 1.0  # bin 1 (samples 20..39), split by the 30-sample chunking
+
+    proc = BinnedAggregateTransformer(axis="time", bin_duration=0.02, operation=AggregationFunction.ARGMAX)
+    out = np.concatenate([m.data for m in _run(proc, _sig_msgs(sig, fs, 30))], axis=0)
+
+    np.testing.assert_allclose(out[1, 0], 0.032)
+
+
+def test_argmin_matches_ranged_aggregate_semantics():
+    """The two aggregators should answer the same question the same way."""
+    from ezmsg.sigproc.aggregate import RangedAggregateSettings, RangedAggregateTransformer
+
+    fs = 1000.0
+    rng = np.random.default_rng(3)
+    sig = rng.standard_normal((40, 1))
+    msg = _sig_msgs(sig, fs, 40)[0]
+
+    binned = BinnedAggregateTransformer(
+        axis="time", bin_duration=0.02, operation=AggregationFunction.ARGMIN, fractional=False
+    )(copy.deepcopy(msg))
+    # Same two groups, expressed as coordinate bands: [0, 0.019] and [0.02, 0.039].
+    ranged = RangedAggregateTransformer(
+        RangedAggregateSettings(
+            axis="time",
+            bands=[(0.0, 0.0195), (0.02, 0.0395)],
+            operation=AggregationFunction.ARGMIN,
+        )
+    )(copy.deepcopy(msg))
+
+    np.testing.assert_allclose(binned.data, ranged.data)
+
+
+def test_tuple_may_mix_value_and_coordinate_operations():
+    fs = 1000.0
+    sig = np.zeros((40, 1))
+    sig[7, 0] = 3.0
+    sig[25, 0] = 5.0
+
+    proc = BinnedAggregateTransformer(
+        axis="time", bin_duration=0.02, operation=(AggregationFunction.MAX, AggregationFunction.ARGMAX)
+    )
+    out = proc(_sig_msgs(sig, fs, 40)[0])
+
+    assert list(out.axes["metric"].data) == ["max", "argmax"]
+    np.testing.assert_allclose(out.data[:, 0, 0], [3.0, 5.0])  # peak values
+    np.testing.assert_allclose(out.data[:, 0, 1], [0.007, 0.025])  # peak times

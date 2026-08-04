@@ -69,9 +69,148 @@ AGGREGATORS = {
     AggregationFunction.ARGMIN: np.argmin,
     AggregationFunction.ARGMAX: np.argmax,
     # Note: Some methods require x-coordinates and
-    #  are handled specially in `_process`.
+    #  are handled specially in `aggregate_slices`.
     AggregationFunction.TRAPEZOID: np.trapezoid,
 }
+
+# Operations that cannot be evaluated from the values alone.
+_NEEDS_COORDINATES = frozenset(
+    {
+        AggregationFunction.TRAPEZOID,
+        AggregationFunction.ARGMIN,
+        AggregationFunction.ARGMAX,
+    }
+)
+
+
+def needs_coordinates(operation: typing.Union["AggregationFunction", typing.Iterable["AggregationFunction"]]) -> bool:
+    """Whether ``operation`` requires the axis's x-coordinates.
+
+    Lets a caller skip building a coordinate vector it will not use, which is
+    worth doing where that vector would have to be constructed per chunk.
+    Accepts a single function or an iterable of them.
+    """
+    if isinstance(operation, AggregationFunction):
+        return operation in _NEEDS_COORDINATES
+    return any(op in _NEEDS_COORDINATES for op in operation)
+
+
+def axis_coordinates(message: AxisArray, axis_name: str) -> npt.NDArray:
+    """The coordinate value of every element along ``axis_name``.
+
+    Reads a coordinate axis's values directly; evaluates a linear axis over its
+    own length. Callers whose data does not line up with the message -- anything
+    carrying samples across message boundaries -- must build their own vector
+    instead.
+    """
+    target_axis = message.get_axis(axis_name)
+    if hasattr(target_axis, "data"):
+        return np.asarray(target_axis.data)
+    axis_idx = message.get_axis_idx(axis_name)
+    return target_axis.value(np.arange(message.data.shape[axis_idx]))
+
+
+def _apply_one(xp, op: AggregationFunction, segment, axis_idx: int):
+    """One aggregation over one already-sliced segment."""
+    func_name = op.value
+    if hasattr(xp, func_name):
+        return getattr(xp, func_name)(segment, axis=axis_idx)
+    # nan-variants and friends are not in the Array API standard.
+    result = AGGREGATORS[op](np.asarray(segment), axis=axis_idx)
+    return xp.asarray(result) if xp is not np else result
+
+
+def aggregate_slices(
+    data,
+    slices: typing.Sequence[slice],
+    axis_idx: int,
+    operation: AggregationFunction,
+    *,
+    coordinates: typing.Optional[npt.NDArray] = None,
+    index_to_coordinate: bool = True,
+):
+    """Apply ``operation`` to each slice of ``data`` along ``axis_idx``, stacked.
+
+    Where the groups come from is the caller's business -- coordinate bands
+    resolved once, or bin boundaries recomputed per chunk -- but *running* the
+    aggregation is the same either way, and three operations need more than
+    ``f(segment, axis)`` to do it correctly:
+
+    * the nan-variants, which the Array API does not define, so they need a
+      numpy fallback and a conversion back to the caller's namespace;
+    * ``TRAPEZOID``, which integrates and so needs the axis's x-coordinates, or
+      it silently returns an integral in units of *samples* rather than of the
+      axis;
+    * ``ARGMIN``/``ARGMAX``, which return a position within the slice. An index
+      is rarely what anyone wants -- "the peak is at 10.5 Hz" is useful, "the
+      peak is at offset 7 of this band" is not -- so it is converted back to the
+      axis coordinate here.
+
+    The result has the same rank as ``data``, with ``axis_idx`` reduced to one
+    entry per slice, so a caller can drop it into the message it came from
+    having replaced only that axis.
+
+    :param data: The array to slice. Any Array API namespace.
+    :param slices: One slice per output group, in output order. Slices index
+        ``data`` along ``axis_idx``; they need not be contiguous, and an empty
+        sequence yields a zero-length result.
+    :param axis_idx: Index of the axis being grouped.
+    :param operation: The :obj:`AggregationFunction` to apply within each slice.
+    :param coordinates: The axis's coordinate values, one per element of ``data``
+        along ``axis_idx``. Required when :func:`needs_coordinates` is True for
+        ``operation``, ignored otherwise.
+    :param index_to_coordinate: Whether ``ARGMIN``/``ARGMAX`` results are
+        converted from a within-slice index to an axis coordinate. False leaves
+        the raw index, which :obj:`AggregateTransformer` relies on; it needs no
+        ``coordinates``.
+
+    :raises ValueError: if ``operation`` needs coordinates and none were given,
+        or if ``coordinates`` does not span ``data`` along ``axis_idx``. Either
+        would otherwise produce a plausible-looking but wrong number.
+    """
+    xp = get_namespace(data)
+    is_arg = operation in (AggregationFunction.ARGMIN, AggregationFunction.ARGMAX)
+    uses_coordinates = operation == AggregationFunction.TRAPEZOID or (is_arg and index_to_coordinate)
+
+    if uses_coordinates:
+        if coordinates is None:
+            raise ValueError(f"AggregationFunction.{operation.name} needs the axis coordinates; pass coordinates=...")
+        coordinates = np.asarray(coordinates)
+        n = data.shape[axis_idx]
+        if coordinates.shape[0] != n:
+            raise ValueError(f"coordinates has {coordinates.shape[0]} entries but data spans {n} along axis {axis_idx}")
+
+    if not len(slices):
+        return slice_along_axis(data, slice(0, 0), axis=axis_idx)
+
+    if operation == AggregationFunction.TRAPEZOID:
+        # No Array API equivalent, and it needs x, so this path is numpy-only.
+        np_data = np.asarray(data)
+        stacked = np.stack(
+            [
+                np.trapezoid(slice_along_axis(np_data, sl, axis=axis_idx), x=coordinates[sl], axis=axis_idx)
+                for sl in slices
+            ],
+            axis=axis_idx,
+        )
+        return xp.asarray(stacked) if xp is not np else stacked
+
+    stacked = xp.stack(
+        [_apply_one(xp, operation, slice_along_axis(data, sl, axis=axis_idx), axis_idx) for sl in slices],
+        axis=axis_idx,
+    )
+
+    if is_arg and index_to_coordinate:
+        # Indices are relative to each slice, so each is looked up in that
+        # slice's own coordinates rather than in the whole vector.
+        out = [
+            coordinates[sl][np.asarray(slice_along_axis(stacked, sl_ix, axis=axis_idx))]
+            for sl_ix, sl in enumerate(slices)
+        ]
+        stacked = np.stack(out, axis=axis_idx)
+        return xp.asarray(stacked) if xp is not np else stacked
+
+    return stacked
 
 
 class RangedAggregateSettings(ez.Settings):
@@ -153,61 +292,22 @@ class RangedAggregateTransformer(
     def _process(self, message: AxisArray) -> AxisArray:
         axis = self.settings.axis or message.dims[0]
         ax_idx = message.get_axis_idx(axis)
-        xp = get_namespace(message.data)
-        op = self.settings.operation
 
-        if op == AggregationFunction.TRAPEZOID:
-            # Trapezoid requires x-coordinates and has no Array API equivalent;
-            # fall back to numpy.
-            np_data = np.asarray(message.data)
-            out_data = [
-                np.trapezoid(
-                    slice_along_axis(np_data, sl, axis=ax_idx),
-                    x=self._state.ax_vec[sl],
-                    axis=ax_idx,
-                )
-                for sl in self._state.slices
-            ]
-            stacked = np.stack(out_data, axis=ax_idx)
-            # Convert back to original backend if needed
-            if xp is not np:
-                stacked = xp.asarray(stacked)
-        else:
-            # Use Array API function when available, fall back to numpy AGGREGATORS
-            func_name = op.value
-            if hasattr(xp, func_name):
-                agg_func = getattr(xp, func_name)
-                out_data = [
-                    agg_func(slice_along_axis(message.data, sl, axis=ax_idx), axis=ax_idx) for sl in self._state.slices
-                ]
-                stacked = xp.stack(out_data, axis=ax_idx)
-            else:
-                # nan-variants etc. — fall back to numpy
-                np_agg = AGGREGATORS[op]
-                np_data = np.asarray(message.data)
-                out_data = [
-                    np_agg(slice_along_axis(np_data, sl, axis=ax_idx), axis=ax_idx) for sl in self._state.slices
-                ]
-                stacked = np.stack(out_data, axis=ax_idx)
-                if xp is not np:
-                    stacked = xp.asarray(stacked)
+        # The bands are already resolved to slices in _reset_state, and ax_vec
+        # spans the whole axis, so both are handed over as-is.
+        stacked = aggregate_slices(
+            message.data,
+            self._state.slices,
+            ax_idx,
+            self.settings.operation,
+            coordinates=self._state.ax_vec,
+        )
 
-        msg_out = replace(
+        return replace(
             message,
             data=stacked,
             axes={**message.axes, axis: self._state.out_axis},
         )
-
-        if op in (AggregationFunction.ARGMIN, AggregationFunction.ARGMAX):
-            # Post-process: convert indices to axis coordinate values.
-            # ax_vec is always numpy; offsets must be numpy for fancy indexing.
-            out_data = []
-            for sl_ix, sl in enumerate(self._state.slices):
-                offsets = np.asarray(slice_along_axis(msg_out.data, sl_ix, axis=ax_idx))
-                out_data.append(self._state.ax_vec[sl][offsets])
-            msg_out.data = np.stack(out_data, axis=ax_idx)
-
-        return msg_out
 
 
 class RangedAggregate(BaseTransformerUnit[RangedAggregateSettings, AxisArray, AxisArray, RangedAggregateTransformer]):
@@ -254,28 +354,32 @@ class AggregateTransformer(BaseTransformer[AggregateSettings, AxisArray, AxisArr
     """
 
     def _process(self, message: AxisArray) -> AxisArray:
-        xp = get_namespace(message.data)
         axis_idx = message.get_axis_idx(self.settings.axis)
         op = self.settings.operation
 
         if op == AggregationFunction.NONE:
             raise ValueError("AggregationFunction.NONE is not supported for full-axis aggregation")
 
-        if op == AggregationFunction.TRAPEZOID:
-            # Trapezoid integration requires x-coordinates
-            target_axis = message.get_axis(self.settings.axis)
-            if hasattr(target_axis, "data"):
-                x = target_axis.data
-            else:
-                x = target_axis.value(np.arange(message.data.shape[axis_idx]))
-            agg_data = np.trapezoid(np.asarray(message.data), x=x, axis=axis_idx)
-        else:
-            # Try array-API compatible function first, fall back to numpy
-            func_name = op.value
-            if hasattr(xp, func_name):
-                agg_data = getattr(xp, func_name)(message.data, axis=axis_idx)
-            else:
-                agg_data = AGGREGATORS[op](message.data, axis=axis_idx)
+        # A whole-axis reduction is the one-slice case, so it shares the runner
+        # -- which is what gets TRAPEZOID its x-coordinates here.
+        #
+        # index_to_coordinate=False keeps ARGMIN/ARGMAX returning a raw index.
+        # Unlike the other two aggregators that is a *tested* contract here
+        # rather than an oversight, so it is left alone; converting would be more
+        # consistent (and arguably more useful, since this drops the axis the
+        # index refers to) but it is a separate decision.
+        needs_x = op == AggregationFunction.TRAPEZOID
+        coordinates = axis_coordinates(message, self.settings.axis) if needs_x else None
+        agg_data = aggregate_slices(
+            message.data,
+            [slice(None)],
+            axis_idx,
+            op,
+            coordinates=coordinates,
+            index_to_coordinate=False,
+        )
+        # One slice in, one entry out: drop the now-degenerate axis.
+        agg_data = slice_along_axis(agg_data, 0, axis=axis_idx)
 
         new_dims = list(message.dims)
         new_dims.pop(axis_idx)
