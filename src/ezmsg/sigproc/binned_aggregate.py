@@ -85,6 +85,19 @@ class BinnedAggregateSettings(ez.Settings):
     newaxis: str = "metric"
     """Name of the trailing axis added when ``operation`` is a tuple."""
 
+    passthrough: bool = False
+    """Forward messages untouched, as if this node were not in the graph.
+
+    A separate flag rather than a sentinel ``bin_duration`` so the bin rate
+    survives being switched off and on -- a consumer toggling this at runtime
+    (say, because the view zoomed to a range where binning would cost detail)
+    should not have to remember and restore the rate itself.
+
+    Note that toggling changes the *shape* of the output: a tuple ``operation``
+    adds a trailing axis, and turning it off takes that axis away again.
+    Everything downstream has to be able to absorb that -- a fixed-layout sink
+    will have to reallocate, and a plot will have to rebuild."""
+
     fractional: bool = True
     """If True (default), bins span a *fractional* ``bin_duration * fs`` samples
     with a carry accumulator across chunks; each bin spans exactly ``bin_duration``
@@ -133,9 +146,18 @@ class BinnedAggregateTransformer(
     """
 
     def _hash_message(self, message: AxisArray) -> int:
-        return hash((message.axes[self.settings.axis].gain, message.key))
+        # passthrough is in the hash so flipping it resets the schedule and the
+        # carry. Without that, switching back on would splice samples from
+        # before the gap onto the first bin after it.
+        return hash((message.axes[self.settings.axis].gain, message.key, self.settings.passthrough))
 
     def _reset_state(self, message: AxisArray) -> None:
+        if self.settings.passthrough:
+            # No schedule to build, and nothing may be carried across the gap.
+            self._state.schedule = None
+            self._state.carry = None
+            self._state.metric_axis = None
+            return
         axis_info = message.get_axis(self.settings.axis)
         schedule = BinSchedule(
             bin_duration=self.settings.bin_duration,
@@ -219,6 +241,9 @@ class BinnedAggregateTransformer(
         )
 
     def _process(self, message: AxisArray) -> AxisArray:
+        if self.settings.passthrough:
+            return message
+
         axis = self.settings.axis
         axis_info = message.get_axis(axis)
         axis_idx = message.get_axis_idx(axis)

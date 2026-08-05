@@ -487,3 +487,45 @@ def test_tuple_may_mix_value_and_coordinate_operations():
     assert list(out.axes["metric"].data) == ["max", "argmax"]
     np.testing.assert_allclose(out.data[:, 0, 0], [3.0, 5.0])  # peak values
     np.testing.assert_allclose(out.data[:, 0, 1], [0.007, 0.025])  # peak times
+
+
+# ---- passthrough -----------------------------------------------------------
+
+
+def replace_settings(settings, **kw):
+    """Mimic a runtime settings push."""
+    import dataclasses
+
+    return dataclasses.replace(settings, **kw)
+
+
+def test_passthrough_forwards_untouched():
+    proc = BinnedAggregateTransformer(axis="time", bin_duration=0.02, operation=MINMAX, passthrough=True)
+    msg = _sig_msgs(np.arange(100, dtype=float).reshape(50, 2), 1000.0, 50)[0]
+    out = proc(msg)
+    assert out is msg
+
+
+def test_passthrough_keeps_the_bin_rate_for_when_it_is_switched_back():
+    """A sentinel bin_duration would have destroyed the rate; a separate flag
+    means a caller toggling at runtime need not remember and restore it."""
+    proc = BinnedAggregateTransformer(axis="time", bin_duration=0.02, operation=MINMAX, passthrough=True)
+    assert proc.settings.bin_duration == pytest.approx(0.02)
+
+
+def test_toggling_off_does_not_splice_stale_samples_into_the_first_bin():
+    """The carry holds an open partial bin. If it survived a passthrough gap,
+    the first bin after would mix samples from either side of it."""
+    fs = 1000.0
+    proc = BinnedAggregateTransformer(axis="time", bin_duration=0.02, operation=AggregationFunction.MAX)
+
+    # 25 samples: bin 0 closes, 5 are carried.
+    proc(_sig_msgs(np.full((25, 1), 99.0), fs, 25)[0])
+
+    # Pass through a stretch, then resume. The 99s must not reappear.
+    proc.settings = replace_settings(proc.settings, passthrough=True)
+    proc(_sig_msgs(np.zeros((25, 1)), fs, 25)[0])
+    proc.settings = replace_settings(proc.settings, passthrough=False)
+    out = proc(_sig_msgs(np.zeros((40, 1)), fs, 40)[0])
+
+    assert out.data.max() == pytest.approx(0.0)
