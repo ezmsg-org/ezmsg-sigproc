@@ -206,9 +206,7 @@ def sosfilt_mlx_metal(sos, x, zi=None, chunk_size=MAX_CHUNK_SIZE, *, chunk_sizes
         zi_flat = mx.zeros(n_sections * n_channels * 2, dtype=mx.float32)
     else:
         if zi.shape != (n_sections,) + batch_shape + (2,):
-            raise ValueError(
-                f"zi shape {tuple(zi.shape)} does not match expected " f"{(n_sections,) + batch_shape + (2,)}"
-            )
+            raise ValueError(f"zi shape {tuple(zi.shape)} does not match expected {(n_sections,) + batch_shape + (2,)}")
         zi_flat = to_float32(zi).reshape(n_sections * n_channels * 2)
 
     # Flatten SOS to a linear coefficient buffer
@@ -684,9 +682,7 @@ def _sosfilt_mlx_metal_unfused(sos, x, zi=None, chunk_size=MAX_CHUNK_SIZE, *, ch
         zi_per_section = mx.zeros((n_sections, n_channels, 2), dtype=mx.float32)
     else:
         if zi.shape != (n_sections,) + batch_shape + (2,):
-            raise ValueError(
-                f"zi shape {tuple(zi.shape)} does not match expected " f"{(n_sections,) + batch_shape + (2,)}"
-            )
+            raise ValueError(f"zi shape {tuple(zi.shape)} does not match expected {(n_sections,) + batch_shape + (2,)}")
         zi_f32 = zi.astype(mx.float32) if zi.dtype != mx.float32 else zi
         zi_per_section = zi_f32.reshape(n_sections, n_channels, 2)
 
@@ -743,9 +739,9 @@ def _self_test():
 
     # ---- per-size benchmark ---------------------------------------------
     for N in [30, 12_000, 60_000]:
-        print(f"\n{'='*72}")
+        print(f"\n{'=' * 72}")
         print(f"N = {N} samples, {N_CHANNELS} channels, {n_sections} sections")
-        print(f"{'='*72}")
+        print(f"{'=' * 72}")
 
         x_np = rng.standard_normal((N_CHANNELS, N)).astype(np.float32)
         y_ref = sp_signal.sosfilt(sos_np, x_np, axis=-1)
@@ -791,23 +787,23 @@ def _self_test():
         t_scipy = (time.perf_counter() - t0) / ITERS
 
         print(
-            f"  fused   (cs={cs}):  {t_fused*1000:8.2f} ms/iter "
-            f"(1st: {t_first*1000:.0f} ms)  max |Δ| vs scipy: {diff_f:.2e}"
+            f"  fused   (cs={cs}):  {t_fused * 1000:8.2f} ms/iter "
+            f"(1st: {t_first * 1000:.0f} ms)  max |Δ| vs scipy: {diff_f:.2e}"
         )
         print(
-            f"  unfused (cs={cs}):  {t_unfused*1000:8.2f} ms/iter" f"                    max |Δ| vs scipy: {diff_u:.2e}"
+            f"  unfused (cs={cs}):  {t_unfused * 1000:8.2f} ms/iter                    max |Δ| vs scipy: {diff_u:.2e}"
         )
-        print(f"  fused vs unfused: {t_unfused/t_fused:.2f}x speedup   " f"max |Δ| between them: {diff_fu:.2e}")
-        print(f"  scipy:               {t_scipy*1000:8.2f} ms/iter   " f"(fused vs scipy: {t_scipy/t_fused:.2f}x)")
+        print(f"  fused vs unfused: {t_unfused / t_fused:.2f}x speedup   max |Δ| between them: {diff_fu:.2e}")
+        print(f"  scipy:               {t_scipy * 1000:8.2f} ms/iter   (fused vs scipy: {t_scipy / t_fused:.2f}x)")
 
-        assert diff_fu == 0.0, (
-            f"REGRESSION: fused and unfused differ by {diff_fu:.2e} — " f"bit-exact agreement is required."
-        )
+        assert (
+            diff_fu == 0.0
+        ), f"REGRESSION: fused and unfused differ by {diff_fu:.2e} — bit-exact agreement is required."
 
     # ---- streaming correctness ------------------------------------------
-    print(f"\n{'='*72}")
+    print(f"\n{'=' * 72}")
     print("Streaming correctness (N=6000 split into 200 chunks of 30, state carry)")
-    print(f"{'='*72}")
+    print(f"{'=' * 72}")
     N_total = 6000
     chunk = 30
     x_np = rng.standard_normal((N_CHANNELS, N_total)).astype(np.float32)
@@ -827,9 +823,9 @@ def _self_test():
     print(f"  streamed vs scipy whole: max |Δ| = {diff_stream:.2e}")
 
     # ---- online throughput ----------------------------------------------
-    print(f"\n{'='*72}")
+    print(f"\n{'=' * 72}")
     print("Online streaming throughput (1000 chunks of 30, state carry)")
-    print(f"{'='*72}")
+    print(f"{'=' * 72}")
     N_chunks = 1000
     x_chunks_np = rng.standard_normal((N_chunks, N_CHANNELS, 30)).astype(np.float32)
 
@@ -848,8 +844,8 @@ def _self_test():
     t_stream = time.perf_counter() - t0
     per_chunk_us = t_stream / N_chunks * 1e6
     realtime_budget_us = 30 / FS * 1e6  # 1000 µs at 30 kHz
-    print(f"  1000 chunks: {t_stream*1000:.1f} ms total, {per_chunk_us:.0f} µs/chunk")
-    print(f"  real-time budget: {realtime_budget_us:.0f} µs — " f"headroom: {realtime_budget_us / per_chunk_us:.1f}x")
+    print(f"  1000 chunks: {t_stream * 1000:.1f} ms total, {per_chunk_us:.0f} µs/chunk")
+    print(f"  real-time budget: {realtime_budget_us:.0f} µs — headroom: {realtime_budget_us / per_chunk_us:.1f}x")
 
 
 if __name__ == "__main__":

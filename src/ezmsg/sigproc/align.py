@@ -230,7 +230,7 @@ class AlignAlongAxisProcessor(
                 if off_a is not None and off_b is not None:
                     if not np.isclose(off_a, off_b, atol=abs(gain) * 1e-6):
                         raise RuntimeError(
-                            f"Offset mismatch after alignment: " f"off_a={off_a}, off_b={off_b}, gain={gain}"
+                            f"Offset mismatch after alignment: off_a={off_a}, off_b={off_b}, gain={gain}"
                         )
             self._state.aligned = True
 
