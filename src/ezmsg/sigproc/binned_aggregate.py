@@ -93,6 +93,9 @@ class BinnedAggregateSettings(ez.Settings):
     (say, because the view zoomed to a range where binning would cost detail)
     should not have to remember and restore the rate itself.
 
+    Switching back off starts a fresh schedule and an empty carry: nothing from
+    before the gap is spliced onto the first bin after it.
+
     Note that toggling changes the *shape* of the output: a tuple ``operation``
     adds a trailing axis, and turning it off takes that axis away again.
     Everything downstream has to be able to absorb that -- a fixed-layout sink
@@ -145,19 +148,27 @@ class BinnedAggregateTransformer(
     guaranteed to describe the same bins.
     """
 
+    # `passthrough` is read live in `__call__`/`__acall__`, which short-circuit
+    # before the state is ever consulted; everything else is baked into the
+    # schedule and the metric axis during `_reset_state`.
+    NONRESET_SETTINGS_FIELDS = frozenset({"passthrough"})
+
+    def __call__(self, message: AxisArray) -> AxisArray:
+        if self.settings.passthrough:
+            self._request_reset()
+            return message
+        return super().__call__(message)
+
+    async def __acall__(self, message: AxisArray) -> AxisArray:
+        if self.settings.passthrough:
+            self._request_reset()
+            return message
+        return await super().__acall__(message)
+
     def _hash_message(self, message: AxisArray) -> int:
-        # passthrough is in the hash so flipping it resets the schedule and the
-        # carry. Without that, switching back on would splice samples from
-        # before the gap onto the first bin after it.
-        return hash((message.axes[self.settings.axis].gain, message.key, self.settings.passthrough))
+        return hash((message.axes[self.settings.axis].gain, message.key))
 
     def _reset_state(self, message: AxisArray) -> None:
-        if self.settings.passthrough:
-            # No schedule to build, and nothing may be carried across the gap.
-            self._state.schedule = None
-            self._state.carry = None
-            self._state.metric_axis = None
-            return
         axis_info = message.get_axis(self.settings.axis)
         schedule = BinSchedule(
             bin_duration=self.settings.bin_duration,
@@ -241,9 +252,6 @@ class BinnedAggregateTransformer(
         )
 
     def _process(self, message: AxisArray) -> AxisArray:
-        if self.settings.passthrough:
-            return message
-
         axis = self.settings.axis
         axis_info = message.get_axis(axis)
         axis_idx = message.get_axis_idx(axis)

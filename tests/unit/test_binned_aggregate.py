@@ -513,6 +513,16 @@ def test_passthrough_keeps_the_bin_rate_for_when_it_is_switched_back():
     assert proc.settings.bin_duration == pytest.approx(0.02)
 
 
+def test_passthrough_skips_the_state_entirely():
+    """The short-circuit happens before hashing, so a message that arrives in
+    passthrough neither builds a schedule nor grows the carry."""
+    proc = BinnedAggregateTransformer(axis="time", bin_duration=0.02, operation=MINMAX, passthrough=True)
+    for msg in _sig_msgs(np.zeros((100, 2)), 1000.0, 25):
+        assert proc(msg) is msg
+    assert proc._state.schedule is None
+    assert proc._state.carry is None
+
+
 def test_toggling_off_does_not_splice_stale_samples_into_the_first_bin():
     """The carry holds an open partial bin. If it survived a passthrough gap,
     the first bin after would mix samples from either side of it."""
@@ -521,11 +531,53 @@ def test_toggling_off_does_not_splice_stale_samples_into_the_first_bin():
 
     # 25 samples: bin 0 closes, 5 are carried.
     proc(_sig_msgs(np.full((25, 1), 99.0), fs, 25)[0])
+    assert proc._state.carry.shape[0] == 5
 
     # Pass through a stretch, then resume. The 99s must not reappear.
     proc.settings = replace_settings(proc.settings, passthrough=True)
     proc(_sig_msgs(np.zeros((25, 1)), fs, 25)[0])
+    # The stale carry is still in the state, but a reset is queued so it can
+    # never reach the next bin.
+    assert proc._hash == -1
     proc.settings = replace_settings(proc.settings, passthrough=False)
     out = proc(_sig_msgs(np.zeros((40, 1)), fs, 40)[0])
 
     assert out.data.max() == pytest.approx(0.0)
+    assert out.data.shape[0] == 2  # a fresh grid: 40 samples = exactly 2 bins
+
+
+def test_toggling_off_via_update_settings_also_resets():
+    """`passthrough` is in NONRESET_SETTINGS_FIELDS, so update_settings queues
+    no reset of its own -- the short-circuit in __call__ has to be what does."""
+    fs = 1000.0
+    settings = BinnedAggregateSettings(axis="time", bin_duration=0.02, operation=AggregationFunction.MAX)
+    proc = BinnedAggregateTransformer(settings=settings)
+
+    proc(_sig_msgs(np.full((25, 1), 99.0), fs, 25)[0])
+
+    proc.update_settings(replace_settings(settings, passthrough=True))
+    proc(_sig_msgs(np.zeros((25, 1)), fs, 25)[0])
+    proc.update_settings(settings)
+    out = proc(_sig_msgs(np.zeros((40, 1)), fs, 40)[0])
+
+    assert out.data.max() == pytest.approx(0.0)
+
+
+def test_toggling_restores_the_metric_axis():
+    """A tuple operation adds a trailing axis; the gap must not leave it behind."""
+    fs = 1000.0
+    proc = BinnedAggregateTransformer(axis="time", bin_duration=0.02, operation=MINMAX)
+
+    out = proc(_sig_msgs(np.zeros((40, 2)), fs, 40)[0])
+    assert out.data.shape == (2, 2, 2)
+    assert list(out.axes["metric"].data) == ["min", "max"]
+
+    proc.settings = replace_settings(proc.settings, passthrough=True)
+    msg = _sig_msgs(np.zeros((40, 2)), fs, 40)[0]
+    assert proc(msg) is msg
+    assert "metric" not in msg.axes
+
+    proc.settings = replace_settings(proc.settings, passthrough=False)
+    out = proc(_sig_msgs(np.zeros((40, 2)), fs, 40)[0])
+    assert out.data.shape == (2, 2, 2)
+    assert list(out.axes["metric"].data) == ["min", "max"]
