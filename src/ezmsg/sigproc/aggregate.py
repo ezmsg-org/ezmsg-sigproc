@@ -161,8 +161,9 @@ def aggregate_slices(
         ``operation``, ignored otherwise.
     :param index_to_coordinate: Whether ``ARGMIN``/``ARGMAX`` results are
         converted from a within-slice index to an axis coordinate. False leaves
-        the raw index, which :obj:`AggregateTransformer` relies on; it needs no
-        ``coordinates``.
+        the raw index and needs no ``coordinates``. Every transformer in this
+        package leaves this True; it exists for a caller that means to index
+        back into the array it passed in.
 
     :raises ValueError: if ``operation`` needs coordinates and none were given,
         or if ``coordinates`` does not span ``data`` along ``axis_idx``. Either
@@ -244,8 +245,18 @@ class RangedAggregateTransformer(
     def __call__(self, message: AxisArray) -> AxisArray:
         # Override for shortcut passthrough mode.
         if self.settings.bands is None:
+            self._request_reset()
             return message
         return super().__call__(message)
+
+    async def __acall__(self, message: AxisArray) -> AxisArray:
+        # The async path is what a graph actually takes (`BaseTransformerUnit`
+        # awaits `__acall__`), so the shortcut has to be repeated here or
+        # `bands=None` reaches `_reset_state` and raises on iterating None.
+        if self.settings.bands is None:
+            self._request_reset()
+            return message
+        return await super().__acall__(message)
 
     def _hash_message(self, message: AxisArray) -> int:
         axis = self.settings.axis or message.dims[0]
@@ -341,7 +352,14 @@ class AggregateSettings(ez.Settings):
     """The name of the axis to aggregate over. This axis will be removed from the output."""
 
     operation: AggregationFunction = AggregationFunction.MEAN
-    """:obj:`AggregationFunction` to apply."""
+    """:obj:`AggregationFunction` to apply.
+
+    ``ARGMIN``/``ARGMAX`` return the *coordinate* of the extremum along ``axis``
+    -- "the peak is at 14 Hz" -- not its index, matching
+    :obj:`RangedAggregateTransformer` and :obj:`BinnedAggregateTransformer`. An
+    index would be unusable here anyway, since ``axis`` is removed from the
+    output. Where ``axis`` carries no axis metadata the coordinates are 0, 1,
+    2, ..., so the result is the index after all."""
 
 
 class AggregateTransformer(BaseTransformer[AggregateSettings, AxisArray, AxisArray]):
@@ -361,22 +379,17 @@ class AggregateTransformer(BaseTransformer[AggregateSettings, AxisArray, AxisArr
             raise ValueError("AggregationFunction.NONE is not supported for full-axis aggregation")
 
         # A whole-axis reduction is the one-slice case, so it shares the runner
-        # -- which is what gets TRAPEZOID its x-coordinates here.
-        #
-        # index_to_coordinate=False keeps ARGMIN/ARGMAX returning a raw index.
-        # Unlike the other two aggregators that is a *tested* contract here
-        # rather than an oversight, so it is left alone; converting would be more
-        # consistent (and arguably more useful, since this drops the axis the
-        # index refers to) but it is a separate decision.
-        needs_x = op == AggregationFunction.TRAPEZOID
-        coordinates = axis_coordinates(message, self.settings.axis) if needs_x else None
+        # -- which is what gets TRAPEZOID its x-coordinates, and ARGMIN/ARGMAX
+        # their index-to-coordinate conversion. The latter matters more here than
+        # in the other two aggregators: this one *removes* the axis, so a raw
+        # index would point into a dimension the output no longer describes.
+        coordinates = axis_coordinates(message, self.settings.axis) if needs_coordinates(op) else None
         agg_data = aggregate_slices(
             message.data,
             [slice(None)],
             axis_idx,
             op,
             coordinates=coordinates,
-            index_to_coordinate=False,
         )
         # One slice in, one entry out: drop the now-degenerate axis.
         agg_data = slice_along_axis(agg_data, 0, axis=axis_idx)
