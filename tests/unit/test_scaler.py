@@ -376,6 +376,36 @@ class TestAdaptiveStandardScalerPassthrough:
         assert out.data.shape == (50, 4)
         assert not np.any(np.isnan(out.data))
 
+    def test_reset_on_resume_discards_state(self):
+        """reset_on_resume=True rebuilds both child EWMAs after the gap."""
+        scaler = AdaptiveStandardScalerTransformer(
+            settings=AdaptiveStandardScalerSettings(time_constant=0.1, reset_on_resume=True)
+        )
+
+        np.random.seed(42)
+        _ = scaler(_make_scaler_test_msg(np.random.randn(100, 4)))
+        samps_before = scaler._state.samps_ewma
+        zi_before = samps_before._state.zi.copy()
+
+        # The gap itself leaves the children untouched; only the hash is dropped.
+        scaler.update_settings(
+            AdaptiveStandardScalerSettings(time_constant=0.1, reset_on_resume=True, passthrough=True)
+        )
+        msg = _make_scaler_test_msg(np.random.randn(50, 4) + 1000.0)
+        assert scaler(msg) is msg
+        assert scaler._state.samps_ewma is samps_before
+        assert np.allclose(scaler._state.samps_ewma._state.zi, zi_before)
+        assert scaler._hash == -1
+
+        # Resume: _reset_state builds fresh children, so the pre-gap statistics
+        # are gone rather than being applied to post-gap data.
+        scaler.update_settings(
+            AdaptiveStandardScalerSettings(time_constant=0.1, reset_on_resume=True, passthrough=False)
+        )
+        out = scaler(_make_scaler_test_msg(np.random.randn(50, 4)))
+        assert scaler._state.samps_ewma is not samps_before
+        assert not np.any(np.isnan(out.data))
+
 
 class TestAdaptiveStandardScalerUpdateSettings:
     """Live settings updates via update_settings."""
@@ -539,7 +569,9 @@ def test_scaler_bias_correction_survives_chunking():
     data = rng.normal(0.0, 1.0, size=(151, 2))
 
     def mk(d, offset):
-        return AxisArray(d, dims=["time", "ch"], axes=frozendict({"time": AxisArray.TimeAxis(fs=fs, offset=offset / fs)}))
+        return AxisArray(
+            d, dims=["time", "ch"], axes=frozendict({"time": AxisArray.TimeAxis(fs=fs, offset=offset / fs)})
+        )
 
     single = AdaptiveStandardScalerTransformer(time_constant=tau, axis="time")(mk(data, 0)).data
     chunked = AdaptiveStandardScalerTransformer(time_constant=tau, axis="time")
