@@ -7,7 +7,7 @@ from copy import deepcopy
 
 import numpy as np
 from array_api_compat import get_namespace
-from ezmsg.util.messages.axisarray import AxisArray, CoordinateAxis, LinearAxis
+from ezmsg.util.messages.axisarray import AxisArray, CoordinateAxis, LinearAxis, slice_along_axis
 from ezmsg.util.messages.util import replace
 
 from .buffer import HybridBuffer
@@ -244,6 +244,13 @@ class HybridAxisArrayBuffer:
     allowing it to automatically configure its size, shape, dtype, and array backend
     (e.g., NumPy, CuPy) based on the message content and a desired buffer duration.
 
+    The dimension order of the first message is preserved: whichever position the
+    target axis occupies there is where it stays, in the ring buffer and in every
+    message returned by `peek`/`read`. Time-last data (``["ch", "time"]``) therefore
+    round-trips without a transpose, which keeps samples contiguous for filters and
+    matches the layout the MLX Metal kernels want. Messages that later arrive with a
+    different dimension order are permuted to match the established layout.
+
     Args:
         duration: The desired duration of the buffer in seconds.
         axis: The name of the axis to buffer along.
@@ -254,6 +261,8 @@ class HybridAxisArrayBuffer:
     _data_buffer: HybridBuffer | None
     _axis_buffer: HybridAxisBuffer
     _template_msg: AxisArray | None
+    _sample_axis: int | None
+    _dims: list[str] | None
 
     def __init__(self, duration: float, axis: str = "time", **kwargs):
         self.duration = duration
@@ -265,6 +274,14 @@ class HybridAxisArrayBuffer:
         # Delay initialization until the first message arrives
         self._data_buffer = None
         self._template_msg = None
+        # Layout is learned from the first message.
+        self._sample_axis = None
+        self._dims = None
+
+    @property
+    def sample_axis(self) -> int | None:
+        """Index of the target axis in stored/returned data, or None before the first write."""
+        return self._sample_axis
 
     def available(self) -> int:
         """The total number of unread samples currently available in the buffer."""
@@ -289,11 +306,15 @@ class HybridAxisArrayBuffer:
         return self._axis_buffer.final_value
 
     def _initialize(self, first_msg: AxisArray) -> None:
+        # Adopt the incoming layout: the target axis stays where this message put it.
+        self._sample_axis = first_msg.get_axis_idx(self._axis)
+        self._dims = list(first_msg.dims)
+
         # Create a template message that has everything except the data are length 0
         # and the target axis is missing.
         self._template_msg = replace(
             first_msg,
-            data=first_msg.data[:0],
+            data=slice_along_axis(first_msg.data, slice(0, 0), self._sample_axis),
             axes={k: deepcopy(v) for k, v in first_msg.axes.items() if k != self._axis},
         )
 
@@ -303,30 +324,32 @@ class HybridAxisArrayBuffer:
         # Use the axis buffer's capacity verbatim so the two sub-buffers share
         # an identical capacity and overflow at the same sample count.
         capacity = self._axis_buffer.capacity
+        shape = first_msg.data.shape
         self._data_buffer = HybridBuffer(
             get_namespace(first_msg.data),
             capacity,
-            other_shape=first_msg.data.shape[1:],
+            other_shape=shape[: self._sample_axis] + shape[self._sample_axis + 1 :],
             dtype=first_msg.data.dtype,
+            sample_axis=self._sample_axis,
             **self.buffer_kwargs,
         )
 
     def write(self, msg: AxisArray) -> None:
         """Adds an AxisArray message to the buffer, initializing on the first call."""
-        in_axis_idx = msg.get_axis_idx(self._axis)
-        if in_axis_idx > 0:
-            # This class assumes that the target axis is the first axis.
-            # If it is not, we move it to the front.
-            dims = list(msg.dims)
-            dims.insert(0, dims.pop(in_axis_idx))
-            _xp = get_namespace(msg.data)
-            msg = replace(msg, data=_xp.moveaxis(msg.data, in_axis_idx, 0), dims=dims)
-
         if self._data_buffer is None:
             self._initialize(msg)
+        elif list(msg.dims) != self._dims:
+            # A mid-stream reorder: permute to the layout adopted at initialization
+            # so the ring buffer's dimensions keep their meaning.
+            _xp = get_namespace(msg.data)
+            msg = replace(
+                msg,
+                data=_xp.transpose(msg.data, [msg.get_axis_idx(d) for d in self._dims]),
+                dims=list(self._dims),
+            )
 
         self._data_buffer.write(msg.data)
-        self._axis_buffer.write(msg.axes[self._axis], msg.shape[0])
+        self._axis_buffer.write(msg.axes[self._axis], msg.data.shape[self._sample_axis])
 
     def peek(self, n_samples: int | None = None) -> AxisArray | None:
         """Retrieves the oldest unread data as a new AxisArray without advancing the read head."""
@@ -376,10 +399,14 @@ class HybridAxisArrayBuffer:
         """Retrieves the oldest unread data as a new AxisArray and advances the read head."""
         retrieved_axis_array = self.peek(n_samples)
 
-        if retrieved_axis_array is None or retrieved_axis_array.shape[0] == 0:
+        if retrieved_axis_array is None:
             return None
 
-        self.seek(retrieved_axis_array.shape[0])
+        n_retrieved = retrieved_axis_array.data.shape[self._sample_axis]
+        if n_retrieved == 0:
+            return None
+
+        self.seek(n_retrieved)
 
         return retrieved_axis_array
 
