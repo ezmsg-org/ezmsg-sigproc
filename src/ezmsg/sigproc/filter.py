@@ -22,9 +22,10 @@ from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
 from ezmsg.util.messages.util import replace
 from scipy.fft import next_fast_len as _next_fast_len
 
+from .util import sosfilt_direct
 from .util.array import array_device, xp_asarray, xp_create
 from .util.threaded_filt import DEFAULT_MIN_BYTES as _DEFAULT_THREAD_MIN_BYTES
-from .util.threaded_filt import filt_threaded
+from .util.threaded_filt import filt_threaded, should_thread
 
 try:
     import mlx.core as _mx
@@ -87,103 +88,6 @@ def _normalize_coefs(
         elif not isinstance(coefs, tuple):
             coefs = (coefs,)
     return coef_type, coefs
-
-
-def _sosfilt_xp(sos, x, axis_idx, zi, xp):
-    """SOS filtering via parallel prefix scan (direct-form II transposed).
-
-    Solves the IIR linear recurrence z[n+1] = A @ z[n] + B * x[n] using a
-    Hillis-Steele inclusive prefix scan in O(log N) sequential steps instead
-    of O(N), minimizing Python-level loop overhead for lazy-evaluation
-    backends like MLX.
-
-    Args:
-        sos: (n_sections, 6) SOS coefficient array. Each row is [b0, b1, b2, a0, a1, a2].
-            a0 is assumed to be 1.0 (standard for scipy.signal.butter output).
-        x: Input data array.
-        axis_idx: The axis along which to filter.
-        zi: Initial conditions, shape (n_sections, *x.shape[:axis_idx], 2, *x.shape[axis_idx+1:]).
-        xp: Array API namespace.
-
-    Returns:
-        (y, zf) tuple — filtered output and final filter state.
-    """
-    n_sections = sos.shape[0]
-    N = x.shape[axis_idx]
-
-    # Move time to axis 0 for uniform batch handling.
-    x = xp.moveaxis(x, axis_idx, 0)  # (N, *batch)
-    zi = xp.moveaxis(zi, axis_idx + 1, 1)  # (n_sections, 2, *batch)
-
-    # Flatten batch dims into one.
-    batch_shape = x.shape[1:]
-    batch_size = 1
-    for s in batch_shape:
-        batch_size *= s
-    x = xp.reshape(x, (N, batch_size))  # (N, B)
-    zi = xp.reshape(zi, (n_sections, 2, batch_size))  # (S, 2, B)
-
-    # Pre-allocate output zi.
-    zi_out = xp.zeros((n_sections, 2, batch_size), dtype=x.dtype)
-
-    for s in range(n_sections):
-        _b0 = float(sos[s, 0])
-        _b1 = float(sos[s, 1])
-        _b2 = float(sos[s, 2])
-        _a1 = float(sos[s, 4])
-        _a2 = float(sos[s, 5])
-
-        z_init = zi[s]  # (2, B)
-
-        # State recurrence: z[n+1] = A @ z[n] + B_vec * x[n]
-        #   A = [[-a1, 1], [-a2, 0]]
-        #   B_vec = [b1 - a1*b0, b2 - a2*b0]
-        # Output: y[n] = b0 * x[n] + z[n][0]
-        A_mat = xp_asarray(xp, np.array([[-_a1, 1.0], [-_a2, 0.0]]))  # (2, 2)
-        B_vec = xp_asarray(xp, np.array([_b1 - _a1 * _b0, _b2 - _a2 * _b0]))  # (2,)
-
-        # Initialize scan elements:
-        #   A_scan[n] = A for all n
-        #   c_scan[n] = B_vec * x[n]
-        A_scan = xp.zeros((N, 2, 2), dtype=A_mat.dtype)
-        A_scan[:] = A_mat  # broadcast A_mat into every row
-        c_scan = B_vec[None, :, None] * x[:, None, :]  # (N, 2, B)
-
-        # Hillis-Steele inclusive prefix scan.
-        # Operator: (A_r, c_r) ∘ (A_l, c_l) = (A_r @ A_l, A_r @ c_l + c_r)
-        # After the scan, A_scan[n] = A^(n+1) and
-        # c_scan[n] = Σ_{k=0..n} A^(n-k) @ B_vec * x[k].
-        stride = 1
-        while stride < N:
-            right_A = A_scan[stride:]  # (N-stride, 2, 2)
-            left_A = A_scan[:-stride]  # (N-stride, 2, 2)
-            right_c = c_scan[stride:]  # (N-stride, 2, B)
-            left_c = c_scan[:-stride]  # (N-stride, 2, B)
-
-            A_scan[stride:] = right_A @ left_A
-            c_scan[stride:] = right_A @ left_c + right_c
-            stride *= 2
-
-        # Recover all states: z[n+1] = A_scan[n] @ z_init + c_scan[n]
-        z_from_scan = A_scan @ z_init[None, :, :] + c_scan  # (N, 2, B)
-
-        # z[0..N-1] for output: prepend z_init, drop z[N].
-        z_needed = xp.zeros((N, 2, batch_size), dtype=x.dtype)
-        z_needed[0] = z_init
-        z_needed[1:] = z_from_scan[:-1]
-
-        # y[n] = b0 * x[n] + z[n][0]; output becomes input for the next section.
-        x = _b0 * x + z_needed[:, 0, :]  # (N, B)
-
-        # Final state for this section: z[N]
-        zi_out[s] = z_from_scan[-1]
-
-    # Restore shapes.
-    x = xp.reshape(x, (N,) + batch_shape)
-    zi_out = xp.reshape(zi_out, (n_sections, 2) + batch_shape)
-    x = xp.moveaxis(x, 0, axis_idx)
-    zi_out = xp.moveaxis(zi_out, 1, axis_idx + 1)
-    return x, zi_out
 
 
 #: Promoted dtypes for which the dedicated numpy FIR paths reproduce
@@ -404,6 +308,20 @@ class FilterBaseSettings(ez.Settings):
     coef_type: str = "ba"
     """The type of filter coefficients. One of "ba" or "sos"."""
 
+    use_fast_sosfilt: bool = True
+    """If True (default), numpy SOS filtering calls scipy's Cython kernel
+    directly instead of going through ``scipy.signal.sosfilt``.
+
+    Output is bit-identical -- same kernel, same dtype promotion, same order of
+    operations -- so this is purely a latency optimization. It removes scipy's
+    fixed ~12-18 us of per-call validation and bookkeeping, which is invisible
+    on offline-sized chunks but dominant online: measured 59.9% of the call at
+    16 channels x 30 samples, 51.0% at 32x30, 16.6% at 256x30, 4.1% at 256x128.
+
+    The fast path depends on a private scipy entry point. It is verified against
+    the public function once per process, and falls back automatically if the
+    private kernel is missing or disagrees. Set False to force the public path."""
+
     use_mlx_metal: bool = True
     """If True (default), SOS filtering on MLX inputs runs on the GPU via the
     bundled Metal kernel (``sosfilt_mlx_metal``) instead of round-tripping
@@ -464,6 +382,7 @@ class FilterState:
     fir_method: str | None = None  # "conv1d", "conv", "fft", or None (scipy)
     sos_method: str | None = None  # 'mlx_metal', 'scipy_numpy', or None (scipy)
     sos_mx: typing.Any | None = None  # cached mlx.core.array of SOS coefs
+    sos_direct: typing.Any | None = None  # DirectSosfilt with per-call setup hoisted
 
 
 class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisArray, FilterState]):
@@ -624,6 +543,10 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
             self.state.sos_method = None
             self.state.sos_mx = None
 
+        # Built lazily on first use, so that a coefficient update which does not
+        # force a full reset still rebuilds it (see update_coefficients).
+        self.state.sos_direct = None
+
     def update_coefficients(
         self,
         coefs: FilterCoefficients | tuple[npt.NDArray, npt.NDArray] | npt.NDArray,
@@ -685,6 +608,34 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
         # _refresh_fir_taps rebuilds them on the next chunk.
         self.state.fir_b = None
         self.state.fir_b_1d = None
+        # Likewise the direct-kernel filter, which holds a converted copy of the
+        # coefficients. A same-length coefficient change does not reset zi, so
+        # without this it would keep filtering with the old coefficients.
+        self.state.sos_direct = None
+
+    def _sos_direct_for(self, data_np: npt.NDArray, zi_np: npt.NDArray):
+        """Cached direct-kernel SOS filter for the current coefficients, or None.
+
+        Built on first use rather than in ``_reset_state`` so that a coefficient
+        update which does not force a reset still picks up the new coefficients.
+        ``False`` is cached to mean "checked, not usable", so the availability
+        and dtype probes run once per stream rather than once per chunk.
+        """
+        cached = self.state.sos_direct
+        if cached is False:
+            return None
+        if cached is not None:
+            return cached
+        if self.settings.coef_type != "sos" or not self.settings.use_fast_sosfilt:
+            self.state.sos_direct = False
+            return None
+        _, coefs = _normalize_coefs(self.settings.coefs)
+        if not (sosfilt_direct.available() and sosfilt_direct.can_apply(coefs[0], data_np, zi_np)):
+            self.state.sos_direct = False
+            return None
+        dtype = np.result_type(coefs[0], data_np, zi_np)
+        self.state.sos_direct = sosfilt_direct.DirectSosfilt(coefs[0], dtype)
+        return self.state.sos_direct
 
     def _process(self, message: AxisArray) -> AxisArray:
         if message.data.size > 0:
@@ -712,22 +663,52 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
                     self.settings.mlx_metal_chunk_sizes,
                 )
             elif self.state.sos_method == "scipy_numpy":
+                data_np, zi_np = np.asarray(message.data), np.asarray(self.state.zi)
                 _, coefs = _normalize_coefs(self.settings.coefs)
-                filt_func = {"ba": scipy.signal.lfilter, "sos": scipy.signal.sosfilt}[self.settings.coef_type]
-                dat_out_np, self.state.zi = filt_threaded(
-                    filt_func,
-                    coefs,
-                    np.asarray(message.data),
-                    axis_idx,
-                    np.asarray(self.state.zi),
-                    zi_axis_offset=1 if self.settings.coef_type == "sos" else 0,
-                    min_bytes=self.settings.thread_min_bytes,
-                )
+                if should_thread(data_np, axis_idx, self.settings.thread_min_bytes):
+                    dat_out_np, self.state.zi = filt_threaded(
+                        scipy.signal.sosfilt,
+                        coefs,
+                        data_np,
+                        axis_idx,
+                        zi_np,
+                        zi_axis_offset=1,
+                        min_bytes=self.settings.thread_min_bytes,
+                    )
+                else:
+                    direct = self._sos_direct_for(data_np, zi_np)
+                    if direct is not None:
+                        dat_out_np, self.state.zi = direct.apply(data_np, axis_idx, zi_np)
+                    else:
+                        dat_out_np, self.state.zi = scipy.signal.sosfilt(*coefs, data_np, axis=axis_idx, zi=zi_np)
                 dat_out = xp_asarray(get_namespace(message.data), dat_out_np)
+            elif is_numpy_array(message.data) and self.settings.coef_type == "sos":
+                _, coefs = _normalize_coefs(self.settings.coefs)
+                if should_thread(message.data, axis_idx, self.settings.thread_min_bytes):
+                    dat_out, self.state.zi = filt_threaded(
+                        scipy.signal.sosfilt,
+                        coefs,
+                        message.data,
+                        axis_idx,
+                        self.state.zi,
+                        zi_axis_offset=1,
+                        min_bytes=self.settings.thread_min_bytes,
+                    )
+                else:
+                    direct = self._sos_direct_for(message.data, self.state.zi)
+                    if direct is not None:
+                        dat_out, self.state.zi = direct.apply(message.data, axis_idx, self.state.zi)
+                    else:
+                        dat_out, self.state.zi = scipy.signal.sosfilt(
+                            *coefs, message.data, axis=axis_idx, zi=self.state.zi
+                        )
             else:
                 _, coefs = _normalize_coefs(self.settings.coefs)
                 filt_func = {"ba": scipy.signal.lfilter, "sos": scipy.signal.sosfilt}[self.settings.coef_type]
                 input_xp = None if is_numpy_array(message.data) else get_namespace(message.data)
+                if input_xp is None:
+                    # Cache that the direct SOS path is not applicable to BA.
+                    self._sos_direct_for(message.data, self.state.zi)
                 if input_xp is not None:
                     # Convert coefs and zi to the input namespace so scipy's
                     # array_namespace sees a single backend and converts back.
