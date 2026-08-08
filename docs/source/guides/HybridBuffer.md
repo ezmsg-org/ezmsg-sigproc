@@ -74,6 +74,12 @@ There are a few mitigations to defer flushing to help prevent overflows:
 
 The previous section describes how `read`, `peek`, `seek`, and `peek_at` function in normal use cases. It is also possible to call `seek` with a negative value, which will attempt to move the tail pointer backwards over previously-read (or previously sought-over) data by that many samples. `seek` returns the number of samples that were actually moved, which may be less than the requested value if there was insufficient room. Negative seeks can only rewind into previously read data, and positive seeks can only advance into unread data, possibly including data that gets flushed from the deque.
 
+## Sample Axis and Data Layout
+
+By default the sample (e.g. time) dimension is dim 0 of the circular buffer, which is allocated as `(capacity, *other_shape)`. Pass `sample_axis` to put it elsewhere: the buffer is then allocated as `(*other_shape[:sample_axis], capacity, *other_shape[sample_axis:])`, and `other_shape` continues to mean "the shape with the sample dimension removed". Negative indices are accepted and normalized, so `sample_axis=-1` gives a time-last buffer.
+
+This matters for performance. With time-last data (`(n_channels, n_samples)`), consecutive samples of a channel are adjacent in memory, so filters iterate over contiguous memory instead of striding `n_channels` elements per sample. It is also the layout the bundled MLX Metal kernels require. Storing time-last data in a time-first buffer would force a transpose copy on every flush *and* leave the filter operating on the strided axis.
+
 ## HybridAxisBuffer
 
 The `HybridAxisBuffer` carries the semantics of the `HybridBuffer` but it is designed to handle either a `LinearAxis` or a `CoordinateAxis`. Its `write` method expects an axis object and its `peek` and `read` methods return an axis, not just the data.
@@ -85,3 +91,5 @@ For a `CoordinateAxis`, the `HybridAxisBuffer` maintains the `data` in a `Hybrid
 ## HybridAxisArrayBuffer
 
 This is a convenience class that combines the `HybridAxisBuffer` and `HybridBuffer` into a single object that can be used to manage both axis and data in a single object. This class is particularly useful when you need to manage both the axis information and the data samples together, as is the case for an `AxisArray` object. Its `write` method expects an `AxisArary` object and its `peek` and `read` methods return an `AxisArray` object. Note that the return object's `.data` field might be a view on the data in the buffer so it should not be modified in place. Similarly so for the `CoordinateAxis` data.
+
+This class does not take a `sample_axis` argument; it infers one. Whichever position the target axis occupies in the *first* message it receives becomes the buffer's layout, and every message returned by `peek`/`read` uses that same dimension order. A time-last stream therefore round-trips through the buffer without a transpose. The inferred position is readable via the `sample_axis` property (`None` before the first write). Should a later message arrive with a different dimension order, it is permuted to match the established layout, so the ring buffer's dimensions keep their meaning; the caller's message is never modified in place.
