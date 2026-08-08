@@ -539,7 +539,8 @@ def test_scaler_bias_correction_survives_chunking():
     data = rng.normal(0.0, 1.0, size=(151, 2))
 
     def mk(d, offset):
-        return AxisArray(d, dims=["time", "ch"], axes=frozendict({"time": AxisArray.TimeAxis(fs=fs, offset=offset / fs)}))
+        axes = frozendict({"time": AxisArray.TimeAxis(fs=fs, offset=offset / fs)})
+        return AxisArray(d, dims=["time", "ch"], axes=axes)
 
     single = AdaptiveStandardScalerTransformer(time_constant=tau, axis="time")(mk(data, 0)).data
     chunked = AdaptiveStandardScalerTransformer(time_constant=tau, axis="time")

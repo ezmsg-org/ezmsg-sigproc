@@ -123,9 +123,9 @@ def test_rms_bandpower_no_sqrt():
     expected_ms = amplitude**2 / 2
     settled = all_data[all_data.shape[0] // 2 :]
     mean_ms = np.mean(settled)
-    assert (
-        abs(mean_ms - expected_ms) < 0.15 * expected_ms
-    ), f"Expected mean-square ~{expected_ms:.3f}, got {mean_ms:.3f}"
+    assert abs(mean_ms - expected_ms) < 0.15 * expected_ms, (
+        f"Expected mean-square ~{expected_ms:.3f}, got {mean_ms:.3f}"
+    )
 
 
 def test_squarelaw_bandpower():
@@ -177,9 +177,9 @@ def test_squarelaw_bandpower():
     expected_ms = amplitude**2 / 2
     settled = all_data[all_data.shape[0] // 2 :]
     mean_power = np.mean(settled)
-    assert (
-        abs(mean_power - expected_ms) < 0.25 * expected_ms
-    ), f"Expected power ~{expected_ms:.3f}, got {mean_power:.3f}"
+    assert abs(mean_power - expected_ms) < 0.25 * expected_ms, (
+        f"Expected power ~{expected_ms:.3f}, got {mean_power:.3f}"
+    )
 
 
 @requires_mlx

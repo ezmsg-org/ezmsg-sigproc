@@ -366,9 +366,9 @@ class HybridAxisArrayBuffer:
 
         skipped_data_count = self._data_buffer.seek(n_samples)
         axis_skipped = self._axis_buffer.seek(skipped_data_count)
-        assert (
-            axis_skipped == skipped_data_count
-        ), f"Axis buffer skipped {axis_skipped} samples, but data buffer skipped {skipped_data_count}."
+        assert axis_skipped == skipped_data_count, (
+            f"Axis buffer skipped {axis_skipped} samples, but data buffer skipped {skipped_data_count}."
+        )
 
         return skipped_data_count
 

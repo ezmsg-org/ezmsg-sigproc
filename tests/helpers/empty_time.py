@@ -39,9 +39,9 @@ def check_empty_result(result: AxisArray, time_dim: str = "time"):
     """Assert that result has 0 in the time dimension and data is empty."""
     if time_dim in result.dims:
         time_idx = result.dims.index(time_dim)
-        assert (
-            result.data.shape[time_idx] == 0
-        ), f"Expected 0 samples in '{time_dim}' dimension, got shape {result.data.shape}"
+        assert result.data.shape[time_idx] == 0, (
+            f"Expected 0 samples in '{time_dim}' dimension, got shape {result.data.shape}"
+        )
     else:
         assert result.data.size == 0, f"Expected empty data, got shape {result.data.shape}"
 
@@ -50,7 +50,7 @@ def check_state_not_corrupted(proc, normal_msg: AxisArray, time_dim: str = "time
     """Verify that a processor can still handle normal messages after an empty one."""
     result = proc(normal_msg)
     time_idx = result.dims.index(time_dim) if time_dim in result.dims else 0
-    assert (
-        result.data.shape[time_idx] > 0
-    ), f"Expected non-empty output after empty message, got shape {result.data.shape}"
+    assert result.data.shape[time_idx] > 0, (
+        f"Expected non-empty output after empty message, got shape {result.data.shape}"
+    )
     assert np.all(np.isfinite(result.data)), "Output contains NaN or Inf after empty message"

@@ -796,9 +796,9 @@ def _self_test():
         print(f"  fused vs unfused: {t_unfused / t_fused:.2f}x speedup   max |Δ| between them: {diff_fu:.2e}")
         print(f"  scipy:               {t_scipy * 1000:8.2f} ms/iter   (fused vs scipy: {t_scipy / t_fused:.2f}x)")
 
-        assert (
-            diff_fu == 0.0
-        ), f"REGRESSION: fused and unfused differ by {diff_fu:.2e} — bit-exact agreement is required."
+        assert diff_fu == 0.0, (
+            f"REGRESSION: fused and unfused differ by {diff_fu:.2e} — bit-exact agreement is required."
+        )
 
     # ---- streaming correctness ------------------------------------------
     print(f"\n{'=' * 72}")
