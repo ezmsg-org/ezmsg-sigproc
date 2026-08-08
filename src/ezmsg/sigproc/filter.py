@@ -21,6 +21,8 @@ from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
 from ezmsg.util.messages.util import replace
 
 from .util.array import array_device, xp_asarray, xp_create
+from .util.threaded_filt import DEFAULT_MIN_BYTES as _DEFAULT_THREAD_MIN_BYTES
+from .util.threaded_filt import filt_threaded
 
 try:
     import mlx.core as _mx
@@ -316,6 +318,17 @@ class FilterBaseSettings(ez.Settings):
     the largest size is repeated. Specializations compile lazily on first use.
     Values must be in ``[1, 512]``."""
 
+    thread_min_bytes: int = _DEFAULT_THREAD_MIN_BYTES
+    """Chunk size (bytes) at or above which scipy IIR filtering is split across
+    threads on a non-sample axis. Channels are independent recurrences, so the
+    result is bit-identical to the single-threaded call.
+
+    Only large chunks benefit: scipy's filters are single-threaded C loops, and
+    below ~1 MB the dispatch cost makes threading a net loss (measured 0.23x at
+    30 samples x 256 channels, 4.5x at 8192). The default keeps online-sized
+    chunks single-threaded while letting offline blocks use the cores. Set to 0
+    to disable threading entirely."""
+
 
 class FilterSettings(FilterBaseSettings):
     coefs: FilterCoefficients | None = None
@@ -528,11 +541,14 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
             elif self.state.sos_method == "scipy_numpy":
                 _, coefs = _normalize_coefs(self.settings.coefs)
                 filt_func = {"ba": scipy.signal.lfilter, "sos": scipy.signal.sosfilt}[self.settings.coef_type]
-                dat_out_np, self.state.zi = filt_func(
-                    *coefs,
+                dat_out_np, self.state.zi = filt_threaded(
+                    filt_func,
+                    coefs,
                     np.asarray(message.data),
-                    axis=axis_idx,
-                    zi=np.asarray(self.state.zi),
+                    axis_idx,
+                    np.asarray(self.state.zi),
+                    zi_axis_offset=1 if self.settings.coef_type == "sos" else 0,
+                    min_bytes=self.settings.thread_min_bytes,
                 )
                 dat_out = xp_asarray(get_namespace(message.data), dat_out_np)
             else:
@@ -547,10 +563,21 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
                     # When scipy's bundled copy gains MLX support, the manual
                     # conversion will become a no-op.
                     coefs = tuple(xp_asarray(input_xp, c) for c in coefs)
-                dat_out, self.state.zi = filt_func(*coefs, message.data, axis=axis_idx, zi=self.state.zi)
-                if input_xp is not None:
+                    # Non-numpy arrays are left to scipy's own dispatch;
+                    # filt_threaded declines anything that is not an ndarray.
+                    dat_out, self.state.zi = filt_func(*coefs, message.data, axis=axis_idx, zi=self.state.zi)
                     dat_out = xp_asarray(input_xp, dat_out)
                     self.state.zi = xp_asarray(input_xp, self.state.zi)
+                else:
+                    dat_out, self.state.zi = filt_threaded(
+                        filt_func,
+                        coefs,
+                        message.data,
+                        axis_idx,
+                        self.state.zi,
+                        zi_axis_offset=1 if self.settings.coef_type == "sos" else 0,
+                        min_bytes=self.settings.thread_min_bytes,
+                    )
         else:
             dat_out = message.data
 
