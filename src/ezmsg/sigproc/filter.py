@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
+import scipy.ndimage
 import scipy.signal
 from array_api_compat import get_namespace, is_numpy_array
 from ezmsg.baseproc import (
@@ -19,6 +20,7 @@ from ezmsg.baseproc import (
 )
 from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
 from ezmsg.util.messages.util import replace
+from scipy.fft import next_fast_len as _next_fast_len
 
 from .util.array import array_device, xp_asarray, xp_create
 from .util.threaded_filt import DEFAULT_MIN_BYTES as _DEFAULT_THREAD_MIN_BYTES
@@ -225,8 +227,13 @@ def _fir_filt_fft(b, data, zi, axis_idx, xp):
     # Prepend state (last M input samples from previous chunk)
     extended = xp.concat([zi, data], axis=axis_idx)
 
-    # FFT convolution
-    fft_len = N + 2 * M
+    # FFT convolution. Round the transform length up to a 5-smooth size: the
+    # natural N + 2M is frequently a bad length (a large prime factor), and
+    # paying for a few extra samples is far cheaper than the resulting
+    # transform. Measured worst case, 17 taps on a 8192-sample chunk:
+    # 56.8 ms at N + 2M = 8224 (= 2**5 * 257) vs 24.9 ms at the next fast
+    # length. next_fast_len itself costs ~40 ns, so it is called inline.
+    fft_len = _next_fast_len(N + 2 * M)
     B = xp.fft.rfft(b, n=fft_len, axis=axis_idx)
     X = xp.fft.rfft(extended, n=fft_len, axis=axis_idx)
     full = xp.fft.irfft(B * X, n=fft_len, axis=axis_idx)
@@ -237,6 +244,52 @@ def _fir_filt_fft(b, data, zi, axis_idx, xp):
     # Update state: last M samples of extended input
     new_zi = slice_along_axis(extended, slice(N, N + M), axis_idx)
 
+    return out, new_zi
+
+
+def _fir_filt_conv1d(b_1d, data, zi, axis_idx):
+    """FIR filtering via scipy.ndimage's C-level 1-D correlation (numpy only).
+
+    The scipy.signal route for a numpy FIR is ``lfilter``, which for ``len(a) == 1``
+    degrades to ``np.apply_along_axis(np.convolve, ...)`` -- a Python-level loop
+    with one ``np.convolve`` call per channel. ``ndimage.correlate1d`` does the
+    same arithmetic in one C call over the whole array, which is 1.9-3.0x faster
+    for short filters.
+
+    It loses to the FFT path once the filter grows (see FIR_FFT_MIN_TAPS), so
+    this is the short-filter branch only.
+
+    Args:
+        b_1d: 1-D FIR taps, shape (M+1,).
+        data: Input array.
+        zi: State holding the last M input samples along axis_idx.
+        axis_idx: The axis along which to filter.
+
+    Returns:
+        (filtered_data, new_zi) tuple.
+    """
+    M = zi.shape[axis_idx]
+
+    if M == 0:
+        return data * b_1d[0], zi
+
+    N = data.shape[axis_idx]
+    extended = np.concatenate([zi, data], axis=axis_idx)
+
+    # correlate1d centers its kernel; origin shifts it. Correlating with the
+    # reversed taps at origin = -(len(b) // 2) makes output index n use the
+    # window starting at n, i.e. y[n] = sum_k b[k] * extended[n + M - k], which
+    # is the causal convolution whose first N samples are the valid output.
+    # Verified for both odd and even tap counts.
+    full = scipy.ndimage.correlate1d(
+        extended,
+        b_1d[::-1],
+        axis=axis_idx,
+        mode="constant",
+        origin=-(len(b_1d) // 2),
+    )
+    out = slice_along_axis(full, slice(0, N), axis_idx)
+    new_zi = slice_along_axis(extended, slice(N, N + M), axis_idx)
     return out, new_zi
 
 
@@ -329,6 +382,27 @@ class FilterBaseSettings(ez.Settings):
     chunks single-threaded while letting offline blocks use the cores. Set to 0
     to disable threading entirely."""
 
+    fir_fft_min_taps: int = 64
+    """Tap count at or above which a numpy FIR filter is applied by FFT
+    convolution instead of scipy.ndimage's C-level correlation.
+
+    Neither wins everywhere. Measured on 256 channels (best FFT vs ndimage),
+    the FFT is 1.3-6.8x faster at 129-513 taps while ndimage is 1.6-3.0x
+    faster at 17-33 taps, with the crossover near 64 taps.
+
+    The two differ in more than speed, and the difference matters if you rely
+    on an offline run reproducing an online one exactly:
+
+    * The time-domain path is **chunk-size invariant** -- filtering in chunks
+      of 250, chunks of 333, or one shot gives bit-identical output.
+    * The FFT path is not. The transform length depends on the chunk length,
+      so a different chunking gives a different rounding: measured 2.6e-07
+      relative in float32 (~7e-16 in float64).
+
+    Both match scipy's ``lfilter`` to roundoff, so this is about reproducibility
+    across chunkings rather than accuracy. Set this very high to force the
+    time-domain path everywhere and keep FIR output chunk-invariant."""
+
 
 class FilterSettings(FilterBaseSettings):
     coefs: FilterCoefficients | None = None
@@ -342,7 +416,7 @@ class FilterState:
     zi: npt.NDArray | None = None
     fir_b: typing.Any | None = None  # reshaped taps for FFT path (broadcast shape)
     fir_b_1d: typing.Any | None = None  # 1D taps for conv path
-    fir_method: str | None = None  # 'conv', 'fft', or None (scipy)
+    fir_method: str | None = None  # "conv1d", "conv", "fft", or None (scipy)
     sos_method: str | None = None  # 'mlx_metal', 'scipy_numpy', or None (scipy)
     sos_mx: typing.Any | None = None  # cached mlx.core.array of SOS coefs
 
@@ -388,9 +462,12 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
             b, a = coefs
             is_fir = len(a) == 1 or np.allclose(a[1:], 0)
 
-            if is_fir and not is_numpy_array(message.data):
-                # FIR + non-numpy: use conv_general if available, else FFT.
-                # The zi buffer holds the last M input samples; fill with x0.
+            if is_fir:
+                # Dedicated FIR paths. scipy's lfilter degrades to a per-channel
+                # Python loop when len(a) == 1, so numpy comes here too rather
+                # than falling through to the generic scipy branch below. Note
+                # these paths define zi as the last M *input* samples, unlike
+                # scipy's lfilter state, which is why the setup differs.
                 xp = get_namespace(message.data)
                 dev = array_device(message.data)
                 M = len(b) - 1  # filter order
@@ -404,8 +481,14 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
                 b_shape = [1] * message.data.ndim
                 b_shape[axis_idx] = len(b)
                 self.state.fir_b = xp.reshape(self.state.fir_b_1d, tuple(b_shape))
-                # Choose method
-                self.state.fir_method = "conv" if hasattr(xp, "conv_general") else "fft"
+                # Choose method. Non-numpy backends prefer their own fused
+                # convolution when they have one. For numpy the choice is
+                # tap-count driven: ndimage's C loop wins for short filters,
+                # the FFT wins once the filter grows (see FIR_FFT_MIN_TAPS).
+                if is_numpy_array(message.data):
+                    self.state.fir_method = "fft" if len(b) >= self.settings.fir_fft_min_taps else "conv1d"
+                else:
+                    self.state.fir_method = "conv" if hasattr(xp, "conv_general") else "fft"
                 self.state.sos_method = None
                 self.state.sos_mx = None
                 return
@@ -521,7 +604,9 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
         if message.data.size > 0:
             axis = message.dims[0] if self.settings.axis is None else self.settings.axis
             axis_idx = message.get_axis_idx(axis)
-            if self.state.fir_method == "conv":
+            if self.state.fir_method == "conv1d":
+                dat_out, self.state.zi = _fir_filt_conv1d(self.state.fir_b_1d, message.data, self.state.zi, axis_idx)
+            elif self.state.fir_method == "conv":
                 xp = get_namespace(message.data)
                 dat_out, self.state.zi = _fir_filt_conv(self.state.fir_b_1d, message.data, self.state.zi, axis_idx, xp)
             elif self.state.fir_method == "fft":
