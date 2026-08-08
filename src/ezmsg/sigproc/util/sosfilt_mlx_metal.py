@@ -11,12 +11,28 @@ Performance targets (M1/M2-class, 700 channels, 4th-order Butterworth):
     N=60000 (offline):  ~35 ms, ~6.5x faster than scipy.signal.sosfilt
 
 Precision:
-    Output matches scipy.signal.sosfilt to ~1e-4 absolute at N=30000 in
-    float32. Error comes from float32 accumulation through the log2(CS)-
-    depth matrix composition chain inside each chunk; state handoff
-    between chunks is precise. For typical neural recordings the error
-    is well below the int16 quantization floor of the input and is
-    dominated by physiological noise.
+    Depends on which kernel runs (see "Kernel selection" below).
+
+    The serial kernel is *bit-identical* to scipy.signal.sosfilt in
+    float32: it evaluates the same DF-II-T recurrence in the same order,
+    so there is no reordering for the floating-point result to depend on.
+
+    The fused scan kernel matches scipy to ~1e-4 absolute at N=30000 in
+    float32 -- roughly 4x scipy's own float32-vs-float64 gap. Error comes
+    from float32 accumulation through the log2(CS)-depth matrix
+    composition chain inside each chunk; state handoff between chunks is
+    precise. Shrinking chunk_size is a poor lever on this (measured: 1.8x
+    less error for 2.5x the time); prefer the serial kernel when accuracy
+    matters. For typical neural recordings the fused error is well below
+    the int16 quantization floor of the input and is dominated by
+    physiological noise.
+
+Kernel selection:
+    Automatic, on two criteria. The serial kernel is used when the SOS
+    poles are too close to the unit circle for the scan to stay accurate
+    (SERIAL_KERNEL_POLE_RADIUS), or when there are enough channels that it
+    is simply faster (SERIAL_KERNEL_MIN_CHANNELS) -- which for multichannel
+    neural data is the common case. Otherwise the fused scan runs.
 
 Quick start:
     import mlx.core as mx
@@ -80,6 +96,24 @@ MAX_CHUNK_SIZE = 512
 # poles are very close to the unit circle. Above this radius we keep the
 # computation on Metal but use a serial DF-II-T kernel per channel.
 SERIAL_KERNEL_POLE_RADIUS = 0.995
+
+# The two kernels extract parallelism from different axes: the fused kernel
+# scans over *time* within a chunk (one threadgroup per channel, CS threads
+# each), while the serial kernel assigns one thread per *channel* and walks
+# time in order. Once there are enough channels to saturate the GPU on their
+# own, the serial kernel both runs faster -- it does O(N) work per channel
+# instead of the scan's O(N log CS) matrix compositions -- and is bit-identical
+# to scipy.signal.sosfilt in float32, because it evaluates the same DF-II-T
+# recurrence in the same order.
+#
+# Measured on an order-4 bandpass, 60k samples (fused vs serial):
+#     16 ch  3.31 / 6.44 ms      128 ch  7.88 / 7.13 ms
+#     64 ch  4.85 / 7.00 ms      512 ch 26.56 / 8.86 ms
+# The serial kernel is near-flat in channel count while the fused kernel
+# scales linearly, so the crossover sits at ~64-128 channels; it holds at
+# order 8 and at short (N=2000) chunks. Below the threshold the fused scan
+# still wins by up to ~2x, so both paths are retained.
+SERIAL_KERNEL_MIN_CHANNELS = 128
 
 _SOS_POLE_RADIUS_CACHE: dict[int, tuple[weakref.ReferenceType, tuple[int, ...], str, float]] = {}
 
@@ -193,13 +227,18 @@ def sosfilt_mlx_metal(sos, x, zi=None, chunk_size=MAX_CHUNK_SIZE, *, chunk_sizes
             f"float32 quantization; max pole radius is {max_pole_radius:.9g}. "
             "Use a float64 scipy path or redesign the filter with a higher cutoff."
         )
-    use_serial_kernel = max_pole_radius >= SERIAL_KERNEL_POLE_RADIUS
+    needs_serial_for_stability = max_pole_radius >= SERIAL_KERNEL_POLE_RADIUS
 
     sos_f32 = to_float32(sos)
     x_f32 = to_float32(x)
 
     n_sections = sos_f32.shape[0]
     x_flat, batch_shape, n_channels, n_samples = flatten_batch(x_f32)
+
+    # Deferred until n_channels is known: with enough channels the serial
+    # kernel is both faster and bit-identical to scipy. See
+    # SERIAL_KERNEL_MIN_CHANNELS.
+    use_serial_kernel = needs_serial_for_stability or n_channels >= SERIAL_KERNEL_MIN_CHANNELS
 
     # Flatten zi to the packed layout the kernel expects
     if zi is None:

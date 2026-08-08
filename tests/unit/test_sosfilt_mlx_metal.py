@@ -213,3 +213,130 @@ def test_butterworth_mlx_float32_unstable_highpass_uses_scipy_numpy_state():
     actual = np.asarray(result.data)
     assert np.isfinite(actual).all()
     assert np.allclose(actual, expected.astype(np.float32), rtol=1e-5, atol=1e-5)
+
+
+# ---------------------------------------------------------------------------
+# Kernel selection by channel count
+# ---------------------------------------------------------------------------
+#
+# The two kernels parallelize over different axes, so the faster one depends on
+# how many channels there are. Above the threshold the serial kernel is both
+# faster and bit-identical to scipy; below it the fused scan wins on speed.
+# These tests pin the selection rule and the accuracy guarantee that motivates
+# it, so the threshold cannot be changed without a deliberate update here.
+
+
+def _record_launches(monkeypatch, module):
+    """Record which kernel(s) a call dispatches to."""
+    used = []
+    for name in ("_launch_fused_kernel", "_launch_serial_kernel"):
+        original = getattr(module, name)
+
+        def recording(*args, _name=name, _orig=original, **kwargs):
+            used.append(_name)
+            return _orig(*args, **kwargs)
+
+        monkeypatch.setattr(module, name, recording)
+    return used
+
+
+@requires_mlx
+@pytest.mark.parametrize(
+    "n_channels, expected",
+    [
+        (1, "_launch_fused_kernel"),
+        (64, "_launch_fused_kernel"),
+        (128, "_launch_serial_kernel"),
+        (256, "_launch_serial_kernel"),
+    ],
+)
+def test_kernel_selected_by_channel_count(monkeypatch, n_channels, expected):
+    import mlx.core as mx
+
+    import ezmsg.sigproc.util.sosfilt_mlx_metal as sosfilt_module
+
+    assert sosfilt_module.SERIAL_KERNEL_MIN_CHANNELS == 128, "threshold changed; update this test's parametrization"
+
+    sos = scipy.signal.butter(4, [300.0, 5_000.0], btype="bandpass", fs=30_000.0, output="sos").astype(np.float32)
+    data = np.random.default_rng(0).standard_normal((n_channels, 2_000)).astype(np.float32)
+
+    used = _record_launches(monkeypatch, sosfilt_module)
+    out, state = sosfilt_module.sosfilt_mlx_metal(mx.array(sos), mx.array(data))
+    mx.eval(out, state)
+
+    assert set(used) == {expected}, f"{n_channels} channels dispatched to {set(used)}"
+
+
+@requires_mlx
+def test_near_unit_poles_still_force_serial_below_channel_threshold(monkeypatch):
+    """The stability criterion must keep working independently of channel count."""
+    import mlx.core as mx
+
+    import ezmsg.sigproc.util.sosfilt_mlx_metal as sosfilt_module
+
+    # A low highpass cutoff pushes poles toward (but not past) the unit circle:
+    # radius must land in [SERIAL_KERNEL_POLE_RADIUS, 1.0), since >= 1.0 is
+    # rejected outright as float32-unstable.
+    sos = scipy.signal.butter(4, 10.0, btype="highpass", fs=30_000.0, output="sos").astype(np.float32)
+    radius = sosfilt_module.sos_float32_max_pole_radius(sos)
+    assert sosfilt_module.SERIAL_KERNEL_POLE_RADIUS <= radius < 1.0, "test filter no longer has near-unit poles"
+
+    data = np.random.default_rng(0).standard_normal((4, 1_000)).astype(np.float32)  # well below 128 channels
+    used = _record_launches(monkeypatch, sosfilt_module)
+    out, state = sosfilt_module.sosfilt_mlx_metal(mx.array(sos), mx.array(data))
+    mx.eval(out, state)
+
+    assert set(used) == {"_launch_serial_kernel"}
+
+
+@requires_mlx
+@pytest.mark.parametrize("order", [2, 4, 8])
+@pytest.mark.parametrize(
+    "btype, wn",
+    [("bandpass", [300.0, 5_000.0]), ("lowpass", 500.0), ("highpass", 250.0)],
+)
+@pytest.mark.parametrize("n_channels", [128, 256])
+@pytest.mark.parametrize("n_samples, chunk_size", [(5_000, 512), (777, 512), (5_000, 128)])
+def test_serial_kernel_is_bit_identical_to_scipy_float32(order, btype, wn, n_channels, n_samples, chunk_size):
+    """The accuracy guarantee that justifies preferring serial at high channel counts.
+
+    Not merely close: the serial kernel runs the same DF-II-T recurrence in the
+    same order as scipy, so in float32 the results are equal bit for bit. If this
+    ever weakens to "allclose", the docstring's precision claim is wrong.
+    """
+    import mlx.core as mx
+
+    import ezmsg.sigproc.util.sosfilt_mlx_metal as sosfilt_module
+
+    sos = scipy.signal.butter(order, wn, btype=btype, fs=30_000.0, output="sos").astype(np.float32)
+    data = np.random.default_rng(1).standard_normal((n_channels, n_samples)).astype(np.float32)
+    expected = scipy.signal.sosfilt(sos, data, axis=-1)
+
+    actual, state = sosfilt_module.sosfilt_mlx_metal(mx.array(sos), mx.array(data), chunk_size=chunk_size)
+    mx.eval(actual, state)
+
+    np.testing.assert_array_equal(np.asarray(actual), expected)
+
+
+@requires_mlx
+def test_serial_kernel_streaming_state_matches_scipy():
+    """Chunked streaming through the serial path must also stay bit-identical."""
+    import mlx.core as mx
+
+    import ezmsg.sigproc.util.sosfilt_mlx_metal as sosfilt_module
+
+    sos = scipy.signal.butter(4, [300.0, 5_000.0], btype="bandpass", fs=30_000.0, output="sos").astype(np.float32)
+    n_channels, total = 256, 4_096
+    data = np.random.default_rng(2).standard_normal((n_channels, total)).astype(np.float32)
+
+    expected = scipy.signal.sosfilt(sos, data, axis=-1)
+
+    sos_mx = mx.array(sos)
+    zi = None
+    outs = []
+    for start in range(0, total, 512):
+        chunk = mx.array(data[:, start : start + 512])
+        y, zi = sosfilt_module.sosfilt_mlx_metal(sos_mx, chunk, zi=zi)
+        outs.append(np.asarray(y))
+
+    np.testing.assert_array_equal(np.concatenate(outs, axis=-1), expected)
