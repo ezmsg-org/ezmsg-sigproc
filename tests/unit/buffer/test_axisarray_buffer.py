@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 from ezmsg.util.messages.axisarray import AxisArray, CoordinateAxis, LinearAxis
+from ezmsg.util.messages.util import replace
 
 from ezmsg.sigproc.util.axisarray_buffer import HybridAxisArrayBuffer, HybridAxisBuffer
 
@@ -651,20 +652,89 @@ def test_searchsorted_coordinate(coordinate_axis_message):
     np.testing.assert_array_equal(indices, np.array([0, 5, 19]))
 
 
-def test_permute_dims(linear_axis_message):
+def _transposed(msg):
+    """Return ``msg`` relaid out as ["ch", "time"] (time-last)."""
+    out = replace(msg, data=np.ascontiguousarray(msg.data.T), dims=["ch", "time"])
+    return out
+
+
+def test_first_message_establishes_time_last_layout(linear_axis_message):
+    """A time-last first message is buffered and returned time-last, no transpose."""
     buf = HybridAxisArrayBuffer(duration=1.0, axis="time", update_strategy="immediate")
-    msg = linear_axis_message(samples=10, fs=100.0, offset=0.0)
-    # Swap the axes
-    msg.dims = ["ch", "time"]
-    msg.data = np.ascontiguousarray(msg.data.T)
-    # Write the message; it should automatically permute the dimensions back to ["time", "ch"]
+    msg = _transposed(linear_axis_message(samples=10, fs=100.0, offset=0.0))
+
     buf.write(msg)
+
+    assert buf.sample_axis == 1
     assert buf.available() == 10
     assert buf._data_buffer is not None
     assert buf._data_buffer.capacity == 100  # 1.0s * 100Hz
+    assert buf._data_buffer._buffer.shape == (2, 100)  # ring is time-last too
     assert buf._axis_buffer._linear_axis.offset == 0.00
-    assert buf._template_msg is not None and buf._template_msg.dims == ["time", "ch"]
+    assert buf._template_msg is not None and buf._template_msg.dims == ["ch", "time"]
     assert msg.dims == ["ch", "time"]  # Unchanged
+
+    retrieved = buf.read()
+    assert retrieved.dims == ["ch", "time"]
+    assert retrieved.shape == (2, 10)
+    np.testing.assert_array_equal(retrieved.data, msg.data)
+
+
+def test_first_message_establishes_time_first_layout(linear_axis_message):
+    """The time-first default is unchanged."""
+    buf = HybridAxisArrayBuffer(duration=1.0, axis="time", update_strategy="immediate")
+    msg = linear_axis_message(samples=10, fs=100.0, offset=0.0)
+
+    buf.write(msg)
+
+    assert buf.sample_axis == 0
+    assert buf._data_buffer._buffer.shape == (100, 2)
     retrieved = buf.read()
     assert retrieved.dims == ["time", "ch"]
     assert retrieved.shape == (10, 2)
+    np.testing.assert_array_equal(retrieved.data, msg.data)
+
+
+@pytest.mark.parametrize("first_is_time_last", [False, True])
+def test_permute_dims_to_established_layout(linear_axis_message, first_is_time_last):
+    """A message whose dims order differs from the established layout is permuted."""
+    buf = HybridAxisArrayBuffer(duration=1.0, axis="time", update_strategy="immediate")
+
+    first = linear_axis_message(samples=10, fs=100.0, offset=0.0)
+    second = linear_axis_message(samples=10, fs=100.0, offset=0.1)
+    if first_is_time_last:
+        first, second = _transposed(first), second  # second arrives time-first
+        expected_dims, expected_shape = ["ch", "time"], (2, 20)
+    else:
+        second = _transposed(second)  # second arrives time-last
+        expected_dims, expected_shape = ["time", "ch"], (20, 2)
+
+    buf.write(first)
+    buf.write(second)
+    assert buf.available() == 20
+
+    retrieved = buf.read()
+    assert retrieved.dims == expected_dims
+    assert retrieved.shape == expected_shape
+    # The second message's samples land in the established layout, values intact.
+    tail = retrieved.data[:, 10:] if first_is_time_last else retrieved.data[10:]
+    expected_tail = second.data if list(second.dims) == expected_dims else second.data.T
+    np.testing.assert_array_equal(tail, expected_tail)
+    assert second.dims == list(second.dims)  # caller's message unmodified
+
+
+def test_layout_preservation_values_match_across_layouts(linear_axis_message):
+    """Buffering time-last yields the transpose of buffering time-first."""
+    msgs = [linear_axis_message(samples=7, fs=100.0, offset=i * 0.07) for i in range(5)]
+
+    buf_tf = HybridAxisArrayBuffer(duration=1.0, axis="time", update_strategy="on_demand")
+    buf_tl = HybridAxisArrayBuffer(duration=1.0, axis="time", update_strategy="on_demand")
+    for m in msgs:
+        buf_tf.write(m)
+        buf_tl.write(_transposed(m))
+
+    got_tf = buf_tf.read()
+    got_tl = buf_tl.read()
+    assert got_tf.dims == ["time", "ch"] and got_tl.dims == ["ch", "time"]
+    np.testing.assert_array_equal(got_tl.data.T, got_tf.data)
+    assert got_tl.axes["time"].offset == got_tf.axes["time"].offset

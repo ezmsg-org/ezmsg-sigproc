@@ -14,7 +14,7 @@ from ezmsg.baseproc import (
     BaseStatefulProcessor,
     processor_state,
 )
-from ezmsg.util.messages.axisarray import AxisArray, LinearAxis
+from ezmsg.util.messages.axisarray import AxisArray, LinearAxis, slice_along_axis
 from ezmsg.util.messages.util import replace
 
 from .util.axisarray_buffer import HybridAxisArrayBuffer, HybridAxisBuffer
@@ -305,10 +305,12 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
             xvec_append = ref_xvec[-1] + np.arange(1, n_append + 1) * ref_ax.gain
             ref_xvec = np.hstack((ref_xvec, xvec_append))
 
-        # Get source to train interpolation
+        # Get source to train interpolation. The buffer preserves the input layout,
+        # so the resample axis is wherever the incoming messages put it.
         src_axarr = src.peek()
+        src_ax_idx = src_axarr.get_axis_idx(self.settings.axis)
         src_axis = src_axarr.axes[self.settings.axis]
-        x = src_axis.data if hasattr(src_axis, "data") else src_axis.value(np.arange(src_axarr.data.shape[0]))
+        x = src_axis.data if hasattr(src_axis, "data") else src_axis.value(np.arange(src_axarr.data.shape[src_ax_idx]))
 
         # Only resample at reference values that have not been interpolated over previously.
         b_ref = ref_xvec > self.state.last_ref_ax_val
@@ -322,7 +324,7 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
             null_ref = replace(ref_ax, data=ref_ax.data[:0]) if hasattr(ref_ax, "data") else ref_ax
             return replace(
                 src_axarr,
-                data=src_axarr.data[:0, ...],
+                data=slice_along_axis(src_axarr.data, slice(0, 0), src_ax_idx),
                 axes={**src_axarr.axes, self.settings.axis: null_ref},
             )
 
@@ -332,17 +334,21 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
         src_start_ix = max(0, np.where(x > xnew[0])[0][0] - 2 if np.any(x > xnew[0]) else 0)
 
         x = x[src_start_ix:]
-        y = src_axarr.data[src_start_ix:]
+        y = slice_along_axis(src_axarr.data, slice(src_start_ix, None), src_ax_idx)
 
         if isinstance(self.settings.fill_value, str) and self.settings.fill_value == "last":
-            fill_value = (y[0], y[-1])
+            # Edge samples with the resample axis dropped, as interp1d expects.
+            fill_value = (
+                slice_along_axis(y, 0, src_ax_idx),
+                slice_along_axis(y, -1, src_ax_idx),
+            )
         else:
             fill_value = self.settings.fill_value
         f = scipy.interpolate.interp1d(
             x,
             y,
             kind="linear",
-            axis=0,
+            axis=src_ax_idx,
             copy=False,
             bounds_error=False,
             fill_value=fill_value,
@@ -378,12 +384,15 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
         # an identical axis with `result` and the two need no further alignment.
         if self.state.ref_data_buffer is not None:
             ref_axarr = self.state.ref_data_buffer.peek()
-            if ref_axarr is not None and ref_axarr.data.shape[0] == ref.available():
-                self.state.reference_output = replace(
-                    ref_axarr,
-                    data=ref_axarr.data[ref_idx],
-                    axes={**ref_axarr.axes, self.settings.axis: out_ax},
-                )
+            if ref_axarr is not None:
+                ref_ax_idx = ref_axarr.get_axis_idx(self.settings.axis)
+                if ref_axarr.data.shape[ref_ax_idx] == ref.available():
+                    ref_xp = get_namespace(ref_axarr.data)
+                    self.state.reference_output = replace(
+                        ref_axarr,
+                        data=ref_xp.take(ref_axarr.data, ref_idx, axis=ref_ax_idx),
+                        axes={**ref_axarr.axes, self.settings.axis: out_ax},
+                    )
 
         # Update the state. For state buffers, seek beyond samples that are no longer needed.
         # src: keep at least 1 sample before the final resampled value
