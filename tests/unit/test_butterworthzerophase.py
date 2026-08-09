@@ -459,8 +459,82 @@ def test_different_axis_positions(n_dims, time_ax, coef_type):
     expected_shape[time_ax] = n_times - pad_length
     assert list(result.data.shape) == expected_shape
 
+    # Dimension order is preserved -- the filter no longer permutes to time-first.
+    assert result.dims == dims
+
     # Check output is finite
     assert np.isfinite(result.data).all()
+
+    # Value equivalence: the same data with time at axis 0 must give the same
+    # numbers, just laid out differently. This is what makes the layout change
+    # safe -- shape and finiteness alone would not catch a mis-indexed filter.
+    x_tf = np.moveaxis(x, time_ax, 0)
+    dims_tf = ["time"] + [d for d in dims if d != "time"]
+    ref = ButterworthZeroPhaseTransformer(
+        ButterworthZeroPhaseSettings(axis="time", order=order, cutoff=cutoff, coef_type=coef_type)
+    )(_make_message(x_tf, dims_tf, fs))
+    np.testing.assert_allclose(np.moveaxis(result.data, time_ax, 0), ref.data, rtol=1e-9, atol=1e-9)
+    assert result.axes["time"].offset == ref.axes["time"].offset
+
+
+@pytest.mark.parametrize("coef_type", ["ba", "sos"])
+@pytest.mark.parametrize("chunk_size", [37, 200, 1000])
+def test_streaming_time_last_matches_time_first(coef_type, chunk_size):
+    """Chunked time-last streaming must match chunked time-first exactly.
+
+    The backward stage carries a ``pad_length`` tail across chunks; a seam bug
+    would show up here and nowhere else. Chunk sizes straddle pad_length so the
+    warmup path (chunk < pad_length) and the steady-state path are both covered.
+    """
+    fs = 500.0
+    n_times = 3000
+    order = 4
+    cutoff = 40.0
+    rng = np.random.default_rng(7)
+    x = rng.standard_normal((n_times, 4))
+
+    def run(time_last: bool):
+        tf = ButterworthZeroPhaseTransformer(
+            ButterworthZeroPhaseSettings(axis="time", order=order, cutoff=cutoff, coef_type=coef_type)
+        )
+        dims = ["ch", "time"] if time_last else ["time", "ch"]
+        outs = []
+        for i in range(0, n_times, chunk_size):
+            block = x[i : i + chunk_size]
+            data = np.ascontiguousarray(block.T) if time_last else block
+            result = tf(_make_message(data, dims, fs))
+            if result.data.size > 0:
+                assert result.dims == dims
+                outs.append(np.asarray(result.data).T if time_last else np.asarray(result.data))
+        return np.concatenate(outs, axis=0)
+
+    y_tf = run(time_last=False)
+    y_tl = run(time_last=True)
+
+    assert y_tf.shape == y_tl.shape
+    assert np.isfinite(y_tl).all()
+    np.testing.assert_allclose(y_tl, y_tf, rtol=1e-9, atol=1e-9)
+
+
+def test_carry_over_tail_does_not_retain_the_whole_chunk():
+    """The retained tail must be a copy, not a view onto a file-sized chunk."""
+    fs = 1000.0
+    order = 4
+    cutoff = 50.0
+    pad_length = _compute_pad_length(order, "sos", fs, cutoff=cutoff)
+
+    transformer = ButterworthZeroPhaseTransformer(
+        ButterworthZeroPhaseSettings(axis="time", order=order, cutoff=cutoff, coef_type="sos")
+    )
+    rng = np.random.default_rng(3)
+    big = rng.standard_normal((50_000, 8))
+    transformer(_make_message(big, ["time", "ch"], fs))
+
+    tail = transformer._procs["backward"]._tail
+    assert tail.shape[0] == pad_length
+    # `.base` is None for an owned array; a view would point back at the 50k chunk.
+    assert tail.base is None, "tail is a view -- it pins the entire input chunk in memory"
+    assert tail.nbytes < big.nbytes / 100
 
 
 def test_offset_accumulates_correctly():
@@ -734,6 +808,64 @@ def test_zerophase_warmup_returns_empty_mlx(coef_type):
     result1 = transformer(msg)
     assert result1.data.shape[0] == 0
     assert result1.data.shape[1] == 2
+
+
+@pytest.mark.benchmark(group="butterworthzerophase_layout")
+@pytest.mark.parametrize("n_channels", [256])
+@pytest.mark.parametrize("layout", ["time_last", "time_first"])
+def test_butterworthzerophase_layout_benchmark(layout, n_channels, benchmark):
+    """Track the offline time-last win.
+
+    The buffers preserve the input layout, so time-last data filters along the
+    contiguous axis. The gain grows with chunk size (negligible at online chunk
+    sizes, ~1.2x at 300k samples) because the strided access only becomes
+    expensive once the chunk overflows cache.
+    """
+    fs = 30000.0
+    chunk_samples = 30_000
+    n_chunks = 4
+    time_last = layout == "time_last"
+    dims = ["ch", "time"] if time_last else ["time", "ch"]
+
+    settings = ButterworthZeroPhaseSettings(axis="time", order=4, cuton=300.0, cutoff=5000.0, coef_type="sos")
+
+    rng = np.random.default_rng(42)
+    chunks = []
+    for i in range(n_chunks):
+        d = rng.standard_normal((chunk_samples, n_channels)).astype(np.float32)
+        chunks.append(_make_message(np.ascontiguousarray(d.T) if time_last else d, dims, fs))
+
+    xformer = ButterworthZeroPhaseTransformer(settings)
+    xformer(chunks[0])  # warmup: filter design + first carry-over fill
+
+    benchmark(lambda: [xformer(chunk) for chunk in chunks[1:]])
+
+
+def test_carry_over_memory_is_independent_of_chunk_size():
+    """Retention is a fixed pad_length window, not the whole chunk.
+
+    The previous ring-buffer implementation grew to hold an entire offline chunk
+    (hundreds of MB for a 300k-sample block, and an OverflowError past the 1 GB
+    max_size). The carry-over tail must stay flat as the chunk grows.
+    """
+    fs = 30000.0
+    n_ch = 8
+    settings = ButterworthZeroPhaseSettings(axis="time", order=4, cuton=300.0, cutoff=5000.0, coef_type="sos")
+
+    sizes = []
+    for chunk_samples in (10_000, 100_000):
+        rng = np.random.default_rng(0)
+        x = rng.standard_normal((chunk_samples, n_ch)).astype(np.float32)
+        xformer = ButterworthZeroPhaseTransformer(settings)
+        xformer(_make_message(x, ["time", "ch"], fs))
+        tail = xformer._procs["backward"]._tail
+        sizes.append(tail.nbytes)
+        # Retention is a small multiple of pad_length, never a multiple of the chunk.
+        assert tail.shape[0] < 10_000
+        assert tail.nbytes < x.nbytes / 10
+
+    # A 10x larger chunk must not enlarge the retained state at all.
+    assert sizes[0] == sizes[1]
 
 
 @requires_mlx
