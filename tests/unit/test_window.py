@@ -7,7 +7,7 @@ import sparse
 from ezmsg.util.messages.axisarray import AxisArray
 from frozendict import frozendict
 
-from ezmsg.sigproc.window import WindowTransformer
+from ezmsg.sigproc.window import WindowSettings, WindowTransformer
 from tests.helpers.empty_time import check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
 from tests.helpers.util import assert_messages_equal, calculate_expected_windows, requires_mlx
 
@@ -112,6 +112,10 @@ def test_window_generator(
 
     assert_messages_equal(in_msgs, backup)
 
+    # Post-process the results to yield a single data array and a single vector of offsets.
+    win_ax = time_ax
+    # time_ax = win_ax + 1
+
     # Check each return value's metadata (offsets checked at end)
     expected_dims = template_msg.dims[:time_ax] + [newaxis or "win"] + template_msg.dims[time_ax:]
     for msg in out_msgs:
@@ -120,9 +124,6 @@ def test_window_generator(
         assert (newaxis or "win") in msg.axes
         assert msg.axes[(newaxis or "win")].gain == (0.0 if win_shift is None else shift_len / fs)
 
-    # Post-process the results to yield a single data array and a single vector of offsets.
-    win_ax = time_ax
-    # time_ax = win_ax + 1
     result = np.concatenate([_.data for _ in out_msgs], win_ax)
     offsets = np.hstack([_.axes[newaxis or "win"].value(np.arange(_.data.shape[win_ax])) for _ in out_msgs])
 
@@ -326,3 +327,217 @@ def test_window_benchmark(backend, n_channels, benchmark):
         return outputs
 
     benchmark(process_all_chunks)
+
+
+# --- Unit output shapes ---
+
+
+def _batch_msgs(chunk_lens, fs=1000.0, n_ch=4, seed=0):
+    """Input messages of the given sample counts, carrying contiguous data."""
+    rng = np.random.default_rng(seed)
+    total = sum(chunk_lens)
+    data = rng.standard_normal((total, n_ch))
+    msgs, start = [], 0
+    for n in chunk_lens:
+        msgs.append(
+            AxisArray(
+                data=data[start : start + n],
+                dims=["time", "ch"],
+                key="batch",
+                axes={"time": AxisArray.TimeAxis(fs=fs, offset=start / fs)},
+            )
+        )
+        start += n
+    return msgs, data
+
+
+def _drive_unit(settings, msgs):
+    import asyncio
+
+    from ezmsg.sigproc.window import Window
+
+    async def _run():
+        unit = Window(settings)
+        unit.create_processor()
+        out = []
+        for msg in msgs:
+            async for _, ret in unit.on_signal(msg):
+                out.append(ret)
+        return out
+
+    return asyncio.run(_run())
+
+
+def test_unit_split_defaults_axis_to_first_dim():
+    """Regression: the unit resolved the target axis from SETTINGS.axis, so the
+    documented `axis=None` default raised KeyError(None) inside a bare `except`
+    -- every message swallowed, the stream silently dead for the whole run."""
+    fs, win = 1000.0, 20
+    msgs, data = _batch_msgs([30] * 8, fs=fs)
+    settings = WindowSettings(
+        axis=None, newaxis=None, window_dur=win / fs, window_shift=win / fs, zero_pad_until="none"
+    )
+    outs = _drive_unit(settings, msgs)
+
+    assert len(outs) == 240 // win
+    assert all(o.data.shape[0] == win for o in outs)
+    assert np.array_equal(np.concatenate([o.data for o in outs], axis=0), data)
+    assert np.allclose([o.axes["time"].offset for o in outs], np.arange(240 // win) * win / fs)
+
+
+def test_batcher_emits_without_win_axis():
+    """Windows tile the target axis, so no `win` axis is added and the offset stays absolute."""
+    fs, win = 1000.0, 20
+    msgs, data = _batch_msgs([1] * 100, fs=fs)
+    proc = WindowTransformer(
+        axis="time", newaxis=None, window_dur=win / fs, window_shift=win / fs, zero_pad_until="none", batch_windows=True
+    )
+    outs = [proc(m) for m in msgs]
+    emitted = [o for o in outs if o.data.shape[0]]
+
+    assert all(o.dims == ["time", "ch"] for o in outs)
+    assert all("win" not in o.axes for o in outs)
+    assert len(emitted) == 5
+    assert np.array_equal(np.concatenate([o.data for o in emitted], axis=0), data)
+    assert np.allclose([o.axes["time"].offset for o in emitted], np.arange(5) * win / fs)
+
+
+def test_batcher_multiple_windows_in_one_message():
+    """A chunk that completes several windows emits them as one contiguous run --
+    the whole point of batching is fewer, larger messages."""
+    fs, win = 1000.0, 20
+    # 19 samples buffered, then a 22-sample chunk => 41 buffered => 2 windows.
+    msgs, data = _batch_msgs([19, 22], fs=fs)
+    proc = WindowTransformer(
+        axis="time", newaxis=None, window_dur=win / fs, window_shift=win / fs, zero_pad_until="none", batch_windows=True
+    )
+    first, second = (proc(m) for m in msgs)
+
+    assert first.data.shape[0] == 0  # 19 < 20: nothing complete yet
+    assert second.data.shape[0] == 2 * win  # both windows, one message
+    assert np.array_equal(second.data, data[: 2 * win])
+    assert second.axes["time"].offset == 0.0
+    # The leftover sample stays buffered rather than being emitted or dropped.
+    assert proc._state.buffer_len == 41 - 2 * win
+
+
+def test_batcher_output_is_always_a_multiple_of_the_window():
+    """The size guarantee batcher mode does (and does not) make."""
+    fs, win = 1000.0, 20
+    msgs, _ = _batch_msgs([7, 31, 3, 60, 5], fs=fs)
+    proc = WindowTransformer(
+        axis="time", newaxis=None, window_dur=win / fs, window_shift=win / fs, zero_pad_until="none", batch_windows=True
+    )
+    lengths = [proc(m).data.shape[0] for m in msgs]
+    assert all(n % win == 0 for n in lengths)
+    assert max(lengths) > win  # at least one message carried 2+ windows
+
+
+def test_batcher_unit_yields_once_per_message():
+    """The Unit must not try to split a batcher message: there is no `win` axis,
+    and splitting would undo the batching."""
+    fs, win = 1000.0, 20
+    msgs, data = _batch_msgs([30] * 8, fs=fs)
+    settings = WindowSettings(
+        axis="time", newaxis=None, window_dur=win / fs, window_shift=win / fs, zero_pad_until="none", batch_windows=True
+    )
+    outs = _drive_unit(settings, msgs)
+
+    # 240 samples => 12 windows, but delivered in far fewer messages.
+    assert sum(o.data.shape[0] for o in outs) == 240
+    assert len(outs) < 12
+    assert np.array_equal(np.concatenate([o.data for o in outs], axis=0), data)
+    offsets = [o.axes["time"].offset for o in outs]
+    assert offsets == sorted(offsets)
+
+
+def test_batcher_not_engaged_when_windows_do_not_tile():
+    """Overlap and gaps still need the `win` axis, and the Unit still splits."""
+    fs, win = 1000.0, 20
+    msgs, _ = _batch_msgs([30] * 8, fs=fs)
+    for shift in (win // 2, win * 2):  # overlapping, then gapped
+        settings = WindowSettings(
+            axis="time", newaxis=None, window_dur=win / fs, window_shift=shift / fs, zero_pad_until="none"
+        )
+        proc = WindowTransformer(settings)
+        assert not proc.is_batcher
+        assert "win" in proc(msgs[0]).dims
+        outs = _drive_unit(settings, msgs)
+        assert all(o.dims == ["time", "ch"] for o in outs)
+        assert all(o.data.shape[0] == win for o in outs)  # Unit split them 1:N
+
+
+def test_batcher_rejects_meaningless_anchor():
+    for anchor in ("end", "middle"):
+        with pytest.raises(ValueError, match="no meaning with batch_windows"):
+            WindowTransformer(
+                axis="time", newaxis=None, window_dur=0.02, window_shift=0.02, anchor=anchor, batch_windows=True
+            )
+    # Anchors remain valid wherever a per-window origin exists.
+    WindowTransformer(axis="time", newaxis="win", window_dur=0.02, window_shift=0.02, anchor="end")
+    WindowTransformer(axis="time", newaxis=None, window_dur=0.02, window_shift=0.02, anchor="end")
+    WindowTransformer(axis="time", newaxis=None, window_dur=0.02, window_shift=0.01, anchor="end")
+
+
+def test_batch_windows_requires_tiling_and_no_win_axis():
+    with pytest.raises(ValueError, match="batch_windows requires newaxis=None"):
+        WindowTransformer(axis="time", newaxis="win", window_dur=0.02, window_shift=0.02, batch_windows=True)
+    for shift in (0.01, 0.04, None):
+        with pytest.raises(ValueError, match="batch_windows requires window_shift == window_dur"):
+            WindowTransformer(axis="time", newaxis=None, window_dur=0.02, window_shift=shift, batch_windows=True)
+
+
+def test_unit_yields_exact_duration_messages_by_default():
+    """The default for `newaxis=None`: one message per window, each exactly
+    `window_dur` long -- what asking for a window_dur most obviously means."""
+    fs, win = 1000.0, 20
+    msgs, data = _batch_msgs([30] * 8, fs=fs)
+    settings = WindowSettings(
+        axis="time", newaxis=None, window_dur=win / fs, window_shift=win / fs, zero_pad_until="none"
+    )
+    assert not WindowTransformer(settings).is_batcher
+    outs = _drive_unit(settings, msgs)
+
+    assert len(outs) == 240 // win
+    assert all(o.dims == ["time", "ch"] for o in outs)
+    assert all("win" not in o.axes for o in outs)
+    assert all(o.data.shape[0] == win for o in outs)  # exactly window_dur, never a multiple
+    assert np.array_equal(np.concatenate([o.data for o in outs], axis=0), data)
+    assert np.allclose([o.axes["time"].offset for o in outs], np.arange(240 // win) * win / fs)
+
+
+def test_unit_exact_duration_survives_an_oversized_input():
+    """Even when one input completes several windows, the unit still publishes
+    them one at a time at exactly window_dur."""
+    fs, win = 1000.0, 20
+    msgs, data = _batch_msgs([19, 81], fs=fs)  # second chunk completes 5 windows at once
+    settings = WindowSettings(
+        axis="time", newaxis=None, window_dur=win / fs, window_shift=win / fs, zero_pad_until="none"
+    )
+    outs = _drive_unit(settings, msgs)
+    assert [o.data.shape[0] for o in outs] == [win] * 5
+    assert np.array_equal(np.concatenate([o.data for o in outs], axis=0), data[: 5 * win])
+    assert np.allclose([o.axes["time"].offset for o in outs], np.arange(5) * win / fs)
+
+
+def test_batcher_channel_major():
+    """(ch, time) chunks batch along the target axis just the same."""
+    fs, win = 1000.0, 20
+    rng = np.random.default_rng(3)
+    data = rng.standard_normal((4, 100))
+    msgs = [
+        AxisArray(
+            data=data[:, i : i + 10],
+            dims=["ch", "time"],
+            key="cm",
+            axes={"time": AxisArray.TimeAxis(fs=fs, offset=i / fs)},
+        )
+        for i in range(0, 100, 10)
+    ]
+    proc = WindowTransformer(
+        axis="time", newaxis=None, window_dur=win / fs, window_shift=win / fs, zero_pad_until="none", batch_windows=True
+    )
+    outs = [proc(m) for m in msgs]
+    emitted = [o for o in outs if o.data.shape[1]]
+    assert all(o.dims == ["ch", "time"] for o in outs)
+    assert np.array_equal(np.concatenate([o.data for o in emitted], axis=1), data)
