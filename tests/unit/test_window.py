@@ -7,7 +7,7 @@ import sparse
 from ezmsg.util.messages.axisarray import AxisArray
 from frozendict import frozendict
 
-from ezmsg.sigproc.window import WindowTransformer
+from ezmsg.sigproc.window import WindowSettings, WindowTransformer
 from tests.helpers.empty_time import check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
 from tests.helpers.util import assert_messages_equal, calculate_expected_windows, requires_mlx
 
@@ -112,6 +112,10 @@ def test_window_generator(
 
     assert_messages_equal(in_msgs, backup)
 
+    # Post-process the results to yield a single data array and a single vector of offsets.
+    win_ax = time_ax
+    # time_ax = win_ax + 1
+
     # Check each return value's metadata (offsets checked at end)
     expected_dims = template_msg.dims[:time_ax] + [newaxis or "win"] + template_msg.dims[time_ax:]
     for msg in out_msgs:
@@ -120,9 +124,6 @@ def test_window_generator(
         assert (newaxis or "win") in msg.axes
         assert msg.axes[(newaxis or "win")].gain == (0.0 if win_shift is None else shift_len / fs)
 
-    # Post-process the results to yield a single data array and a single vector of offsets.
-    win_ax = time_ax
-    # time_ax = win_ax + 1
     result = np.concatenate([_.data for _ in out_msgs], win_ax)
     offsets = np.hstack([_.axes[newaxis or "win"].value(np.arange(_.data.shape[win_ax])) for _ in out_msgs])
 
@@ -326,3 +327,91 @@ def test_window_benchmark(backend, n_channels, benchmark):
         return outputs
 
     benchmark(process_all_chunks)
+
+
+# --- Unit output shapes ---
+
+
+def _batch_msgs(chunk_lens, fs=1000.0, n_ch=4, seed=0):
+    """Input messages of the given sample counts, carrying contiguous data."""
+    rng = np.random.default_rng(seed)
+    total = sum(chunk_lens)
+    data = rng.standard_normal((total, n_ch))
+    msgs, start = [], 0
+    for n in chunk_lens:
+        msgs.append(
+            AxisArray(
+                data=data[start : start + n],
+                dims=["time", "ch"],
+                key="batch",
+                axes={"time": AxisArray.TimeAxis(fs=fs, offset=start / fs)},
+            )
+        )
+        start += n
+    return msgs, data
+
+
+def _drive_unit(settings, msgs):
+    import asyncio
+
+    from ezmsg.sigproc.window import Window
+
+    async def _run():
+        unit = Window(settings)
+        unit.create_processor()
+        out = []
+        for msg in msgs:
+            async for _, ret in unit.on_signal(msg):
+                out.append(ret)
+        return out
+
+    return asyncio.run(_run())
+
+
+def test_unit_split_defaults_axis_to_first_dim():
+    """Regression: the unit resolved the target axis from SETTINGS.axis, so the
+    documented `axis=None` default raised KeyError(None) inside a bare `except`
+    -- every message swallowed, the stream silently dead for the whole run."""
+    fs, win = 1000.0, 20
+    msgs, data = _batch_msgs([30] * 8, fs=fs)
+    settings = WindowSettings(
+        axis=None, newaxis=None, window_dur=win / fs, window_shift=win / fs, zero_pad_until="none"
+    )
+    outs = _drive_unit(settings, msgs)
+
+    assert len(outs) == 240 // win
+    assert all(o.data.shape[0] == win for o in outs)
+    assert np.array_equal(np.concatenate([o.data for o in outs], axis=0), data)
+    assert np.allclose([o.axes["time"].offset for o in outs], np.arange(240 // win) * win / fs)
+
+
+def test_unit_yields_exact_duration_messages_by_default():
+    """The default for `newaxis=None`: one message per window, each exactly
+    `window_dur` long -- what asking for a window_dur most obviously means."""
+    fs, win = 1000.0, 20
+    msgs, data = _batch_msgs([30] * 8, fs=fs)
+    settings = WindowSettings(
+        axis="time", newaxis=None, window_dur=win / fs, window_shift=win / fs, zero_pad_until="none"
+    )
+    outs = _drive_unit(settings, msgs)
+
+    assert len(outs) == 240 // win
+    assert all(o.dims == ["time", "ch"] for o in outs)
+    assert all("win" not in o.axes for o in outs)
+    assert all(o.data.shape[0] == win for o in outs)  # exactly window_dur, never a multiple
+    assert np.array_equal(np.concatenate([o.data for o in outs], axis=0), data)
+    assert np.allclose([o.axes["time"].offset for o in outs], np.arange(240 // win) * win / fs)
+
+
+def test_unit_exact_duration_survives_an_oversized_input():
+    """Even when one input completes several windows, the unit still publishes
+    them one at a time at exactly window_dur."""
+    fs, win = 1000.0, 20
+    msgs, data = _batch_msgs([19, 81], fs=fs)  # second chunk completes 5 windows at once
+    settings = WindowSettings(
+        axis="time", newaxis=None, window_dur=win / fs, window_shift=win / fs, zero_pad_until="none"
+    )
+    outs = _drive_unit(settings, msgs)
+    assert [o.data.shape[0] for o in outs] == [win] * 5
+    assert np.array_equal(np.concatenate([o.data for o in outs], axis=0), data[: 5 * win])
+    assert np.allclose([o.axes["time"].offset for o in outs], np.arange(5) * win / fs)
