@@ -255,7 +255,7 @@ class ButterworthBackwardFilterTransformer(FilterByDesignTransformer[Butterworth
             combined = message.data
             combined_offset = message.axes[axis].offset
         else:
-            combined = xp.concat([self._tail, message.data], axis=ax_idx)
+            combined = xp.concatenate([self._tail, message.data], axis=ax_idx)
             combined_offset = self._tail_offset
 
         n_available = combined.shape[ax_idx]
