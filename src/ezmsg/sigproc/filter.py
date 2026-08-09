@@ -186,6 +186,51 @@ def _sosfilt_xp(sos, x, axis_idx, zi, xp):
     return x, zi_out
 
 
+#: Promoted dtypes for which the dedicated numpy FIR paths reproduce
+#: ``lfilter``'s semantics. ``ndimage.correlate1d`` demotes its output to the
+#: input dtype and ``rfft`` rejects complex outright, so anything else -- complex,
+#: integer, extended precision -- goes to scipy rather than being mis-handled.
+_FIR_NUMPY_DTYPES = (np.dtype(np.float32), np.dtype(np.float64))
+
+
+def _is_fir(b: npt.NDArray, a: npt.NDArray) -> bool:
+    """Whether BA coefficients describe a filter with no feedback."""
+    return len(a) == 1 or bool(np.allclose(a[1:], 0))
+
+
+def _fir_taps(b: npt.NDArray, a: npt.NDArray, data: typing.Any) -> tuple[npt.NDArray, typing.Any] | None:
+    """Normalized FIR taps and the dtype to filter in, or None to use scipy.
+
+    ``scipy.signal.lfilter`` divides through by ``a[0]`` and promotes to
+    ``result_type(b, a, x)``; the dedicated paths are only a valid substitute if
+    they do the same. Note ``a`` participates in the promotion even when it is
+    just ``[1.0]``: float32 taps against the default float64 ``a`` still filter
+    in float64 (verified against ``lfilter`` over all eight float32/float64
+    combinations of b, a and x).
+
+    Returns ``None`` for inputs the dedicated paths would silently mis-handle --
+    ``a[0] == 0``, or a promotion outside :data:`_FIR_NUMPY_DTYPES` -- so the
+    caller falls through to ``lfilter``, whose behavior is the reference.
+    """
+    a = np.asarray(a).reshape(-1)
+    if a.size == 0:
+        return None
+    a0 = a[0]
+    if a0 == 0:
+        # scipy warns and yields inf here; defer to it rather than inventing.
+        return None
+    b = np.asarray(b)
+    if a0 != 1:
+        b = b / a0
+    if not is_numpy_array(data):
+        # Device-constrained backends keep filtering in their own dtype.
+        return b, data.dtype
+    dtype = np.result_type(b.dtype, a.dtype, data.dtype)
+    if dtype not in _FIR_NUMPY_DTYPES:
+        return None
+    return b, dtype
+
+
 def _sosfilt_mlx_metal_xp(sos_mx, data, axis_idx, zi, chunk_sizes):
     """Apply SOS filtering via the on-device Metal kernel.
 
@@ -446,6 +491,34 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
         samp_shape = message.data.shape[:axis_idx] + message.data.shape[axis_idx + 1 :]
         return hash((message.key, samp_shape))
 
+    def _build_fir_taps(self, b: npt.NDArray, work_dtype: typing.Any, data: typing.Any, axis_idx: int) -> None:
+        """Cache the converted taps that both dedicated FIR paths read."""
+        xp = get_namespace(data)
+        dev = array_device(data)
+        # 1D taps for the conv paths
+        self.state.fir_b_1d = xp_asarray(xp, b, dtype=work_dtype, device=dev)
+        # Reshape b to broadcast: (1, ..., M+1, ..., 1) for FFT path
+        b_shape = [1] * data.ndim
+        b_shape[axis_idx] = len(b)
+        self.state.fir_b = xp.reshape(self.state.fir_b_1d, tuple(b_shape))
+
+    def _refresh_fir_taps(self, message: AxisArray, axis_idx: int) -> None:
+        """Rebuild the tap caches that ``update_coefficients`` dropped.
+
+        A same-length coefficient swap deliberately keeps ``zi``, so the taps
+        cannot be rebuilt there -- the dtype and device only become known when a
+        message arrives. If the new coefficients no longer route here at all
+        (complex taps, ``a[0] == 0``, a changed order), ``zi`` would mean
+        something different on the path they do route to, so start over instead.
+        """
+        _, coefs = _normalize_coefs(self.settings.coefs)
+        b, a = coefs
+        fir = _fir_taps(b, a, message.data) if _is_fir(b, a) else None
+        if fir is None or len(fir[0]) - 1 != self.state.zi.shape[axis_idx]:
+            self._reset_state(message)
+        else:
+            self._build_fir_taps(fir[0], fir[1], message.data, axis_idx)
+
     def _reset_state(self, message: AxisArray) -> None:
         # __call__ guarantees a non-empty message here. Initial conditions are
         # edge-scaled by the first sample x0 -- the scipy ``lfilter_zi * x[0]``
@@ -460,33 +533,32 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
 
         if self.settings.coef_type == "ba":
             b, a = coefs
-            is_fir = len(a) == 1 or np.allclose(a[1:], 0)
+            fir = _fir_taps(b, a, message.data) if _is_fir(b, a) else None
 
-            if is_fir:
+            if fir is not None:
                 # Dedicated FIR paths. scipy's lfilter degrades to a per-channel
                 # Python loop when len(a) == 1, so numpy comes here too rather
                 # than falling through to the generic scipy branch below. Note
                 # these paths define zi as the last M *input* samples, unlike
                 # scipy's lfilter state, which is why the setup differs.
+                b_fir, work_dtype = fir
                 xp = get_namespace(message.data)
                 dev = array_device(message.data)
-                M = len(b) - 1  # filter order
+                M = len(b_fir) - 1  # filter order
                 zi_shape = list(message.data.shape)
                 zi_shape[axis_idx] = M
-                zeros = xp_create(xp.zeros, tuple(zi_shape), dtype=message.data.dtype, device=dev)
+                # zi holds input samples, but in the promoted dtype: it is
+                # concatenated with the incoming chunk, so it is what carries
+                # result_type(b, x) through to the output.
+                zeros = xp_create(xp.zeros, tuple(zi_shape), dtype=work_dtype, device=dev)
                 self.state.zi = zeros + message.data[first_idx]
-                # 1D taps for conv path
-                self.state.fir_b_1d = xp_asarray(xp, b, dtype=message.data.dtype, device=dev)
-                # Reshape b to broadcast: (1, ..., M+1, ..., 1) for FFT path
-                b_shape = [1] * message.data.ndim
-                b_shape[axis_idx] = len(b)
-                self.state.fir_b = xp.reshape(self.state.fir_b_1d, tuple(b_shape))
+                self._build_fir_taps(b_fir, work_dtype, message.data, axis_idx)
                 # Choose method. Non-numpy backends prefer their own fused
                 # convolution when they have one. For numpy the choice is
                 # tap-count driven: ndimage's C loop wins for short filters,
                 # the FFT wins once the filter grows (see FIR_FFT_MIN_TAPS).
                 if is_numpy_array(message.data):
-                    self.state.fir_method = "fft" if len(b) >= self.settings.fir_fft_min_taps else "conv1d"
+                    self.state.fir_method = "fft" if len(b_fir) >= self.settings.fir_fft_min_taps else "conv1d"
                 else:
                     self.state.fir_method = "conv" if hasattr(xp, "conv_general") else "fft"
                 self.state.sos_method = None
@@ -586,6 +658,15 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
                         reset_needed = True
                 else:
                     reset_needed = True
+                if not reset_needed:
+                    # A same-length swap can still flip FIR <-> IIR (a=[1, 0] ->
+                    # a=[1, -0.9]). The FIR paths keep zi as the last M *input*
+                    # samples while lfilter keeps filter state, so the carried
+                    # state is not transferable between them: reset.
+                    _, old_ba = _normalize_coefs(old_coefs)
+                    _, new_ba = _normalize_coefs(coefs)
+                    if old_ba is None or _is_fir(*old_ba) != _is_fir(*new_ba):
+                        reset_needed = True
             elif self.settings.coef_type == "sos":
                 if isinstance(old_coefs, np.ndarray) and isinstance(coefs, np.ndarray):
                     if old_coefs.shape != coefs.shape:
@@ -599,11 +680,18 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
         # Always invalidate cached MLX SOS coefs; _reset_state or _process
         # will re-cache them from the new settings.coefs on the next call.
         self.state.sos_mx = None
+        # Likewise the converted FIR taps. A same-length swap does not reset zi,
+        # so without this the filter would keep running the old taps.
+        # _refresh_fir_taps rebuilds them on the next chunk.
+        self.state.fir_b = None
+        self.state.fir_b_1d = None
 
     def _process(self, message: AxisArray) -> AxisArray:
         if message.data.size > 0:
             axis = message.dims[0] if self.settings.axis is None else self.settings.axis
             axis_idx = message.get_axis_idx(axis)
+            if self.state.fir_method is not None and self.state.fir_b_1d is None:
+                self._refresh_fir_taps(message, axis_idx)
             if self.state.fir_method == "conv1d":
                 dat_out, self.state.zi = _fir_filt_conv1d(self.state.fir_b_1d, message.data, self.state.zi, axis_idx)
             elif self.state.fir_method == "conv":

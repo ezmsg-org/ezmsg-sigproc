@@ -189,3 +189,193 @@ def test_fft_length_is_a_fast_size():
     # factor. This was measured at 56.8 ms vs 24.9 ms at the next fast length.
     assert _next_fast_len(8224) != 8224
     assert _next_fast_len(8224) >= 8224
+
+
+# ---------------------------------------------------------------------------
+# scipy semantics the dedicated paths must reproduce or decline
+# ---------------------------------------------------------------------------
+
+
+def _make_ba(b, a, **kw):
+    return FilterTransformer(FilterSettings(axis="time", coefs=FilterCoefficients(b=b, a=a), coef_type="ba", **kw))
+
+
+def _lfilter_reference_ba(b, a, data, axis):
+    """``lfilter`` with the same edge-scaled zi the transformer builds."""
+    first = tuple(slice(0, 1) if i == axis else slice(None) for i in range(data.ndim))
+    zi_base = scipy.signal.lfilter_zi(b, a)
+    n_tail = data.ndim - axis - 1
+    expand = (None,) * axis + (slice(None),) + (None,) * n_tail
+    tile = data.shape[:axis] + (1,) + data.shape[axis + 1 :]
+    zi = np.tile(zi_base[expand], tile) * data[first]
+    return scipy.signal.lfilter(b, a, data, axis=axis, zi=zi)[0]
+
+
+@pytest.mark.parametrize("a0", [2.0, -0.5, 4.0])
+@pytest.mark.parametrize("n_taps", [9, 129])
+def test_denominator_is_normalized(a0, n_taps):
+    """``lfilter`` divides through by ``a[0]``; a FIR path that does not is
+    wrong by exactly that factor (``b=[1,2], a=[2]`` gave 2x the correct output).
+    """
+    b, a = _taps(n_taps), np.array([a0])
+    data = np.random.default_rng(7).standard_normal((8, 400))
+    got = np.asarray(_make_ba(b, a)(_msg(data, ["ch", "time"])).data)
+    want = _lfilter_reference_ba(b, a, data, axis=1)
+    np.testing.assert_allclose(got, want, rtol=0, atol=1e-12 * np.abs(want).max())
+
+
+def test_trailing_zero_denominator_is_normalized():
+    """``a = [3, 0]`` is still FIR, and still needs the a[0] division."""
+    b, a = _taps(33), np.array([3.0, 0.0])
+    data = np.random.default_rng(8).standard_normal((8, 400))
+    tf = _make_ba(b, a)
+    got = np.asarray(tf(_msg(data, ["ch", "time"])).data)
+    assert tf.state.fir_method == "conv1d"
+    want = _lfilter_reference_ba(b, a, data, axis=1)
+    np.testing.assert_allclose(got, want, rtol=0, atol=1e-12 * np.abs(want).max())
+
+
+@pytest.mark.parametrize("b_dt", [np.float32, np.float64])
+@pytest.mark.parametrize("a_dt", [np.float32, np.float64])
+@pytest.mark.parametrize("x_dt", [np.float32, np.float64])
+def test_dtype_promotion_matches_lfilter(b_dt, a_dt, x_dt):
+    """The promoted dtype is ``result_type(b, a, x)``, matching ``lfilter``.
+
+    Casting the taps to the *input* dtype instead silently demoted float64 taps
+    on float32 input, losing precision the previous scipy path kept. Note ``a``
+    participates even as ``[1.0]``: float32 taps against a default float64 ``a``
+    still filter in float64.
+    """
+    b, a = _taps(9, b_dt), np.array([1.0], dtype=a_dt)
+    data = np.random.default_rng(9).standard_normal((4, 200)).astype(x_dt)
+    got = np.asarray(_make_ba(b, a)(_msg(data, ["ch", "time"])).data)
+    want = _lfilter_reference_ba(b, a, data, axis=1)
+    assert got.dtype == want.dtype == np.result_type(b, a, data)
+    np.testing.assert_allclose(got, want, rtol=1e-6, atol=1e-6 * np.abs(want).max())
+
+
+@pytest.mark.parametrize("n_taps", [9, 129])
+def test_complex_input_defers_to_scipy(n_taps):
+    """``rfft`` raises outright on complex input and ``correlate1d`` drops the
+    imaginary part, so complex must not take either dedicated path.
+    """
+    b, a = _taps(n_taps), np.array([1.0])
+    rng = np.random.default_rng(10)
+    data = rng.standard_normal((4, 400)) + 1j * rng.standard_normal((4, 400))
+    tf = _make_ba(b, a)
+    got = np.asarray(tf(_msg(data, ["ch", "time"])).data)
+    assert tf.state.fir_method is None
+    want = _lfilter_reference_ba(b, a, data, axis=1)
+    assert got.dtype == want.dtype == np.complex128
+    np.testing.assert_allclose(got, want, rtol=0, atol=1e-12 * np.abs(want).max())
+
+
+def test_complex_taps_defer_to_scipy():
+    """Complex taps on real input promote to complex under ``lfilter``; the
+    dedicated paths would cast them down to the real input dtype instead.
+    """
+    b, a = np.array([1 + 1j, 0.5 - 0.5j]), np.array([1.0])
+    data = np.random.default_rng(11).standard_normal((4, 200))
+    tf = _make_ba(b, a)
+    got = np.asarray(tf(_msg(data, ["ch", "time"])).data)
+    assert tf.state.fir_method is None
+    want = _lfilter_reference_ba(b, a, data, axis=1)
+    assert got.dtype == want.dtype == np.complex128
+    np.testing.assert_allclose(got, want, rtol=0, atol=1e-12 * np.abs(want).max())
+
+
+def test_integer_input_matches_lfilter():
+    """Integer input promotes to float under ``lfilter``, not to an int path."""
+    b, a = _taps(9), np.array([1.0])
+    data = np.random.default_rng(12).integers(-10, 10, (4, 200))
+    got = np.asarray(_make_ba(b, a)(_msg(data, ["ch", "time"])).data)
+    want = _lfilter_reference_ba(b, a, data, axis=1)
+    assert got.dtype == want.dtype == np.float64
+    np.testing.assert_allclose(got, want, rtol=0, atol=1e-12 * np.abs(want).max())
+
+
+def test_zero_denominator_defers_to_scipy():
+    """``a[0] == 0`` is scipy's error to raise (it warns and yields inf), not
+    something the FIR paths should quietly reinterpret as ``a[0] == 1``.
+    """
+    tf = _make_ba(np.array([1.0, 2.0]), np.array([0.0]))
+    data = np.random.default_rng(13).standard_normal((4, 100))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        tf(_msg(data, ["ch", "time"]))
+    assert tf.state.fir_method is None
+
+
+# ---------------------------------------------------------------------------
+# Coefficient updates
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("n_taps", [9, 129])
+def test_same_length_tap_swap_takes_effect(n_taps):
+    """A same-length update keeps zi by design, so the converted taps have to be
+    invalidated explicitly -- otherwise the filter runs the old coefficients.
+    """
+    b_old, b_new = _taps(n_taps), scipy.signal.firwin(n_taps, 0.4)
+    a = np.array([1.0])
+    data = np.random.default_rng(14).standard_normal((4, 400))
+
+    tf = _make_ba(b_old, a)
+    tf(_msg(data, ["ch", "time"]))
+    tf.update_coefficients(FilterCoefficients(b=b_new, a=a))
+    got = np.asarray(tf(_msg(data, ["ch", "time"], offset=0.4)).data)
+
+    np.testing.assert_allclose(tf.state.fir_b_1d, b_new)
+    # Second chunk of a continuous stream filtered with the new taps.
+    ref = _make_ba(b_new, a)
+    ref(_msg(data, ["ch", "time"]))
+    want = np.asarray(ref(_msg(data, ["ch", "time"], offset=0.4)).data)
+    np.testing.assert_allclose(got, want, rtol=0, atol=1e-12 * np.abs(want).max())
+
+
+def test_same_length_swap_to_iir_leaves_the_fir_path():
+    """``a=[1, 0]`` -> ``a=[1, -0.9]`` keeps both lengths but stops being FIR.
+    The two paths carry incompatible state (last M inputs vs lfilter state), so
+    this must reset rather than rebuild; running it as FIR was off by ~2.7.
+    """
+    b = np.array([0.5, 0.5])
+    data = np.random.default_rng(15).standard_normal((16, 4))
+
+    tf = _make_ba(b, np.array([1.0, 0.0]))
+    tf(_msg(data, ["time", "ch"]))
+    assert tf.state.fir_method == "conv1d"
+
+    a_iir = np.array([1.0, -0.9])
+    tf.update_coefficients(FilterCoefficients(b=b, a=a_iir))
+    got = np.asarray(tf(_msg(data, ["time", "ch"])).data)
+
+    assert tf.state.fir_method is None
+    want = _lfilter_reference_ba(b, a_iir, data, axis=0)
+    np.testing.assert_allclose(got, want, rtol=0, atol=1e-12 * np.abs(want).max())
+
+
+def test_same_length_swap_to_complex_taps_leaves_the_fir_path():
+    """A same-length swap can also make the coefficients unsupported."""
+    a = np.array([1.0])
+    data = np.random.default_rng(16).standard_normal((16, 4))
+
+    tf = _make_ba(np.array([0.25, 0.75]), a)
+    tf(_msg(data, ["time", "ch"]))
+    assert tf.state.fir_method == "conv1d"
+
+    b_c = np.array([1 + 1j, 0.5 - 0.5j])
+    tf.update_coefficients(FilterCoefficients(b=b_c, a=a))
+    got = np.asarray(tf(_msg(data, ["time", "ch"])).data)
+
+    assert tf.state.fir_method is None
+    assert got.dtype == np.complex128
+
+
+def test_same_length_denominator_change_takes_effect():
+    """``a=[1]`` -> ``a=[2]``: same lengths, still FIR, but the taps change."""
+    b = _taps(9)
+    data = np.random.default_rng(17).standard_normal((4, 200))
+    tf = _make_ba(b, np.array([1.0]))
+    tf(_msg(data, ["ch", "time"]))
+    tf.update_coefficients(FilterCoefficients(b=b, a=np.array([2.0])))
+    tf(_msg(data, ["ch", "time"], offset=0.2))
+    np.testing.assert_allclose(tf.state.fir_b_1d, b / 2.0)
