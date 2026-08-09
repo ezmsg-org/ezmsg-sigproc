@@ -172,7 +172,29 @@ class EWMASettings(ez.Settings):
     """If True, return the input unchanged (identity) without touching the
     EWMA. Unlike a very large time_constant -- which still applies a (stale)
     baseline estimate -- passthrough leaves the data untouched. May be toggled
-    at runtime without resetting the filter state."""
+    at runtime without resetting the filter state; see ``reset_on_resume`` for
+    what that means for the first message after the gap."""
+
+    reset_on_resume: bool = False
+    """Whether switching ``passthrough`` back off discards the filter state.
+
+    The filter sees none of the samples that go by during passthrough, so ``zi``
+    describes an exponentially-weighted window that ended when passthrough was
+    switched on -- and the state cannot tell a 10 ms blip from a 10 minute
+    outage, since both resume identically. For a scaler that means z-scoring
+    post-gap data against pre-gap statistics.
+
+    False (the default) resumes from the preserved state, which is right for a
+    short blip and keeps an estimate that may have taken many ``time_constant``\\ s
+    to converge. True rebuilds from the first post-gap message instead: with the
+    bias correction below, that first output is exactly the first sample, and the
+    estimate re-converges over ``time_constant``. Prefer True where passthrough
+    may be left on long enough for the signal to drift, which is the case
+    :obj:`ezmsg.sigproc.binned_aggregate.BinnedAggregateTransformer` always
+    assumes.
+
+    Empty chunks are not gaps -- they carry no samples past the filter -- so they
+    never trigger this."""
 
     mlx_metal_chunk_sizes: tuple[int, ...] = (32, 1024)
     """Allowable compile-time chunk sizes for EWMA Metal kernels. The smallest
@@ -191,17 +213,31 @@ class EWMAState:
 
 class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray, EWMAState]):
     # `accumulate` is read live in `_process` to gate state updates and
-    # `passthrough` is read live in `__call__`/`__acall__`; other fields are
-    # cached into state (alpha, zi) during `_reset_state`.
-    NONRESET_SETTINGS_FIELDS = frozenset({"accumulate", "passthrough", "mlx_metal_chunk_sizes"})
+    # `passthrough`/`reset_on_resume` are read live in `__call__`/`__acall__`;
+    # other fields are cached into state (alpha, zi) during `_reset_state`.
+    NONRESET_SETTINGS_FIELDS = frozenset({"accumulate", "passthrough", "reset_on_resume", "mlx_metal_chunk_sizes"})
+
+    def _skip(self, message: AxisArray) -> bool:
+        """Whether to bypass the filter, flagging a reset if this is a real gap.
+
+        The two bypass conditions have to be kept apart: passthrough lets samples
+        past unfiltered and so leaves a hole in ``zi``'s history, while an empty
+        chunk carries nothing past and leaves the history intact. Only the former
+        is a gap, so only the former can invalidate the state.
+        """
+        if self.settings.passthrough:
+            if self.settings.reset_on_resume and np.prod(message.data.shape) != 0:
+                self._request_reset()
+            return True
+        return bool(np.prod(message.data.shape) == 0)
 
     def __call__(self, message: AxisArray) -> AxisArray:
-        if self.settings.passthrough or np.prod(message.data.shape) == 0:
+        if self._skip(message):
             return message
         return super().__call__(message)
 
     async def __acall__(self, message: AxisArray) -> AxisArray:
-        if self.settings.passthrough or np.prod(message.data.shape) == 0:
+        if self._skip(message):
             return message
         return await super().__acall__(message)
 
