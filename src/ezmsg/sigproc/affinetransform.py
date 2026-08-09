@@ -16,6 +16,7 @@ matmul exploits is always read off the weight matrix itself.
 """
 
 import inspect
+import math
 import os
 from collections.abc import Callable
 from pathlib import Path
@@ -220,7 +221,10 @@ class AffineTransformTransformer(
 
         # Context the kernel planner needs, set before set_weights() consults it.
         self._state.n_in = n_in
-        self._state.n_samples = max(message.data.size // n_in, 1) if n_in else 1
+        # math.prod(shape), not .size: torch spells size as a *method*, so
+        # `data.size // n_in` raises TypeError on a torch-backed message.
+        n_elem = math.prod(message.data.shape)
+        self._state.n_samples = max(n_elem // n_in, 1) if n_in else 1
         self._state.dispatched = _is_dispatched(xp)
         self.set_weights(weights, recalc_structure=True)
 
