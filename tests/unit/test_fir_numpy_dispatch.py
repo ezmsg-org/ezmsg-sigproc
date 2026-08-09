@@ -295,14 +295,16 @@ def test_integer_input_matches_lfilter():
 
 
 def test_zero_denominator_defers_to_scipy():
-    """``a[0] == 0`` is scipy's error to raise (it warns and yields inf), not
-    something the FIR paths should quietly reinterpret as ``a[0] == 1``.
+    """``a[0] == 0`` must reach scipy rather than being quietly reinterpreted as
+    ``a[0] == 1`` by a path that never divides.
+
+    What scipy then *does* with it is version-dependent -- 1.17.1 takes its FIR
+    shortcut and yields ``inf``, others raise ``ValueError`` -- so this pins the
+    routing decision, which is the part we own, and not scipy's behavior.
     """
-    tf = _make_ba(np.array([1.0, 2.0]), np.array([0.0]))
-    data = np.random.default_rng(13).standard_normal((4, 100))
-    with np.errstate(divide="ignore", invalid="ignore"):
-        tf(_msg(data, ["ch", "time"]))
-    assert tf.state.fir_method is None
+    from ezmsg.sigproc.filter import _fir_taps
+
+    assert _fir_taps(np.array([1.0, 2.0]), np.array([0.0]), np.zeros((4, 100))) is None
 
 
 # ---------------------------------------------------------------------------
