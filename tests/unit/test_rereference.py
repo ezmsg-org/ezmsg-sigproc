@@ -26,7 +26,7 @@ class TestCarMatrix:
 
     def test_per_cluster_independence(self):
         clusters = [[0, 1, 2], [3, 4, 5, 6, 7]]
-        A = car_matrix(8, clusters=clusters, include_current=False)
+        A = car_matrix(8, groups=clusters, include_current=False)
         X = _rng().normal(size=(20, 8))
         expected = X.copy()
         for cl in clusters:
@@ -40,18 +40,18 @@ class TestCarMatrix:
 
     def test_min_reref_size_leaves_small_clusters_identity(self):
         clusters = [[0, 1], [2, 3, 4, 5]]
-        A = car_matrix(6, clusters=clusters, include_current=False, min_reref_size=3)
+        A = car_matrix(6, groups=clusters, include_current=False, min_reref_size=3)
         np.testing.assert_array_equal(A[np.ix_([0, 1], [0, 1])], np.eye(2))
         assert A[2, 3] != 0
 
     def test_unclustered_channels_stay_identity(self):
-        A = car_matrix(5, clusters=[[0, 1, 2]])
+        A = car_matrix(5, groups=[[0, 1, 2]])
         np.testing.assert_array_equal(A[3:, :], np.eye(5)[3:, :])
         np.testing.assert_array_equal(A[:, 3:], np.eye(5)[:, 3:])
 
     def test_leave_one_out_singleton_cluster_is_identity(self):
         # k == 1 has no "other" channels; must not divide by zero.
-        A = car_matrix(4, clusters=[[0], [1, 2, 3]], include_current=False)
+        A = car_matrix(4, groups=[[0], [1, 2, 3]], include_current=False)
         np.testing.assert_array_equal(A[0, :], np.eye(4)[0, :])
 
     def test_leave_one_out_pair_is_bipolar(self):
@@ -60,18 +60,18 @@ class TestCarMatrix:
         np.testing.assert_allclose((X @ A)[:, 0], X[:, 0] - X[:, 1], atol=1e-12)
 
     def test_symmetric(self):
-        A = car_matrix(8, clusters=[[0, 1, 2], [3, 4, 5, 6, 7]], include_current=False)
+        A = car_matrix(8, groups=[[0, 1, 2], [3, 4, 5, 6, 7]], include_current=False)
         np.testing.assert_array_equal(A, A.T)
 
     def test_zero_channels(self):
         assert car_matrix(0).shape == (0, 0)
-        assert car_matrix(0, clusters=[]).shape == (0, 0)
+        assert car_matrix(0, groups=[]).shape == (0, 0)
 
     def test_out_of_range_indices_raise(self):
         with pytest.raises(ValueError, match="out-of-range"):
-            car_matrix(4, clusters=[[0, 1, 4]])
+            car_matrix(4, groups=[[0, 1, 4]])
         with pytest.raises(ValueError, match="out-of-range"):
-            car_matrix(4, clusters=[[-1, 0, 1]])
+            car_matrix(4, groups=[[-1, 0, 1]])
 
     def test_dtype(self):
         assert car_matrix(4, dtype=np.float32).dtype == np.float32
@@ -82,8 +82,8 @@ class TestRereferenceMatrix:
         np.testing.assert_array_equal(rereference_matrix(RereferenceKind.IDENTITY, 5), np.eye(5))
 
     def test_car_dispatch(self):
-        expected = car_matrix(6, clusters=[[0, 1, 2]], include_current=False)
-        got = rereference_matrix(RereferenceKind.CAR, 6, clusters=[[0, 1, 2]], include_current=False)
+        expected = car_matrix(6, groups=[[0, 1, 2]], include_current=False)
+        got = rereference_matrix(RereferenceKind.CAR, 6, groups=[[0, 1, 2]], include_current=False)
         np.testing.assert_array_equal(got, expected)
 
     def test_accepts_plain_strings(self):
@@ -97,7 +97,7 @@ class TestRereferenceMatrix:
 
 class TestAffineKindWeights:
     """AffineTransformTransformer accepts a RereferenceKind (or its string value)
-    as ``weights`` and builds the matrix over ``channel_clusters`` at reset."""
+    as ``weights`` and builds the matrix over ``channel_groups`` at reset."""
 
     def test_identity_kind(self):
         X = _rng().normal(size=(10, 6))
@@ -109,7 +109,7 @@ class TestAffineKindWeights:
         clusters = [[0, 1, 2], [3, 4, 5]]
         X = _rng().normal(size=(10, 6))
         xf = AffineTransformTransformer(
-            AffineTransformSettings(weights=RereferenceKind.CAR, axis="ch", channel_clusters=clusters)
+            AffineTransformSettings(weights=RereferenceKind.CAR, axis="ch", channel_groups=clusters)
         )
         out = xf(AxisArray(X, dims=["time", "ch"]))
         expected = X.copy()
