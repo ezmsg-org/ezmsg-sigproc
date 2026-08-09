@@ -395,9 +395,9 @@ class TestNewAxisMerge:
         assert merged is not None
         assert merged.data.shape == (n, 3, 2)
         feature_ax = merged.axes.get("feature")
-        assert feature_ax is not None and hasattr(
-            feature_ax, "data"
-        ), "label_a / label_b should produce a CoordinateAxis on the new axis"
+        assert feature_ax is not None and hasattr(feature_ax, "data"), (
+            "label_a / label_b should produce a CoordinateAxis on the new axis"
+        )
         np.testing.assert_array_equal(np.asarray(feature_ax.data), np.array(["spk", "sbp"]))
 
     @requires_mlx

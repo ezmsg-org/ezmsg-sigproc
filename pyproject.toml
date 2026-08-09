@@ -35,7 +35,7 @@ dev = [
   {include-group = "docs"},
 ]
 lint = [
-  "ruff"
+  "ruff==0.16.2"
 ]
 test = [
   "frozendict>=2.4.4",

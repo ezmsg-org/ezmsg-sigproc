@@ -37,9 +37,7 @@ def test_filter_edge_scales_dc_startup(coef_type):
     else:
         coefs = scipy.signal.butter(4, 50.0, btype="low", fs=fs, output="sos")
 
-    proc = FilterTransformer(
-        settings=FilterSettings(axis="time", coef_type=coef_type, coefs=coefs)
-    )
+    proc = FilterTransformer(settings=FilterSettings(axis="time", coef_type=coef_type, coefs=coefs))
     msg = AxisArray(
         data=data.copy(),
         dims=["time", "ch"],

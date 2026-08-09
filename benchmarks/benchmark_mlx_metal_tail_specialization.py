@@ -104,8 +104,7 @@ def main() -> None:
     rows.append(("repeat tail", repeat_samples, repeat_tail, run(repeat_samples)))
 
     print(
-        f"operation={args.operation} channels={args.channels} "
-        f"chunk_sizes={chunk_sizes} base_chunks={args.base_chunks}"
+        f"operation={args.operation} channels={args.channels} chunk_sizes={chunk_sizes} base_chunks={args.base_chunks}"
     )
     print(f"{'phase':<12} {'samples':>8} {'tail':>6} {'elapsed (ms)':>14}")
     for phase, n_samples, tail, elapsed_ms in rows:
