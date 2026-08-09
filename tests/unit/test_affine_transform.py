@@ -10,9 +10,6 @@ from ezmsg.sigproc.affinetransform import (
     AffineTransformTransformer,
     CommonRereferenceSettings,
     CommonRereferenceTransformer,
-    _find_block_diagonal_clusters,
-    _max_cross_cluster_weight,
-    _merge_small_clusters,
 )
 from tests.helpers.empty_time import N_CH, check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
 from tests.helpers.util import assert_messages_equal, requires_mlx
@@ -89,6 +86,12 @@ def test_affine_passthrough():
     assert_messages_equal([msg_out], backup)
 
 
+def test_affine_invalid_kernel():
+    xformer = AffineTransformTransformer(AffineTransformSettings(weights=np.eye(4), axis="ch", kernel="fastest"))
+    with pytest.raises(ValueError, match="kernel must be one of"):
+        xformer(AxisArray(np.zeros((3, 4)), dims=["time", "ch"]))
+
+
 def test_common_rereference():
     n_times = 300
     n_chans = 64
@@ -99,7 +102,7 @@ def test_common_rereference():
 
     xformer = CommonRereferenceTransformer(CommonRereferenceSettings(mode="mean", axis="ch", include_current=True))
     msg_out = xformer(msg_in)
-    assert np.array_equal(
+    assert np.allclose(
         msg_out.data,
         msg_in.data - np.mean(msg_in.data, axis=1, keepdims=True),
     )
@@ -116,97 +119,188 @@ def test_common_rereference():
     expected_out = np.stack(expected_out).T
 
     xformer = CommonRereferenceTransformer(CommonRereferenceSettings(mode="mean", axis="ch", include_current=False))
-    msg_out = xformer(msg_in)  # 41 us
+    msg_out = xformer(msg_in)
     assert np.allclose(msg_out.data, expected_out)
 
-    # Instead of CAR, we could use AffineTransformTransformer with weights that reproduce CAR.
-    # However, this method is 30x slower than above. (Actual difference varies depending on data shape).
-    if False:
-        weights = -np.ones((n_chans, n_chans)) / (n_chans - 1)
-        np.fill_diagonal(weights, 1)
-        xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch"))
-        msg_out = xformer(msg_in)
-        assert np.allclose(msg_out.data, expected_out)
+
+def test_common_rereference_preserves_float_dtype():
+    """float32 in, float32 out. Promoting to float64 doubles the bandwidth of
+    every downstream stage for no benefit; integers still promote."""
+    rng = np.random.default_rng(0)
+    for groups in (None, [[0, 1, 2, 3], [4, 5, 6, 7]]):
+        xformer = CommonRereferenceTransformer(CommonRereferenceSettings(mode="mean", axis="ch", channel_groups=groups))
+        out = xformer(AxisArray(rng.standard_normal((20, 8)).astype(np.float32), dims=["time", "ch"]))
+        assert out.data.dtype == np.float32
+        xformer = CommonRereferenceTransformer(CommonRereferenceSettings(mode="mean", axis="ch", channel_groups=groups))
+        out = xformer(AxisArray(np.arange(20 * 8, dtype=np.int16).reshape(20, 8), dims=["time", "ch"]))
+        assert out.data.dtype == np.float64
 
 
-def test_common_rereference_clusters():
+def test_common_rereference_groups():
     n_times = 300
     n_chans = 8
     rng = np.random.default_rng(42)
     in_dat = rng.standard_normal((n_times, n_chans))
     msg_in = AxisArray(in_dat, dims=["time", "ch"])
 
-    cluster_a = [0, 1, 2, 3]
-    cluster_b = [4, 5, 6, 7]
-    clusters = [cluster_a, cluster_b]
+    group_a = [0, 1, 2, 3]
+    group_b = [4, 5, 6, 7]
+    groups = [group_a, group_b]
 
     # --- include_current=True ---
     xformer = CommonRereferenceTransformer(
-        CommonRereferenceSettings(mode="mean", axis="ch", include_current=True, channel_clusters=clusters)
+        CommonRereferenceSettings(mode="mean", axis="ch", include_current=True, channel_groups=groups)
     )
     msg_out = xformer(msg_in)
 
-    # Expected: per-cluster CAR
+    # Expected: per-group CAR
     expected = np.zeros_like(in_dat)
-    for cluster in clusters:
-        cluster_data = in_dat[:, cluster]
-        ref = np.mean(cluster_data, axis=1, keepdims=True)
-        expected[:, cluster] = cluster_data - ref
+    for group in groups:
+        group_data = in_dat[:, group]
+        ref = np.mean(group_data, axis=1, keepdims=True)
+        expected[:, group] = group_data - ref
 
     assert np.allclose(msg_out.data, expected)
     assert not np.may_share_memory(msg_out.data, in_dat)
 
     # --- include_current=False ---
     xformer = CommonRereferenceTransformer(
-        CommonRereferenceSettings(mode="mean", axis="ch", include_current=False, channel_clusters=clusters)
+        CommonRereferenceSettings(mode="mean", axis="ch", include_current=False, channel_groups=groups)
     )
     msg_out = xformer(msg_in)
 
-    # Expected: per-cluster CAR excluding current channel (slow deliberate way)
+    # Expected: per-group CAR excluding current channel (slow deliberate way)
     expected = np.zeros_like(in_dat)
-    for cluster in clusters:
-        cluster_data = in_dat[:, cluster]
-        N = len(cluster)
-        for i, ch in enumerate(cluster):
+    for group in groups:
+        group_data = in_dat[:, group]
+        N = len(group)
+        for i, ch in enumerate(group):
             others = [j for j in range(N) if j != i]
-            ref = np.mean(cluster_data[:, others], axis=1)
-            expected[:, ch] = cluster_data[:, i] - ref
+            ref = np.mean(group_data[:, others], axis=1)
+            expected[:, ch] = group_data[:, i] - ref
 
     assert np.allclose(msg_out.data, expected)
 
 
-def _banked_ch_axis(banks: list[str]):
+def test_common_rereference_unequal_groups_leave_one_out():
+    """Groups of different sizes need a per-channel N/(N-1) gain, not a scalar."""
+    rng = np.random.default_rng(9)
+    in_dat = rng.standard_normal((100, 8))
+    groups = [[0, 1, 2], [3, 4, 5, 6, 7]]
+    xformer = CommonRereferenceTransformer(
+        CommonRereferenceSettings(mode="mean", axis="ch", include_current=False, channel_groups=groups)
+    )
+    msg_out = xformer(AxisArray(in_dat, dims=["time", "ch"]))
+
+    expected = np.zeros_like(in_dat)
+    for group in groups:
+        block = in_dat[:, group]
+        loo = (block.sum(axis=1, keepdims=True) - block) / (len(group) - 1)
+        expected[:, group] = block - loo
+    assert np.allclose(msg_out.data, expected)
+
+
+def test_common_rereference_ungrouped_channels_pass_through():
+    """Channels in no group are left alone, matching car_matrix, which leaves
+    them identity. (They used to be silently zeroed.)"""
+    rng = np.random.default_rng(4)
+    in_dat = rng.standard_normal((50, 6))
+    groups = [[0, 1], [2, 3]]
+    expected = in_dat.copy()
+    for group in groups:
+        expected[:, group] = in_dat[:, group] - in_dat[:, group].mean(axis=1, keepdims=True)
+
+    for mode in ("mean", "median"):
+        xformer = CommonRereferenceTransformer(CommonRereferenceSettings(mode=mode, axis="ch", channel_groups=groups))
+        msg_out = xformer(AxisArray(in_dat, dims=["time", "ch"]))
+        assert np.allclose(msg_out.data[:, 4:], in_dat[:, 4:])
+        if mode == "mean":
+            assert np.allclose(msg_out.data, expected)
+
+
+def test_common_rereference_median():
+    rng = np.random.default_rng(6)
+    in_dat = rng.standard_normal((80, 6))
+    msg_in = AxisArray(in_dat, dims=["time", "ch"])
+
+    xformer = CommonRereferenceTransformer(CommonRereferenceSettings(mode="median", axis="ch"))
+    assert np.allclose(xformer(msg_in).data, in_dat - np.median(in_dat, axis=1, keepdims=True))
+
+    groups = [[0, 2, 4], [1, 3, 5]]
+    xformer = CommonRereferenceTransformer(CommonRereferenceSettings(mode="median", axis="ch", channel_groups=groups))
+    expected = np.zeros_like(in_dat)
+    for group in groups:
+        block = in_dat[:, group]
+        expected[:, group] = block - np.median(block, axis=1, keepdims=True)
+    assert np.allclose(xformer(msg_in).data, expected)
+
+
+def test_common_rereference_non_last_axis():
+    """Channel-major (ch, time) chunks, as offline pipelines produce."""
+    rng = np.random.default_rng(8)
+    in_dat = rng.standard_normal((8, 200))
+    groups = [[0, 2, 4, 6], [1, 3, 5, 7]]
+    expected = np.zeros_like(in_dat)
+    for group in groups:
+        block = in_dat[group]
+        expected[group] = block - block.mean(axis=0, keepdims=True)
+
+    xformer = CommonRereferenceTransformer(CommonRereferenceSettings(mode="mean", axis="ch", channel_groups=groups))
+    msg_out = xformer(AxisArray(in_dat, dims=["ch", "time"]))
+    assert msg_out.data.shape == in_dat.shape
+    assert np.allclose(msg_out.data, expected)
+
+
+def _banked_ch_axis(banks: list[str], arrays: list[int] | None = None):
     """Structured ch CoordinateAxis like ezmsg-blackrock ChannelMap emits."""
-    dt = np.dtype([("label", "U16"), ("bank", "U1"), ("elec", "i4")])
+    dt = np.dtype([("label", "U16"), ("bank", "U1"), ("elec", "i4"), ("array", "i4")])
     ch = np.zeros(len(banks), dtype=dt)
     ch["bank"] = banks
     ch["elec"] = list(range(1, len(banks) + 1))
+    ch["array"] = arrays if arrays is not None else [0] * len(banks)
     ch["label"] = [f"ch{i}" for i in range(len(banks))]
     return AxisArray.CoordinateAxis(data=ch, dims=["ch"])
 
 
-def test_common_rereference_cluster_by_field():
-    """cluster_by_field='bank' derives per-bank clusters from a structured ch axis."""
+def test_common_rereference_group_by_field():
+    """channel_groups='bank' derives per-bank groups from a structured ch axis."""
     n_times = 300
     banks = ["A", "A", "A", "A", "B", "B", "B", "B"]
     rng = np.random.default_rng(42)
     in_dat = rng.standard_normal((n_times, len(banks)))
-    ch_ax = _banked_ch_axis(banks)
-    msg_in = AxisArray(in_dat, dims=["time", "ch"], axes={"ch": ch_ax})
+    msg_in = AxisArray(in_dat, dims=["time", "ch"], axes={"ch": _banked_ch_axis(banks)})
 
-    xformer = CommonRereferenceTransformer(CommonRereferenceSettings(mode="mean", axis="ch", cluster_by_field="bank"))
+    xformer = CommonRereferenceTransformer(CommonRereferenceSettings(mode="mean", axis="ch", channel_groups="bank"))
     msg_out = xformer(msg_in)
 
     # Expected: per-bank CAR (bank A = ch 0-3, bank B = ch 4-7)
     expected = np.zeros_like(in_dat)
-    for cluster in ([0, 1, 2, 3], [4, 5, 6, 7]):
-        cd = in_dat[:, cluster]
-        expected[:, cluster] = cd - np.mean(cd, axis=1, keepdims=True)
+    for group in ([0, 1, 2, 3], [4, 5, 6, 7]):
+        cd = in_dat[:, group]
+        expected[:, group] = cd - np.mean(cd, axis=1, keepdims=True)
     assert np.allclose(msg_out.data, expected)
 
 
-def test_common_rereference_cluster_by_field_fallback():
-    """cluster_by_field with no structured 'bank' field falls back to global CAR."""
+def test_common_rereference_group_by_multiple_fields():
+    """A bank label that repeats across arrays must not merge the two arrays."""
+    rng = np.random.default_rng(13)
+    banks = ["A", "A", "A", "A"]
+    arrays = [0, 0, 1, 1]
+    in_dat = rng.standard_normal((60, 4))
+    msg_in = AxisArray(in_dat, dims=["time", "ch"], axes={"ch": _banked_ch_axis(banks, arrays)})
+
+    xformer = CommonRereferenceTransformer(
+        CommonRereferenceSettings(mode="mean", axis="ch", channel_groups=["array", "bank"])
+    )
+    expected = np.zeros_like(in_dat)
+    for group in ([0, 1], [2, 3]):
+        cd = in_dat[:, group]
+        expected[:, group] = cd - np.mean(cd, axis=1, keepdims=True)
+    assert np.allclose(xformer(msg_in).data, expected)
+
+
+def test_common_rereference_group_by_field_fallback():
+    """A field spec with no such field falls back to global CAR."""
     n_times = 50
     n_chans = 8
     rng = np.random.default_rng(0)
@@ -215,31 +309,31 @@ def test_common_rereference_cluster_by_field_fallback():
     ch_ax = AxisArray.CoordinateAxis(data=np.array([str(i) for i in range(n_chans)]), dims=["ch"])
     msg_in = AxisArray(in_dat, dims=["time", "ch"], axes={"ch": ch_ax})
 
-    xformer = CommonRereferenceTransformer(CommonRereferenceSettings(mode="mean", axis="ch", cluster_by_field="bank"))
+    xformer = CommonRereferenceTransformer(CommonRereferenceSettings(mode="mean", axis="ch", channel_groups="bank"))
     msg_out = xformer(msg_in)
     assert np.allclose(msg_out.data, in_dat - in_dat.mean(axis=1, keepdims=True))
 
 
-def test_common_rereference_cluster_by_field_interleaved():
+def test_common_rereference_group_by_field_interleaved():
     """Per-bank CAR works when channels of a bank are non-contiguous."""
     n_times = 200
-    banks = ["A", "B", "A", "B", "A", "B"]  # interleaved -> non-contiguous clusters
+    banks = ["A", "B", "A", "B", "A", "B"]  # interleaved -> non-contiguous groups
     rng = np.random.default_rng(7)
     in_dat = rng.standard_normal((n_times, len(banks)))
     msg_in = AxisArray(in_dat, dims=["time", "ch"], axes={"ch": _banked_ch_axis(banks)})
 
-    xformer = CommonRereferenceTransformer(CommonRereferenceSettings(mode="mean", axis="ch", cluster_by_field="bank"))
+    xformer = CommonRereferenceTransformer(CommonRereferenceSettings(mode="mean", axis="ch", channel_groups="bank"))
     msg_out = xformer(msg_in)
 
     expected = np.zeros_like(in_dat)
-    for cluster in ([0, 2, 4], [1, 3, 5]):
-        cd = in_dat[:, cluster]
-        expected[:, cluster] = cd - np.mean(cd, axis=1, keepdims=True)
+    for group in ([0, 2, 4], [1, 3, 5]):
+        cd = in_dat[:, group]
+        expected[:, group] = cd - np.mean(cd, axis=1, keepdims=True)
     assert np.allclose(msg_out.data, expected)
 
 
-def test_common_rereference_cluster_by_field_exclude_current():
-    """cluster_by_field composes with include_current=False (per-bank, leave-one-out)."""
+def test_common_rereference_group_by_field_exclude_current():
+    """A field spec composes with include_current=False (per-bank, leave-one-out)."""
     n_times = 100
     banks = ["A", "A", "A", "B", "B", "B"]
     rng = np.random.default_rng(3)
@@ -247,21 +341,21 @@ def test_common_rereference_cluster_by_field_exclude_current():
     msg_in = AxisArray(in_dat, dims=["time", "ch"], axes={"ch": _banked_ch_axis(banks)})
 
     xformer = CommonRereferenceTransformer(
-        CommonRereferenceSettings(mode="mean", axis="ch", cluster_by_field="bank", include_current=False)
+        CommonRereferenceSettings(mode="mean", axis="ch", channel_groups="bank", include_current=False)
     )
     msg_out = xformer(msg_in)
 
     expected = np.zeros_like(in_dat)
-    for cluster in ([0, 1, 2], [3, 4, 5]):
-        cd = in_dat[:, cluster]
+    for group in ([0, 1, 2], [3, 4, 5]):
+        cd = in_dat[:, group]
         n = cd.shape[1]
         # leave-one-out mean within the bank: (sum - self) / (n - 1)
         loo_ref = (cd.sum(axis=1, keepdims=True) - cd) / (n - 1)
-        expected[:, cluster] = cd - loo_ref
+        expected[:, group] = cd - loo_ref
     assert np.allclose(msg_out.data, expected)
 
 
-def test_common_rereference_singleton_cluster_exclude_current():
+def test_common_rereference_singleton_group_exclude_current():
     """A lone channel in a derived bank + include_current=False must not divide by
     N-1 == 0. The singleton passes through unchanged; larger banks still do LOO."""
     n_times = 100
@@ -271,7 +365,7 @@ def test_common_rereference_singleton_cluster_exclude_current():
     msg_in = AxisArray(in_dat, dims=["time", "ch"], axes={"ch": _banked_ch_axis(banks)})
 
     xformer = CommonRereferenceTransformer(
-        CommonRereferenceSettings(mode="mean", axis="ch", cluster_by_field="bank", include_current=False)
+        CommonRereferenceSettings(mode="mean", axis="ch", channel_groups="bank", include_current=False)
     )
     msg_out = xformer(msg_in)  # must not raise ZeroDivisionError
 
@@ -285,6 +379,16 @@ def test_common_rereference_singleton_cluster_exclude_current():
     assert np.allclose(msg_out.data, expected)
 
 
+def test_common_rereference_all_singleton_groups_exclude_current():
+    """Every group a singleton -> nothing to reference against -> passthrough."""
+    rng = np.random.default_rng(15)
+    in_dat = rng.standard_normal((30, 3))
+    xformer = CommonRereferenceTransformer(
+        CommonRereferenceSettings(mode="mean", axis="ch", channel_groups=[[0], [1], [2]], include_current=False)
+    )
+    assert np.array_equal(xformer(AxisArray(in_dat, dims=["time", "ch"])).data, in_dat)
+
+
 def test_common_rereference_field_values_change_is_not_detected():
     """Intentional concession: a live bank remap at fixed key + channel count is
     NOT re-derived. _hash_message folds only an O(1) "field present" boolean, not
@@ -295,41 +399,46 @@ def test_common_rereference_field_values_change_is_not_detected():
     rng = np.random.default_rng(11)
     in_dat = rng.standard_normal((n_times, 4))
 
-    xformer = CommonRereferenceTransformer(CommonRereferenceSettings(mode="mean", axis="ch", cluster_by_field="bank"))
+    xformer = CommonRereferenceTransformer(CommonRereferenceSettings(mode="mean", axis="ch", channel_groups="bank"))
 
     # First layout: two banks of two.
     msg1 = AxisArray(in_dat, dims=["time", "ch"], axes={"ch": _banked_ch_axis(["A", "A", "B", "B"])}, key="dev")
     xformer(msg1)
-    assert [list(c) for c in xformer._state.clusters] == [[0, 1], [2, 3]]
+    assert [list(g) for g in xformer._state.groups] == [[0, 1], [2, 3]]
 
     # Same key and channel count, different bank assignment -> hash unchanged,
-    # so the cached clusters are (deliberately) NOT re-derived.
+    # so the cached groups are (deliberately) NOT re-derived.
     msg2 = AxisArray(in_dat, dims=["time", "ch"], axes={"ch": _banked_ch_axis(["A", "B", "A", "B"])}, key="dev")
     xformer(msg2)
-    assert [list(c) for c in xformer._state.clusters] == [[0, 1], [2, 3]]
+    assert [list(g) for g in xformer._state.groups] == [[0, 1], [2, 3]]
 
     # Escape hatch: a new key (as a real remap would carry) forces re-derivation.
     msg3 = AxisArray(in_dat, dims=["time", "ch"], axes={"ch": _banked_ch_axis(["A", "B", "A", "B"])}, key="dev2")
     xformer(msg3)
-    assert [list(c) for c in xformer._state.clusters] == [[0, 2], [1, 3]]
+    assert [list(g) for g in xformer._state.groups] == [[0, 2], [1, 3]]
 
 
-def test_common_rereference_explicit_clusters_beat_field():
-    """Explicit channel_clusters take precedence over cluster_by_field."""
+def test_common_rereference_explicit_groups_beat_field():
+    """One explicit all-channel group overrides what a field spec would derive."""
     n_times = 50
     banks = ["A", "A", "A", "A", "B", "B", "B", "B"]
     rng = np.random.default_rng(1)
     in_dat = rng.standard_normal((n_times, len(banks)))
     msg_in = AxisArray(in_dat, dims=["time", "ch"], axes={"ch": _banked_ch_axis(banks)})
 
-    # One explicit all-channel cluster should override the bank grouping -> global CAR.
     xformer = CommonRereferenceTransformer(
-        CommonRereferenceSettings(
-            mode="mean", axis="ch", channel_clusters=[list(range(len(banks)))], cluster_by_field="bank"
-        )
+        CommonRereferenceSettings(mode="mean", axis="ch", channel_groups=[list(range(len(banks)))])
     )
     msg_out = xformer(msg_in)
     assert np.allclose(msg_out.data, in_dat - in_dat.mean(axis=1, keepdims=True))
+
+
+def test_common_rereference_invalid_groups():
+    msg_in = AxisArray(np.zeros((10, 4)), dims=["time", "ch"])
+    with pytest.raises(ValueError, match="out-of-range"):
+        CommonRereferenceTransformer(CommonRereferenceSettings(axis="ch", channel_groups=[[0, 4]]))(msg_in)
+    with pytest.raises(ValueError, match="overlap"):
+        CommonRereferenceTransformer(CommonRereferenceSettings(axis="ch", channel_groups=[[0, 1], [1]]))(msg_in)
 
 
 def test_car_passthrough():
@@ -344,7 +453,11 @@ def test_car_passthrough():
     assert np.may_share_memory(msg_out.data, in_dat)
 
 
-# --- Block-diagonal optimization tests ---
+# --- Block-diagonal matmul tests ---
+#
+# Which kernel `auto` picks is a performance decision (issue #210) that depends
+# on channel count and chunk length, so correctness tests force `kernel="blocks"`
+# to pin the block path. Tests that assert a *choice* say so explicitly.
 
 
 def _make_block_diagonal_weights(block_sizes: list[int], rng=None) -> np.ndarray:
@@ -360,76 +473,17 @@ def _make_block_diagonal_weights(block_sizes: list[int], rng=None) -> np.ndarray
     return weights
 
 
-def test_find_block_diagonal_clusters():
-    """Test the cluster detection helper function directly."""
-    # Square block-diagonal
-    weights = _make_block_diagonal_weights([64, 64])
-    clusters = _find_block_diagonal_clusters(weights)
-    assert clusters is not None
-    assert len(clusters) == 2
-    in0, out0 = clusters[0]
-    in1, out1 = clusters[1]
-    assert np.array_equal(in0, np.arange(64))
-    assert np.array_equal(out0, np.arange(64))
-    assert np.array_equal(in1, np.arange(64, 128))
-    assert np.array_equal(out1, np.arange(64, 128))
-
-    # Non-square block-diagonal
-    weights_ns = np.zeros((128, 20))
-    weights_ns[:64, :10] = 1.0
-    weights_ns[64:, 10:] = 1.0
-    clusters_ns = _find_block_diagonal_clusters(weights_ns)
-    assert clusters_ns is not None
-    assert len(clusters_ns) == 2
-    assert np.array_equal(clusters_ns[0][0], np.arange(64))
-    assert np.array_equal(clusters_ns[0][1], np.arange(10))
-    assert np.array_equal(clusters_ns[1][0], np.arange(64, 128))
-    assert np.array_equal(clusters_ns[1][1], np.arange(10, 20))
-
-    # Dense matrix should not be detected as block-diagonal
-    rng = np.random.default_rng(0)
-    dense = rng.standard_normal((64, 64))
-    assert _find_block_diagonal_clusters(dense) is None
-
-    # 1x1 should return None
-    assert _find_block_diagonal_clusters(np.array([[1.0]])) is None
-
-
-def test_max_cross_cluster_weight():
-    """Test the cross-cluster weight magnitude checker."""
-    weights = _make_block_diagonal_weights([64, 64])
-    clusters = [(np.arange(64), np.arange(64)), (np.arange(64, 128), np.arange(64, 128))]
-    assert _max_cross_cluster_weight(weights, clusters) == 0.0
-
-    # Add a small cross-cluster weight
-    weights[0, 64] = 0.001
-    assert abs(_max_cross_cluster_weight(weights, clusters) - 0.001) < 1e-10
-
-
-def test_block_diagonal_auto_detect():
-    """Test that block-diagonal weight matrices are auto-detected and give correct results."""
-    n_times = 30
-    n_chans = 128
-    rng = np.random.default_rng(42)
-
-    weights = _make_block_diagonal_weights([64, 64], rng=rng)
-    in_dat = rng.standard_normal((n_times, n_chans))
-    msg_in = AxisArray(data=in_dat, dims=["time", "ch"])
-
-    expected = in_dat @ weights
-
-    xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch"))
-    msg_out = xformer(msg_in)
-
-    assert msg_out.data.shape == expected.shape
-    assert np.allclose(msg_out.data, expected)
-    # Verify cluster optimization was actually used
-    assert xformer._state.clusters is not None
+def _blocked(weights, msg, **kwargs):
+    """Run through the forced block kernel and assert it really was used."""
+    xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch", kernel="blocks", **kwargs))
+    out = xformer(msg)
+    assert xformer._state.blocks is not None and len(xformer._state.blocks) > 1
     assert xformer._state.weights is None
+    return out
 
 
-def test_block_diagonal_explicit_clusters():
-    """Test explicit channel_clusters setting."""
+def test_block_diagonal_matches_dense():
+    """The block kernel and the dense kernel agree, and `auto` agrees with both."""
     n_times = 30
     n_chans = 128
     rng = np.random.default_rng(42)
@@ -437,90 +491,118 @@ def test_block_diagonal_explicit_clusters():
     weights = _make_block_diagonal_weights([64, 64], rng=rng)
     in_dat = rng.standard_normal((n_times, n_chans))
     msg_in = AxisArray(data=in_dat, dims=["time", "ch"])
-
     expected = in_dat @ weights
 
-    xformer = AffineTransformTransformer(
-        AffineTransformSettings(
-            weights=weights,
-            axis="ch",
-            channel_clusters=[list(range(64)), list(range(64, 128))],
-        )
-    )
-    msg_out = xformer(msg_in)
+    assert np.allclose(_blocked(weights, msg_in).data, expected)
+    for kernel in ("auto", "dense"):
+        xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch", kernel=kernel))
+        assert np.allclose(xformer(msg_in).data, expected)
 
-    assert np.allclose(msg_out.data, expected)
-    assert xformer._state.clusters is not None
+
+def test_block_diagonal_selected_when_it_pays():
+    """`auto` routes wide block-diagonal weights into the block kernel and small
+    ones into a dense matmul (issue #210)."""
+    rng = np.random.default_rng(42)
+
+    wide = _make_block_diagonal_weights([64] * 16, rng=rng)
+    xformer = AffineTransformTransformer(AffineTransformSettings(weights=wide, axis="ch"))
+    xformer(AxisArray(rng.standard_normal((30, 1024)), dims=["time", "ch"]))
+    assert xformer._state.blocks is not None
+
+    narrow = _make_block_diagonal_weights([16] * 8, rng=rng)
+    xformer = AffineTransformTransformer(AffineTransformSettings(weights=narrow, axis="ch"))
+    xformer(AxisArray(rng.standard_normal((30, 128)), dims=["time", "ch"]))
+    assert xformer._state.blocks is None
+
+
+def test_block_diagonal_non_contiguous_blocks():
+    """Regression for issue #198.
+
+    W is genuinely block-diagonal over two *non-contiguous* channel groups. The
+    block structure is derived from W, so no caller-supplied grouping can make
+    the result disagree with a dense matmul -- which is exactly what used to
+    happen, silently, when a hint split a true block in two.
+    """
+    rng = np.random.default_rng(0)
+    n = 128
+    groups = [list(range(0, 32)) + list(range(96, 128)), list(range(32, 96))]
+    weights = np.zeros((n, n))
+    for group in groups:
+        weights[np.ix_(group, group)] = rng.standard_normal((len(group), len(group)))
+
+    in_dat = rng.standard_normal((10, n))
+    msg_in = AxisArray(in_dat, dims=["time", "ch"])
+    expected = in_dat @ weights
+
+    # A grouping that splits the true blocks (and one that duplicates them) can
+    # no longer be supplied for array weights, but every kernel must still agree.
+    for kernel in ("auto", "dense", "blocks"):
+        xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch", kernel=kernel))
+        assert np.allclose(xformer(msg_in).data, expected), kernel
+
+    # Forced blocks must reach it via a channel permutation.
+    xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch", kernel="blocks"))
+    xformer(msg_in)
+    assert len(xformer._state.blocks) == 2
+    assert xformer._state.in_perm is not None
+
+
+def test_block_diagonal_channel_groups_ignored_for_array_weights():
+    """A grouping argument cannot change the answer for explicit weights."""
+    rng = np.random.default_rng(3)
+    weights = _make_block_diagonal_weights([64] * 4, rng=rng)
+    in_dat = rng.standard_normal((30, 256))
+    msg_in = AxisArray(in_dat, dims=["time", "ch"])
+    expected = in_dat @ weights
+
+    for groups in (None, [list(range(0, 32)), list(range(32, 256))], [list(range(256))]):
+        xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch", channel_groups=groups))
+        assert np.allclose(xformer(msg_in).data, expected)
 
 
 def test_block_diagonal_unsorted_channels():
-    """Test with channels interleaved across clusters (not sorted by block)."""
+    """Test with channels interleaved across blocks (not sorted by block)."""
     n_times = 30
     n_chans = 128
     rng = np.random.default_rng(42)
 
-    # Create block-diagonal weights in sorted order
     sorted_weights = _make_block_diagonal_weights([64, 64], rng=rng)
-
-    # Permute channels to interleave clusters
     perm = np.arange(n_chans)
     rng.shuffle(perm)
-
-    # Permuted weights: W_perm[i,j] = W_sorted[perm[i], perm[j]]
     weights = sorted_weights[np.ix_(perm, perm)]
 
     in_dat = rng.standard_normal((n_times, n_chans))
     msg_in = AxisArray(data=in_dat, dims=["time", "ch"])
-
     expected = in_dat @ weights
 
-    xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch"))
-    msg_out = xformer(msg_in)
-
-    assert msg_out.data.shape == expected.shape
-    assert np.allclose(msg_out.data, expected)
-    assert xformer._state.clusters is not None
+    out = _blocked(weights, msg_in)
+    assert out.data.shape == expected.shape
+    assert np.allclose(out.data, expected)
 
 
-def test_block_diagonal_many_clusters():
-    """Test with many small clusters (8 clusters of 32 channels)."""
+def test_block_diagonal_many_blocks():
+    """Test with many small blocks (8 blocks of 32 channels)."""
     n_times = 30
-    n_clusters = 8
-    cluster_size = 32
-    n_chans = n_clusters * cluster_size
     rng = np.random.default_rng(42)
 
-    weights = _make_block_diagonal_weights([cluster_size] * n_clusters, rng=rng)
-    in_dat = rng.standard_normal((n_times, n_chans))
+    weights = _make_block_diagonal_weights([32] * 8, rng=rng)
+    in_dat = rng.standard_normal((n_times, 256))
     msg_in = AxisArray(data=in_dat, dims=["time", "ch"])
 
-    expected = in_dat @ weights
-
-    xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch"))
-    msg_out = xformer(msg_in)
-
-    assert np.allclose(msg_out.data, expected)
-    assert xformer._state.clusters is not None
+    assert np.allclose(_blocked(weights, msg_in).data, in_dat @ weights)
 
 
-def test_block_diagonal_unequal_cluster_sizes():
-    """Test with clusters of different sizes."""
+def test_block_diagonal_unequal_block_sizes():
+    """Test with blocks of different sizes."""
     n_times = 30
     block_sizes = [32, 64, 96]
     rng = np.random.default_rng(42)
 
     weights = _make_block_diagonal_weights(block_sizes, rng=rng)
-    n_chans = sum(block_sizes)
-    in_dat = rng.standard_normal((n_times, n_chans))
+    in_dat = rng.standard_normal((n_times, sum(block_sizes)))
     msg_in = AxisArray(data=in_dat, dims=["time", "ch"])
 
-    expected = in_dat @ weights
-
-    xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch"))
-    msg_out = xformer(msg_in)
-
-    assert np.allclose(msg_out.data, expected)
-    assert xformer._state.clusters is not None
+    assert np.allclose(_blocked(weights, msg_in).data, in_dat @ weights)
 
 
 def test_block_diagonal_not_triggered_for_dense():
@@ -532,61 +614,59 @@ def test_block_diagonal_not_triggered_for_dense():
     in_dat = rng.standard_normal((10, n_chans))
     msg_in = AxisArray(data=in_dat, dims=["time", "ch"])
 
-    expected = in_dat @ weights
-
-    xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch"))
-    msg_out = xformer(msg_in)
-
-    assert np.allclose(msg_out.data, expected)
-    # Should NOT use cluster optimization
-    assert xformer._state.clusters is None
-    assert xformer._state.weights is not None
+    for kernel in ("auto", "blocks"):
+        xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch", kernel=kernel))
+        msg_out = xformer(msg_in)
+        assert np.allclose(msg_out.data, in_dat @ weights)
+        # There is no structure to find, so even a forced request gets dense.
+        assert xformer._state.blocks is None
+        assert xformer._state.weights is not None
 
 
 def test_block_diagonal_non_last_axis():
     """Test block-diagonal with the target axis not being the last axis."""
     n_times = 30
-    n_chans = 128
     n_features = 5
     rng = np.random.default_rng(42)
 
     weights = _make_block_diagonal_weights([64, 64], rng=rng)
 
     # Data shape: (n_times, n_chans, n_features) -- ch is the middle axis
-    in_dat = rng.standard_normal((n_times, n_chans, n_features))
+    in_dat = rng.standard_normal((n_times, 128, n_features))
     msg_in = AxisArray(data=in_dat, dims=["time", "ch", "feat"])
 
     # Expected: move ch to last, matmul, move back
-    data_perm = np.transpose(in_dat, (0, 2, 1))  # (time, feat, ch)
-    expected_perm = data_perm @ weights  # (time, feat, ch)
-    expected = np.transpose(expected_perm, (0, 2, 1))  # (time, ch, feat)
+    data_perm = np.transpose(in_dat, (0, 2, 1))
+    expected = np.transpose(data_perm @ weights, (0, 2, 1))
 
-    xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch"))
-    msg_out = xformer(msg_in)
+    out = _blocked(weights, msg_in)
+    assert out.data.shape == expected.shape
+    assert np.allclose(out.data, expected)
 
-    assert msg_out.data.shape == expected.shape
-    assert np.allclose(msg_out.data, expected)
-    assert xformer._state.clusters is not None
+
+def test_block_diagonal_channel_major():
+    """(ch, time) chunks, as offline pipelines produce."""
+    rng = np.random.default_rng(42)
+    weights = _make_block_diagonal_weights([64, 64], rng=rng)
+    in_dat = rng.standard_normal((128, 200))
+    msg_in = AxisArray(data=in_dat, dims=["ch", "time"])
+
+    out = _blocked(weights, msg_in)
+    assert out.data.shape == in_dat.shape
+    assert np.allclose(out.data, (in_dat.T @ weights).T)
 
 
 def test_block_diagonal_right_multiply_false():
     """Test block-diagonal with right_multiply=False."""
     n_times = 30
-    n_chans = 128
     rng = np.random.default_rng(42)
 
-    # Weights will be transposed internally when right_multiply=False
     raw_weights = _make_block_diagonal_weights([64, 64], rng=rng)
-    in_dat = rng.standard_normal((n_times, n_chans))
+    in_dat = rng.standard_normal((n_times, 128))
     msg_in = AxisArray(data=in_dat, dims=["time", "ch"])
 
-    expected = in_dat @ raw_weights.T
-
-    xformer = AffineTransformTransformer(AffineTransformSettings(weights=raw_weights, axis="ch", right_multiply=False))
-    msg_out = xformer(msg_in)
-
-    assert np.allclose(msg_out.data, expected)
-    assert xformer._state.clusters is not None
+    out = _blocked(raw_weights, msg_in, right_multiply=False)
+    assert np.allclose(out.data, in_dat @ raw_weights.T)
 
 
 def test_block_diagonal_identity_preserves_data():
@@ -595,77 +675,34 @@ def test_block_diagonal_identity_preserves_data():
     n_chans = 128
     rng = np.random.default_rng(42)
 
-    # Identity matrix is block-diagonal (each channel is its own cluster)
-    weights = np.eye(n_chans)
     in_dat = rng.standard_normal((n_times, n_chans))
     msg_in = AxisArray(data=in_dat, dims=["time", "ch"])
 
-    xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch"))
-    msg_out = xformer(msg_in)
-
-    assert np.allclose(msg_out.data, in_dat)
-
-
-def test_block_diagonal_invalid_clusters():
-    """Test that out-of-range channel indices raise ValueError."""
-    n_chans = 64
-    weights = np.eye(n_chans)
-
-    with pytest.raises(ValueError, match="out-of-range indices"):
-        xformer = AffineTransformTransformer(
-            AffineTransformSettings(
-                weights=weights,
-                axis="ch",
-                channel_clusters=[[0, 1, 2], [64]],  # 64 is out of range for 64-channel matrix
-            )
-        )
-        msg_in = AxisArray(data=np.zeros((10, n_chans)), dims=["time", "ch"])
-        xformer(msg_in)
-
-    with pytest.raises(ValueError, match="out-of-range indices"):
-        xformer = AffineTransformTransformer(
-            AffineTransformSettings(
-                weights=weights,
-                axis="ch",
-                channel_clusters=[[-1, 0, 1]],
-            )
-        )
-        msg_in = AxisArray(data=np.zeros((10, n_chans)), dims=["time", "ch"])
-        xformer(msg_in)
+    for kernel in ("auto", "blocks"):
+        xformer = AffineTransformTransformer(AffineTransformSettings(weights=np.eye(n_chans), axis="ch", kernel=kernel))
+        assert np.allclose(xformer(msg_in).data, in_dat)
 
 
-def test_block_diagonal_omitted_zero_channels():
-    """Test that channels with all-zero weights can be omitted from channel_clusters."""
+def test_block_diagonal_all_zero_channels():
+    """Channels with all-zero weight rows and columns output zero, and the
+    surrounding block structure is still found."""
     n_times = 30
     n_chans = 6
     rng = np.random.default_rng(42)
 
-    # Channels 0,1 form cluster A; channels 4,5 form cluster B;
-    # channels 2,3 have all-zero rows and columns.
     weights = np.zeros((n_chans, n_chans))
     weights[:2, :2] = rng.standard_normal((2, 2))
     weights[4:, 4:] = rng.standard_normal((2, 2))
 
     in_dat = rng.standard_normal((n_times, n_chans))
     msg_in = AxisArray(data=in_dat, dims=["time", "ch"])
-
     expected = in_dat @ weights  # channels 2,3 output should be zero
 
-    xformer = AffineTransformTransformer(
-        AffineTransformSettings(
-            weights=weights,
-            axis="ch",
-            channel_clusters=[[0, 1], [4, 5]],  # channels 2,3 omitted
-            min_cluster_size=1,
-        )
-    )
-    msg_out = xformer(msg_in)
-
-    assert msg_out.data.shape == expected.shape
-    assert np.allclose(msg_out.data, expected)
-    # Verify omitted channels are indeed zero
-    assert np.all(msg_out.data[:, 2] == 0)
-    assert np.all(msg_out.data[:, 3] == 0)
+    out = _blocked(weights, msg_in)
+    assert out.data.shape == expected.shape
+    assert np.allclose(out.data, expected)
+    assert np.all(out.data[:, 2] == 0)
+    assert np.all(out.data[:, 3] == 0)
 
 
 def test_block_diagonal_streaming():
@@ -674,117 +711,34 @@ def test_block_diagonal_streaming():
     rng = np.random.default_rng(42)
 
     weights = _make_block_diagonal_weights([64, 64], rng=rng)
-
-    xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch"))
+    xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch", kernel="blocks"))
 
     for _ in range(5):
         in_dat = rng.standard_normal((30, n_chans))
         msg_in = AxisArray(data=in_dat, dims=["time", "ch"])
-        expected = in_dat @ weights
-        msg_out = xformer(msg_in)
-        assert np.allclose(msg_out.data, expected)
+        assert np.allclose(xformer(msg_in).data, in_dat @ weights)
 
 
-# --- Cluster merging tests ---
-
-
-def test_merge_small_clusters_unit():
-    """Test _merge_small_clusters helper directly."""
-    # All clusters already large enough — no change
-    clusters = [(np.arange(32), np.arange(32)), (np.arange(32, 64), np.arange(32, 64))]
-    result = _merge_small_clusters(clusters, min_size=32)
-    assert len(result) == 2
-
-    # Many tiny clusters get merged greedily
-    clusters = [(np.array([i]), np.array([i])) for i in range(64)]  # 64 clusters of size 1
-    result = _merge_small_clusters(clusters, min_size=32)
-    # 64 channels / 32 min_size = 2 merged groups
-    assert len(result) == 2
-    assert all(len(c[0]) == 32 for c in result)
-
-    # Mix of large and small
-    clusters = [
-        (np.arange(64), np.arange(64)),
-        (np.array([64]), np.array([64])),
-        (np.array([65]), np.array([65])),
-        (np.array([66]), np.array([66])),
-    ]
-    result = _merge_small_clusters(clusters, min_size=32)
-    # 1 large (64) + 1 merged remainder (3 channels, below threshold but grouped)
-    assert len(result) == 2
-    assert 64 in [len(c[0]) for c in result]
-    assert 3 in [len(c[0]) for c in result]
-
-    # min_size=1 disables merging
-    clusters = [(np.array([i]), np.array([i])) for i in range(10)]
-    result = _merge_small_clusters(clusters, min_size=1)
-    assert len(result) == 10
-
-
-def test_merge_small_clusters_correctness():
-    """Test that merging small clusters still produces correct matmul results."""
-    n_times = 30
-    rng = np.random.default_rng(42)
-
-    # 1 large cluster of 64 + 32 tiny clusters of 2 = 128 channels total
-    block_sizes = [64] + [2] * 32
-    weights = _make_block_diagonal_weights(block_sizes, rng=rng)
-    n_chans = sum(block_sizes)
-    in_dat = rng.standard_normal((n_times, n_chans))
+def test_set_weights_keeps_structure():
+    """An adaptive filter refreshing values under a fixed sparsity pattern
+    should not have to re-derive the blocking."""
+    rng = np.random.default_rng(17)
+    weights = _make_block_diagonal_weights([64, 64], rng=rng)
+    in_dat = rng.standard_normal((30, 128))
     msg_in = AxisArray(data=in_dat, dims=["time", "ch"])
 
-    expected = in_dat @ weights
+    xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch", kernel="blocks"))
+    xformer(msg_in)
+    n_blocks = len(xformer._state.blocks)
 
-    # With default min_cluster_size=32, the 32 tiny clusters should be merged
-    xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch"))
-    msg_out = xformer(msg_in)
+    updated = _make_block_diagonal_weights([64, 64], rng=rng)
+    xformer.set_weights(updated)
+    assert len(xformer._state.blocks) == n_blocks
+    assert np.allclose(xformer(msg_in).data, in_dat @ updated)
 
-    assert np.allclose(msg_out.data, expected)
-    assert xformer._state.clusters is not None
-    # Should have far fewer than 33 clusters after merging
-    assert len(xformer._state.clusters) <= 3
-
-
-def test_merge_collapses_to_dense():
-    """Test that if all clusters are tiny, merging collapses to 1 group → falls back to dense."""
-    n_times = 30
-    n_chans = 16
-    rng = np.random.default_rng(42)
-
-    # 16 clusters of 1 channel each (identity matrix)
-    weights = np.eye(n_chans)
-    in_dat = rng.standard_normal((n_times, n_chans))
-    msg_in = AxisArray(data=in_dat, dims=["time", "ch"])
-
-    # min_cluster_size=32 > 16 total channels, so everything merges into 1 group → dense fallback
-    xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch", min_cluster_size=32))
-    msg_out = xformer(msg_in)
-
-    assert np.allclose(msg_out.data, in_dat)
-    # Merged into 1 cluster → should fall back to dense (no cluster optimization)
-    assert xformer._state.clusters is None
-
-
-def test_min_cluster_size_1_disables_merging():
-    """Test that min_cluster_size=1 keeps all detected clusters separate."""
-    n_times = 30
-    rng = np.random.default_rng(42)
-
-    # 8 clusters of 4 channels each
-    block_sizes = [4] * 8
-    weights = _make_block_diagonal_weights(block_sizes, rng=rng)
-    n_chans = sum(block_sizes)
-    in_dat = rng.standard_normal((n_times, n_chans))
-    msg_in = AxisArray(data=in_dat, dims=["time", "ch"])
-
-    expected = in_dat @ weights
-
-    xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch", min_cluster_size=1))
-    msg_out = xformer(msg_in)
-
-    assert np.allclose(msg_out.data, expected)
-    assert xformer._state.clusters is not None
-    assert len(xformer._state.clusters) == 8
+    # Re-deriving from a now-dense matrix drops back to the dense kernel.
+    xformer.set_weights(rng.standard_normal((128, 128)), recalc_structure=True)
+    assert xformer._state.blocks is None
 
 
 # --- Non-square block-diagonal tests ---
@@ -806,61 +760,20 @@ def _make_block_diagonal_weights_nonsquare(block_shapes: list[tuple[int, int]], 
     return weights
 
 
-def test_nonsquare_auto_detect():
-    """Test auto-detection on a non-square block-diagonal matrix."""
+def test_nonsquare_blocks():
+    """Non-square block-diagonal matrix: 4 blocks of 64 input -> 10 output."""
     n_times = 30
     rng = np.random.default_rng(42)
 
-    # 4 blocks of 64 input → 10 output
-    block_shapes = [(64, 10)] * 4
-    weights = _make_block_diagonal_weights_nonsquare(block_shapes, rng=rng)
+    weights = _make_block_diagonal_weights_nonsquare([(64, 10)] * 4, rng=rng)
     assert weights.shape == (256, 40)
 
     in_dat = rng.standard_normal((n_times, 256))
     msg_in = AxisArray(data=in_dat, dims=["time", "ch"])
 
-    expected = in_dat @ weights
-
-    xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch", min_cluster_size=1))
-    msg_out = xformer(msg_in)
-
-    assert msg_out.data.shape == (n_times, 40)
-    assert np.allclose(msg_out.data, expected)
-    assert xformer._state.clusters is not None
-    assert len(xformer._state.clusters) == 4
-
-
-def test_nonsquare_explicit_clusters():
-    """Test explicit input-only channel_clusters for non-square matrices."""
-    n_times = 30
-    rng = np.random.default_rng(42)
-
-    block_shapes = [(64, 10)] * 4
-    weights = _make_block_diagonal_weights_nonsquare(block_shapes, rng=rng)
-
-    in_dat = rng.standard_normal((n_times, 256))
-    msg_in = AxisArray(data=in_dat, dims=["time", "ch"])
-
-    expected = in_dat @ weights
-
-    # Only specify input clusters; output indices derived from weight matrix
-    xformer = AffineTransformTransformer(
-        AffineTransformSettings(
-            weights=weights,
-            axis="ch",
-            channel_clusters=[
-                list(range(0, 64)),
-                list(range(64, 128)),
-                list(range(128, 192)),
-                list(range(192, 256)),
-            ],
-            min_cluster_size=1,
-        )
-    )
-    msg_out = xformer(msg_in)
-
-    assert msg_out.data.shape == (n_times, 40)
-    assert np.allclose(msg_out.data, expected)
+    out = _blocked(weights, msg_in)
+    assert out.data.shape == (n_times, 40)
+    assert np.allclose(out.data, in_dat @ weights)
 
 
 def test_nonsquare_unequal_blocks():
@@ -868,21 +781,15 @@ def test_nonsquare_unequal_blocks():
     n_times = 30
     rng = np.random.default_rng(42)
 
-    block_shapes = [(64, 10), (96, 20), (32, 5)]
-    weights = _make_block_diagonal_weights_nonsquare(block_shapes, rng=rng)
+    weights = _make_block_diagonal_weights_nonsquare([(64, 10), (96, 20), (32, 5)], rng=rng)
     assert weights.shape == (192, 35)
 
     in_dat = rng.standard_normal((n_times, 192))
     msg_in = AxisArray(data=in_dat, dims=["time", "ch"])
 
-    expected = in_dat @ weights
-
-    xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch", min_cluster_size=1))
-    msg_out = xformer(msg_in)
-
-    assert msg_out.data.shape == (n_times, 35)
-    assert np.allclose(msg_out.data, expected)
-    assert xformer._state.clusters is not None
+    out = _blocked(weights, msg_in)
+    assert out.data.shape == (n_times, 35)
+    assert np.allclose(out.data, in_dat @ weights)
 
 
 def test_nonsquare_shuffled():
@@ -890,30 +797,19 @@ def test_nonsquare_shuffled():
     n_times = 30
     rng = np.random.default_rng(42)
 
-    # Sorted block-diagonal
-    block_shapes = [(64, 10)] * 2
-    sorted_weights = _make_block_diagonal_weights_nonsquare(block_shapes, rng=rng)
-
-    # Shuffle input channels
+    sorted_weights = _make_block_diagonal_weights_nonsquare([(64, 10)] * 2, rng=rng)
     in_perm = np.arange(128)
     rng.shuffle(in_perm)
-    # Shuffle output channels
     out_perm = np.arange(20)
     rng.shuffle(out_perm)
-
     weights = sorted_weights[np.ix_(in_perm, out_perm)]
 
     in_dat = rng.standard_normal((n_times, 128))
     msg_in = AxisArray(data=in_dat, dims=["time", "ch"])
 
-    expected = in_dat @ weights
-
-    xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch", min_cluster_size=1))
-    msg_out = xformer(msg_in)
-
-    assert msg_out.data.shape == (n_times, 20)
-    assert np.allclose(msg_out.data, expected)
-    assert xformer._state.clusters is not None
+    out = _blocked(weights, msg_in)
+    assert out.data.shape == (n_times, 20)
+    assert np.allclose(out.data, in_dat @ weights)
 
 
 def test_nonsquare_non_last_axis():
@@ -922,23 +818,33 @@ def test_nonsquare_non_last_axis():
     n_features = 5
     rng = np.random.default_rng(42)
 
-    block_shapes = [(64, 10)] * 2
-    weights = _make_block_diagonal_weights_nonsquare(block_shapes, rng=rng)
+    weights = _make_block_diagonal_weights_nonsquare([(64, 10)] * 2, rng=rng)
 
-    # Data shape: (n_times, n_in, n_features) — ch is the middle axis
     in_dat = rng.standard_normal((n_times, 128, n_features))
     msg_in = AxisArray(data=in_dat, dims=["time", "ch", "feat"])
 
-    # Expected: move ch to last, matmul, move back
-    data_perm = np.transpose(in_dat, (0, 2, 1))  # (time, feat, 128)
-    expected_perm = data_perm @ weights  # (time, feat, 20)
-    expected = np.transpose(expected_perm, (0, 2, 1))  # (time, 20, feat)
+    data_perm = np.transpose(in_dat, (0, 2, 1))
+    expected = np.transpose(data_perm @ weights, (0, 2, 1))
 
-    xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch", min_cluster_size=1))
-    msg_out = xformer(msg_in)
+    out = _blocked(weights, msg_in)
+    assert out.data.shape == expected.shape
+    assert np.allclose(out.data, expected)
 
-    assert msg_out.data.shape == expected.shape
-    assert np.allclose(msg_out.data, expected)
+
+def test_offset_row_weights_use_dense():
+    """[A|B] weights augment the input with a ones column, which the block
+    kernel does not implement -- it must not be selected."""
+    rng = np.random.default_rng(21)
+    n_chans = 8
+    weights = np.vstack([np.eye(n_chans), rng.standard_normal(n_chans)])
+    in_dat = rng.standard_normal((10, n_chans))
+    msg_in = AxisArray(data=in_dat, dims=["time", "ch"])
+
+    for kernel in ("auto", "blocks"):
+        xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch", kernel=kernel))
+        msg_out = xformer(msg_in)
+        assert xformer._state.blocks is None
+        assert np.allclose(msg_out.data, in_dat @ weights[:-1] + weights[-1])
 
 
 # --- Callable weights tests ---
@@ -967,6 +873,26 @@ def test_affine_callable_weights():
 
     assert msg_out.data.shape == (n_times, n_out)
     assert np.allclose(msg_out.data, expected)
+
+
+def test_affine_callable_weights_receives_groups():
+    """A two-argument factory is handed the resolved channel groups, so it can
+    build weights from metadata it could not otherwise see."""
+    banks = ["A", "A", "B", "B"]
+    seen = {}
+
+    def weight_factory(n_in: int, groups) -> np.ndarray:
+        seen["n_in"] = n_in
+        seen["groups"] = groups
+        return np.eye(n_in)
+
+    msg_in = AxisArray(data=np.ones((5, 4)), dims=["time", "ch"], axes={"ch": _banked_ch_axis(banks)})
+    xformer = AffineTransformTransformer(
+        AffineTransformSettings(weights=weight_factory, axis="ch", channel_groups="bank")
+    )
+    xformer(msg_in)
+    assert seen["n_in"] == 4
+    assert seen["groups"] == [[0, 1], [2, 3]]
 
 
 def test_affine_callable_weights_dimension_change():
@@ -1031,9 +957,17 @@ def test_affine_callable_with_right_multiply_false():
     assert np.allclose(msg_out.data, expected)
 
 
-def test_affine_empty_square():
-    from ezmsg.sigproc.affinetransform import AffineTransformSettings, AffineTransformTransformer
+def test_affine_kind_weights_invalid_groups():
+    """Groups that build the matrix are still validated."""
+    msg_in = AxisArray(data=np.zeros((10, 4)), dims=["time", "ch"])
+    xformer = AffineTransformTransformer(
+        AffineTransformSettings(weights="car", axis="ch", channel_groups=[[0, 1], [4]])
+    )
+    with pytest.raises(ValueError, match="out-of-range"):
+        xformer(msg_in)
 
+
+def test_affine_empty_square():
     weights = np.eye(N_CH)
     proc = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch"))
     normal = make_msg()
@@ -1045,8 +979,6 @@ def test_affine_empty_square():
 
 
 def test_affine_empty_nonsquare():
-    from ezmsg.sigproc.affinetransform import AffineTransformSettings, AffineTransformTransformer
-
     weights = np.random.randn(N_CH, 2)
     proc = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch"))
     normal = make_msg()
@@ -1057,8 +989,6 @@ def test_affine_empty_nonsquare():
 
 
 def test_affine_empty_passthrough():
-    from ezmsg.sigproc.affinetransform import AffineTransformSettings, AffineTransformTransformer
-
     proc = AffineTransformTransformer(AffineTransformSettings(weights="passthrough", axis="ch"))
     empty = make_empty_msg()
     result = proc(empty)
@@ -1066,8 +996,6 @@ def test_affine_empty_passthrough():
 
 
 def test_affine_empty_first():
-    from ezmsg.sigproc.affinetransform import AffineTransformSettings, AffineTransformTransformer
-
     weights = np.eye(N_CH)
     proc = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch"))
     empty = make_empty_msg()
@@ -1077,9 +1005,18 @@ def test_affine_empty_first():
     check_state_not_corrupted(proc, normal)
 
 
-def test_common_rereference_empty_mean():
-    from ezmsg.sigproc.affinetransform import CommonRereferenceSettings, CommonRereferenceTransformer
+def test_affine_empty_blocks():
+    """An empty chunk through the block kernel returns a correctly shaped empty."""
+    weights = _make_block_diagonal_weights([N_CH // 2, N_CH - N_CH // 2])
+    proc = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch", kernel="blocks"))
+    normal = make_msg()
+    _ = proc(normal)
+    assert proc._state.blocks is not None
+    check_empty_result(proc(make_empty_msg()))
+    check_state_not_corrupted(proc, normal)
 
+
+def test_common_rereference_empty_mean():
     proc = CommonRereferenceTransformer(CommonRereferenceSettings(mode="mean", axis="ch"))
     normal = make_msg()
     empty = make_empty_msg()
@@ -1089,9 +1026,15 @@ def test_common_rereference_empty_mean():
     check_state_not_corrupted(proc, normal)
 
 
-def test_common_rereference_empty_passthrough():
-    from ezmsg.sigproc.affinetransform import CommonRereferenceSettings, CommonRereferenceTransformer
+def test_common_rereference_empty_grouped():
+    proc = CommonRereferenceTransformer(CommonRereferenceSettings(mode="mean", axis="ch", channel_groups=[[0, 2]]))
+    normal = make_msg()
+    _ = proc(normal)
+    check_empty_result(proc(make_empty_msg()))
+    check_state_not_corrupted(proc, normal)
 
+
+def test_common_rereference_empty_passthrough():
     proc = CommonRereferenceTransformer(CommonRereferenceSettings(mode="passthrough", axis="ch"))
     empty = make_empty_msg()
     result = proc(empty)
@@ -1099,8 +1042,6 @@ def test_common_rereference_empty_passthrough():
 
 
 def test_common_rereference_empty_first():
-    from ezmsg.sigproc.affinetransform import CommonRereferenceSettings, CommonRereferenceTransformer
-
     proc = CommonRereferenceTransformer(CommonRereferenceSettings(mode="mean", axis="ch"))
     empty = make_empty_msg()
     normal = make_msg()
@@ -1109,11 +1050,78 @@ def test_common_rereference_empty_first():
     check_state_not_corrupted(proc, normal)
 
 
+class _NDArraySubclass(np.ndarray):
+    """Stand-in for message data that is not a plain ndarray.
+
+    `np.asarray` on a subclass returns a *distinct* base-class object that still
+    shares the buffer, so any "did asarray copy?" identity check silently fails
+    here -- which is exactly the case an input-mutation bug would hide in.
+    """
+
+
+def _no_mutation_cases():
+    """(label, factory, data, dims) for every kernel that could write in place."""
+    rng = np.random.default_rng(0)
+    block_weights = _make_block_diagonal_weights([64, 64], rng=rng)
+
+    scattered = np.zeros((128, 128))
+    for group in ([*range(0, 32), *range(96, 128)], list(range(32, 96))):
+        scattered[np.ix_(group, group)] = rng.standard_normal((len(group), len(group)))
+
+    def affine(weights, kernel):
+        return lambda: AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch", kernel=kernel))
+
+    def car(**kwargs):
+        return lambda: CommonRereferenceTransformer(CommonRereferenceSettings(axis="ch", **kwargs))
+
+    wide = rng.standard_normal((30, 128))
+    narrow = rng.standard_normal((50, 8))
+    groups = [[0, 1, 2, 3], [4, 5, 6, 7]]
+    return [
+        ("affine blocks", affine(block_weights, "blocks"), wide, ["time", "ch"]),
+        ("affine dense", affine(block_weights, "dense"), wide, ["time", "ch"]),
+        ("affine blocks channel-major", affine(block_weights, "blocks"), wide.T.copy(), ["ch", "time"]),
+        ("affine blocks permuted", affine(scattered, "blocks"), wide, ["time", "ch"]),
+        ("car mean global", car(mode="mean"), narrow, ["time", "ch"]),
+        ("car mean grouped", car(mode="mean", channel_groups=groups), narrow, ["time", "ch"]),
+        (
+            "car mean grouped loo",
+            car(mode="mean", channel_groups=groups, include_current=False),
+            narrow,
+            ["time", "ch"],
+        ),
+        ("car median global", car(mode="median"), narrow, ["time", "ch"]),
+        ("car median grouped", car(mode="median", channel_groups=groups), narrow, ["time", "ch"]),
+        ("car median partial", car(mode="median", channel_groups=[[0, 1]]), narrow, ["time", "ch"]),
+        ("car median float32", car(mode="median", channel_groups=groups), narrow.astype(np.float32), ["time", "ch"]),
+    ]
+
+
+@pytest.mark.parametrize("label,factory,data,dims", _no_mutation_cases(), ids=lambda v: v if isinstance(v, str) else "")
+@pytest.mark.parametrize("subclass", [False, True], ids=["ndarray", "subclass"])
+def test_does_not_mutate_input(label, factory, data, dims, subclass):
+    """Message data may be a view shared with other branches of the graph, so no
+    processor may write into it -- not even the paths that fill a buffer in place.
+
+    A read-only array turns any in-place write into a ValueError instead of a
+    silent corruption two nodes downstream.
+    """
+    data = np.ascontiguousarray(data)
+    before = data.copy()
+    if subclass:
+        data = data.view(_NDArraySubclass)
+    data.setflags(write=False)
+
+    out = factory()(AxisArray(data, dims=dims))
+
+    assert np.array_equal(np.asarray(data), before)
+    assert not np.may_share_memory(out.data, data)
+
+
 @requires_mlx
-def test_affine_empty_block_diagonal_mlx():
-    """MLX scatter (indexed assignment) rejects zero-size updates; an empty
-    message through the block-diagonal path must short-circuit the cluster
-    writes and return a correctly shaped empty result."""
+def test_affine_block_diagonal_mlx():
+    """MLX has no ``matmul(out=)``, so the block kernel concatenates instead of
+    filling in place; an empty message must survive both paths."""
     import mlx.core as mx
 
     rng = np.random.default_rng(42)
@@ -1128,14 +1136,15 @@ def test_affine_empty_block_diagonal_mlx():
                 "time": AxisArray.TimeAxis(fs=100.0),
                 "ch": AxisArray.CoordinateAxis(data=np.arange(n_ch).astype(str), dims=["ch"]),
             },
-            key="test_affine_empty_block_diagonal_mlx",
+            key="test_affine_block_diagonal_mlx",
         )
 
-    proc = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch"))
+    proc = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch", kernel="blocks"))
 
     # Empty startup message arrives first; state initializes from it.
     empty_result = proc(_mlx_msg(0))
-    assert proc._state.clusters is not None and len(proc._state.clusters) == 2
+    assert proc._state.blocks is not None and len(proc._state.blocks) == 2
+    assert not proc._state.fill_in_place
     assert isinstance(empty_result.data, mx.array)
     assert empty_result.data.shape == (0, n_ch)
     assert empty_result.data.dtype == mx.float32
@@ -1152,3 +1161,27 @@ def test_affine_empty_block_diagonal_mlx():
 
     # And another empty message after real data also passes through.
     check_empty_result(proc(_mlx_msg(0)))
+
+
+@requires_mlx
+def test_common_rereference_mlx():
+    import mlx.core as mx
+
+    rng = np.random.default_rng(3)
+    in_dat = rng.standard_normal((20, 8)).astype(np.float32)
+    msg = AxisArray(mx.array(in_dat), dims=["time", "ch"], key="mlx_car")
+
+    proc = CommonRereferenceTransformer(CommonRereferenceSettings(mode="mean", axis="ch"))
+    out = proc(msg)
+    assert isinstance(out.data, mx.array)
+    assert np.allclose(np.asarray(out.data), in_dat - in_dat.mean(axis=1, keepdims=True), atol=1e-5)
+
+    groups = [[0, 2, 4, 6], [1, 3, 5, 7]]
+    expected = np.zeros_like(in_dat)
+    for group in groups:
+        block = in_dat[:, group]
+        expected[:, group] = block - block.mean(axis=1, keepdims=True)
+    proc = CommonRereferenceTransformer(CommonRereferenceSettings(mode="mean", axis="ch", channel_groups=groups))
+    out = proc(msg)
+    assert isinstance(out.data, mx.array)
+    assert np.allclose(np.asarray(out.data), expected, atol=1e-5)

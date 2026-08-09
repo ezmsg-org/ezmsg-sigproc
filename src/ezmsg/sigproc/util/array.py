@@ -75,14 +75,12 @@ def xp_create(fn, *args, dtype=None, device=None, **extra):
     return fn(*args, **kwargs)
 
 
-def xp_empty(xp, shape, *, dtype=None):
+def xp_empty(xp, shape, *, dtype=None, device=None):
     """Portable ``xp.empty`` with a ``zeros`` fallback for backends (e.g. MLX)
     that don't expose ``empty``. MLX is lazy so the extra zero init is near-free;
     on eager backends ``empty`` is preferred when available."""
     fn = getattr(xp, "empty", None) or xp.zeros
-    if dtype is not None:
-        return fn(shape, dtype=dtype)
-    return fn(shape)
+    return xp_create(fn, shape, dtype=dtype, device=device)
 
 
 def xp_flip(arr, axis):

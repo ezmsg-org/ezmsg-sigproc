@@ -6,8 +6,17 @@ use :obj:`AffineTransformTransformer` or the `AffineTransform` unit.
 For simple per-channel scaling and offset (diagonal weights only), use
 :obj:`LinearTransformTransformer` from :mod:`ezmsg.sigproc.linear` instead,
 which is more efficient as it avoids matrix multiplication.
+
+Both transformers here take a :data:`~ezmsg.sigproc.util.channels.ChannelGroupSpec`
+as ``channel_groups``: explicit index groups, or the name of a channel-metadata
+field (``"bank"``, ``"array"``, ...) to group by. For :obj:`CommonRereference`
+the groups say which channels share a reference. For :obj:`AffineTransform` they
+only shape the *construction* of deterministic weights — the block structure the
+matmul exploits is always read off the weight matrix itself.
 """
 
+import inspect
+import math
 import os
 from collections.abc import Callable
 from pathlib import Path
@@ -24,120 +33,51 @@ from ezmsg.baseproc import (
 from ezmsg.util.messages.axisarray import AxisArray, AxisBase
 from ezmsg.util.messages.util import replace
 
-from ezmsg.sigproc.util.array import array_device, is_float_dtype, xp_asarray, xp_create
-from ezmsg.sigproc.util.channels import channel_clusters_from_field, validate_channel_clusters
+from ezmsg.sigproc.util.array import array_device, is_float_dtype, xp_asarray, xp_copy, xp_create, xp_empty
+from ezmsg.sigproc.util.blockdiag import plan_block_matmul
+from ezmsg.sigproc.util.channels import ChannelGroupSpec, group_spec_fingerprint, resolve_channel_groups
 from ezmsg.sigproc.util.rereference import RereferenceKind, rereference_matrix
 
+KERNELS = ("auto", "dense", "blocks")
+"""Valid values for :attr:`AffineTransformSettings.kernel`."""
 
-def _find_block_diagonal_clusters(weights: np.ndarray) -> list[tuple[np.ndarray, np.ndarray]] | None:
-    """Detect block-diagonal structure in a weight matrix.
 
-    Finds connected components in the bipartite graph of non-zero weights,
-    where input channels and output channels are separate node sets.
+def _is_dispatched(xp) -> bool:
+    """True for backends whose per-op overhead is well above numpy's."""
+    return "numpy" not in xp.__name__
 
-    Args:
-        weights: 2-D weight matrix of shape (n_in, n_out).
 
-    Returns:
-        List of (input_indices, output_indices) tuples, one per block, or
-        None if the matrix is not block-diagonal (single connected component).
+def _supports_matmul_out(xp, dtype, device) -> bool:
+    """Whether ``xp.matmul(..., out=view)`` works, so blocks can fill in place.
+
+    numpy, cupy and torch accept ``out=``; MLX does not. Probed once per state
+    reset rather than sniffed from the namespace name, since which backends
+    support it is a moving target.
     """
-    if weights.ndim != 2:
-        return None
-
-    n_in, n_out = weights.shape
-    if n_in + n_out <= 2:
-        return None
-
-    from scipy.sparse import coo_matrix
-    from scipy.sparse.csgraph import connected_components
-
-    rows, cols = np.nonzero(weights)
-    if len(rows) == 0:
-        return None
-
-    # Bipartite graph: input nodes [0, n_in), output nodes [n_in, n_in + n_out)
-    shifted_cols = cols + n_in
-    adj_rows = np.concatenate([rows, shifted_cols])
-    adj_cols = np.concatenate([shifted_cols, rows])
-    adj_data = np.ones(len(adj_rows), dtype=bool)
-    n_nodes = n_in + n_out
-    adj = coo_matrix((adj_data, (adj_rows, adj_cols)), shape=(n_nodes, n_nodes))
-
-    n_components, labels = connected_components(adj, directed=False)
-
-    if n_components <= 1:
-        return None
-
-    clusters = []
-    for comp in range(n_components):
-        members = np.where(labels == comp)[0]
-        in_idx = np.sort(members[members < n_in])
-        out_idx = np.sort(members[members >= n_in] - n_in)
-        if len(in_idx) > 0 and len(out_idx) > 0:
-            clusters.append((in_idx, out_idx))
-
-    return clusters if len(clusters) > 1 else None
+    try:
+        a = xp_create(xp.zeros, (1, 1), dtype=dtype, device=device)
+        b = xp_create(xp.zeros, (1, 1), dtype=dtype, device=device)
+        xp.matmul(a, a, out=b)
+    except Exception:
+        return False
+    return True
 
 
-def _max_cross_cluster_weight(weights: np.ndarray, clusters: list[tuple[np.ndarray, np.ndarray]]) -> float:
-    """Return the maximum absolute weight between different clusters."""
-    mask = np.zeros(weights.shape, dtype=bool)
-    for in_idx, out_idx in clusters:
-        mask[np.ix_(in_idx, out_idx)] = True
-    cross = np.abs(weights[~mask])
-    return float(cross.max()) if cross.size > 0 else 0.0
+def _call_weight_factory(factory: Callable, n_in: int, groups: list[list[int]] | None):
+    """Call a user weights factory as ``f(n_in)`` or ``f(n_in, groups)``.
 
-
-def _merge_small_clusters(
-    clusters: list[tuple[np.ndarray, np.ndarray]], min_size: int
-) -> list[tuple[np.ndarray, np.ndarray]]:
-    """Merge clusters smaller than *min_size* into combined groups.
-
-    Small clusters are greedily concatenated until each merged group has
-    at least *min_size* channels (measured as ``max(n_in, n_out)``).
-    Any leftover small clusters that don't reach the threshold are
-    combined into a final group.
-
-    The merged group's sub-weight-matrix will contain the original small
-    diagonal blocks with zeros between them — a dense matmul on that
-    sub-matrix is cheaper than iterating over many tiny matmuls.
+    The two-argument form lets a factory build weights from channel metadata
+    (which it cannot see otherwise) without every caller having to accept it.
     """
-    if min_size <= 1:
-        return clusters
-
-    large = []
-    small = []
-    for cluster in clusters:
-        in_idx, out_idx = cluster
-        if max(len(in_idx), len(out_idx)) >= min_size:
-            large.append(cluster)
-        else:
-            small.append(cluster)
-
-    if not small:
-        return clusters
-
-    current_in: list[np.ndarray] = []
-    current_out: list[np.ndarray] = []
-    current_in_size = 0
-    current_out_size = 0
-    for in_idx, out_idx in small:
-        current_in.append(in_idx)
-        current_out.append(out_idx)
-        current_in_size += len(in_idx)
-        current_out_size += len(out_idx)
-        if max(current_in_size, current_out_size) >= min_size:
-            large.append((np.sort(np.concatenate(current_in)), np.sort(np.concatenate(current_out))))
-            current_in = []
-            current_out = []
-            current_in_size = 0
-            current_out_size = 0
-
-    if current_in:
-        large.append((np.sort(np.concatenate(current_in)), np.sort(np.concatenate(current_out))))
-
-    return large
+    try:
+        params = inspect.signature(factory).parameters.values()
+        positional = sum(1 for p in params if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD))
+        variadic = any(p.kind is p.VAR_POSITIONAL for p in params)
+    except (TypeError, ValueError):  # builtins and C callables have no signature
+        positional, variadic = 1, False
+    if positional >= 2 or variadic:
+        return factory(n_in, groups)
+    return factory(n_in)
 
 
 class AffineTransformSettings(ez.Settings):
@@ -149,8 +89,8 @@ class AffineTransformSettings(ez.Settings):
     """An array of weights; a path to a file with weights compatible with np.loadtxt;
     a :class:`~ezmsg.sigproc.util.rereference.RereferenceKind` or its string value
     (e.g. ``"car"``) to build a deterministic rereference matrix over
-    ``channel_clusters``; or a callable that accepts ``n_in: int`` and returns an
-    ndarray of shape ``(n_in, n_out)``.
+    ``channel_groups``; or a callable accepting ``n_in: int`` (optionally also the
+    resolved ``groups``) and returning an ndarray of shape ``(n_in, n_out)``.
 
     Note: if you simply want streaming CAR, :obj:`CommonRereference` in this module
     is usually the better choice (per-sample mean subtraction instead of a matmul,
@@ -158,8 +98,8 @@ class AffineTransformSettings(ez.Settings):
     available deterministic transforms and for workflows that start from such a
     matrix and later replace it externally via
     :meth:`AffineTransformTransformer.set_weights`. For variants (leave-one-out,
-    minimum cluster size) pass a callable, e.g.
-    ``lambda n: car_matrix(n, clusters=..., include_current=False)``."""
+    minimum group size) pass a callable, e.g.
+    ``lambda n, groups: car_matrix(n, groups=groups, include_current=False)``."""
 
     axis: str | None = None
     """The name of the axis to apply the transformation to. Defaults to the leading (0th) axis in the array."""
@@ -167,32 +107,52 @@ class AffineTransformSettings(ez.Settings):
     right_multiply: bool = True
     """Set False to transpose the weights before applying."""
 
-    channel_clusters: list[list[int]] | None = None
-    """Optional explicit input channel cluster specification for block-diagonal optimization.
+    channel_groups: ChannelGroupSpec | None = None
+    """How to group input channels when *building* the weight matrix.
 
-    Each element is a list of input channel indices forming one cluster. The
-    corresponding output indices are derived automatically from the non-zero
-    columns of the weight matrix for those input rows.
+    Applies only when ``weights`` is a
+    :class:`~ezmsg.sigproc.util.rereference.RereferenceKind` or a callable —
+    e.g. ``weights="car", channel_groups="bank"`` builds a per-bank common
+    average reference from the channel axis metadata. See
+    :data:`~ezmsg.sigproc.util.channels.ChannelGroupSpec` for the accepted forms.
 
-    When provided, the weight matrix is decomposed into per-cluster sub-matrices
-    and multiplied separately, which is faster when cross-cluster weights are zero.
+    It has **no effect** when ``weights`` is an explicit array or file: the block
+    structure exploited by the matmul is always derived from the weight matrix
+    itself, so a grouping that disagreed with the weights could never change the
+    result (ezmsg-org/ezmsg-sigproc#198)."""
 
-    If None, block-diagonal structure is auto-detected from the zero pattern
-    of the weights."""
-
-    min_cluster_size: int = 32
-    """Minimum number of channels per cluster for the block-diagonal optimization.
-    Clusters smaller than this are greedily merged together to avoid excessive
-    Python loop overhead. Set to 1 to disable merging."""
+    kernel: str = "auto"
+    """Matmul kernel: ``"auto"`` (default) picks between a dense matmul and a
+    block-diagonal one from the structure of the weights and the message size;
+    ``"dense"`` and ``"blocks"`` force the choice. See
+    :mod:`ezmsg.sigproc.util.blockdiag` for the cost model behind ``"auto"``."""
 
 
 @processor_state
 class AffineTransformState:
     weights: npt.NDArray | None = None
+    """Full weight matrix for the dense kernel; None when blocks are in use."""
+    blocks: list | None = None
+    """list of (in_slice, out_slice, sub_weights) for the block-diagonal kernel."""
+    in_perm: npt.NDArray | None = None
+    """Channel gather that makes the blocks contiguous, or None if they already are."""
+    out_perm: npt.NDArray | None = None
+    """Output-channel counterpart of ``in_perm``, used to slice the weights."""
+    out_inv_perm: npt.NDArray | None = None
+    """Gather that undoes ``out_perm`` on the result."""
+    out_dtype: npt.DTypeLike | None = None
+    """Result dtype of a block matmul, resolved once against the message dtype."""
+    fill_in_place: bool = False
+    """Whether the backend accepts ``matmul(..., out=)``; else blocks are concatenated."""
+    device: object = None
+    """Device the output buffer is allocated on, resolved once at reset."""
     new_axis: AxisBase | None = None
     n_out: int = 0
-    clusters: list | None = None
-    """list of (in_indices_xp, out_indices_xp, sub_weights_xp) tuples when block-diagonal."""
+    n_in: int = 0
+    """Channels expected on the message; blocks require it to equal ``weights.shape[0]``."""
+    n_samples: int = 1
+    """Representative samples per message, for the kernel cost model."""
+    dispatched: bool = False
 
 
 class AffineTransformTransformer(
@@ -222,9 +182,20 @@ class AffineTransformTransformer(
     def _hash_message(self, message: AxisArray) -> int:
         axis = self.settings.axis or message.dims[-1]
         axis_idx = message.get_axis_idx(axis)
-        return hash((message.key, message.data.shape[axis_idx]))
+        return hash(
+            (message.key, message.data.shape[axis_idx])
+            + group_spec_fingerprint(message, axis, self.settings.channel_groups)
+        )
 
     def _reset_state(self, message: AxisArray) -> None:
+        if self.settings.kernel not in KERNELS:
+            raise ValueError(f"kernel must be one of {KERNELS}, got {self.settings.kernel!r}")
+
+        axis = self.settings.axis or message.dims[-1]
+        axis_idx = message.get_axis_idx(axis)
+        n_in = message.data.shape[axis_idx]
+        xp = get_namespace(message.data)
+
         weights = self.settings.weights
         if isinstance(weights, str):
             # Bare strings may name a RereferenceKind (e.g. "car" from config);
@@ -234,28 +205,31 @@ class AffineTransformTransformer(
             except ValueError:
                 pass
         if isinstance(weights, RereferenceKind) or callable(weights):
-            axis = self.settings.axis or message.dims[-1]
-            axis_idx = message.get_axis_idx(axis)
-            n_in = message.data.shape[axis_idx]
+            groups = resolve_channel_groups(message, axis, self.settings.channel_groups)
+            group_lists = None if groups is None else [group.tolist() for group in groups]
             if isinstance(weights, RereferenceKind):
-                weights = rereference_matrix(weights, n_in, clusters=self.settings.channel_clusters)
+                weights = rereference_matrix(weights, n_in, groups=group_lists)
             else:
-                weights = weights(n_in)
+                weights = _call_weight_factory(weights, n_in, group_lists)
         if isinstance(weights, str):
             weights = Path(os.path.abspath(os.path.expanduser(weights)))
         if isinstance(weights, Path):
             weights = np.loadtxt(weights, delimiter=",")
         if not self.settings.right_multiply:
             weights = weights.T
-        if weights is not None:
-            weights = np.ascontiguousarray(weights)
+        weights = np.ascontiguousarray(weights)
 
-        # Cluster detection + weight storage (delegated)
-        self.set_weights(weights, recalc_clusters=True)
+        # Context the kernel planner needs, set before set_weights() consults it.
+        self._state.n_in = n_in
+        # math.prod(shape), not .size: torch spells size as a *method*, so
+        # `data.size // n_in` raises TypeError on a torch-backed message.
+        n_elem = math.prod(message.data.shape)
+        self._state.n_samples = max(n_elem // n_in, 1) if n_in else 1
+        self._state.dispatched = _is_dispatched(xp)
+        self.set_weights(weights, recalc_structure=True)
 
-        # --- Axis label handling (for non-square transforms, non-cluster path) ---
+        # --- Axis label handling (for non-square transforms) ---
         n_in, n_out = weights.shape
-        axis = self.settings.axis or message.dims[-1]
         if axis in message.axes and hasattr(message.axes[axis], "data") and n_in != n_out:
             in_labels = message.axes[axis].data
             new_labels = []
@@ -281,127 +255,130 @@ class AffineTransformTransformer(
             self._state.new_axis = replace(message.axes[axis], data=np.array(new_labels))
 
         # Convert to match message.data namespace and device for _process.
-        # Weights are stored as numpy float64 after cluster detection; some
-        # devices (e.g. MPS) don't support float64, so we downcast weight
-        # arrays to the message's dtype when the message is floating-point.
-        xp = get_namespace(message.data)
+        # Weights are numpy float64 up to here; some devices (e.g. MPS) don't
+        # support float64, so downcast to the message's dtype when it is floating.
         dev = array_device(message.data)
         msg_dt = message.data.dtype
-        # Downcast weights dtype only for float message data (avoids casting
-        # float weights to integer when message data happens to be int).
         w_dt = msg_dt if is_float_dtype(xp, msg_dt) else None
         if self._state.weights is not None:
             self._state.weights = xp_asarray(xp, self._state.weights, dtype=w_dt, device=dev)
-        if self._state.clusters is not None:
-            self._state.clusters = [
-                (
-                    xp_asarray(xp, in_idx, device=dev),
-                    xp_asarray(xp, out_idx, device=dev),
-                    xp_asarray(xp, sub_w, dtype=w_dt, device=dev),
-                )
-                for in_idx, out_idx, sub_w in self._state.clusters
+        if self._state.blocks is not None:
+            self._state.blocks = [
+                (in_slice, out_slice, xp_asarray(xp, sub_w, dtype=w_dt, device=dev))
+                for in_slice, out_slice, sub_w in self._state.blocks
             ]
+            if w_dt is not None:
+                out_dtype = msg_dt  # weights were downcast to the message's float dtype
+            else:
+                try:
+                    out_dtype = np.result_type(msg_dt, np.float64)
+                except TypeError:
+                    out_dtype = None  # non-numpy integer dtype; concatenate instead
+            self._state.out_dtype = out_dtype
+            self._state.device = dev
+            self._state.fill_in_place = out_dtype is not None and _supports_matmul_out(xp, out_dtype, dev)
+            for name in ("in_perm", "out_perm", "out_inv_perm"):
+                perm = getattr(self._state, name)
+                if perm is not None:
+                    setattr(self._state, name, xp_asarray(xp, perm, device=dev))
 
-    def set_weights(self, weights, *, recalc_clusters=False) -> None:
-        """Replace weight values, optionally recalculating cluster decomposition.
+    def set_weights(self, weights, *, recalc_structure: bool = False) -> None:
+        """Replace weight values, optionally re-deriving the matmul kernel.
 
         *weights* must be in **canonical orientation** (``right_multiply``
-        already applied by the caller or by ``_reset_state``).  The array may
+        already applied by the caller or by ``_reset_state``). The array may
         live in any Array-API namespace (NumPy, CuPy, etc.).
 
         Args:
             weights: Weight matrix in canonical orientation.
-            recalc_clusters: When True, re-run block-diagonal cluster detection
-                and store the new decomposition.  When False (default), reuse
-                the existing cluster structure and only update weight values.
+            recalc_structure: When True, re-derive the block-diagonal structure
+                from *weights* and re-choose the kernel. When False (default),
+                keep the existing block layout and only refresh the values --
+                appropriate for an adaptive filter whose sparsity pattern is
+                fixed. Note that re-deriving reads the whole matrix on the host,
+                so avoid it on a hot path with device-resident weights.
         """
-        if recalc_clusters:
-            # Note: If weights were scipy.sparse BSR then maybe we could automate this next part.
-            #  However, that would break compatibility with Array API.
-
-            # --- Block-diagonal cluster detection ---
-            # Clusters are a list of (input_indices, output_indices) tuples.
+        if recalc_structure:
             w_np = np.ascontiguousarray(weights)
             n_in, n_out = w_np.shape
-            if self.settings.channel_clusters is not None:
-                validate_channel_clusters(self.settings.channel_clusters, n_in)
+            plan = None
+            if self.settings.kernel != "dense" and n_in == self._state.n_in:
+                # A mismatch means the [A|B] offset form, whose ones-column
+                # augmentation the block kernel does not implement.
+                plan = plan_block_matmul(
+                    w_np,
+                    self._state.n_samples,
+                    force=self.settings.kernel == "blocks",
+                    dispatched=self._state.dispatched,
+                )
+            self._state.n_out = n_out
+            self._state.blocks = None if plan is None else [(in_sl, out_sl, None) for in_sl, out_sl in plan.blocks]
+            self._state.in_perm = None if plan is None else plan.in_perm
+            self._state.out_perm = None if plan is None else plan.out_perm
+            self._state.out_inv_perm = None
+            if self._state.out_perm is not None:
+                inverse = np.empty(n_out, dtype=np.intp)
+                inverse[plan.out_perm] = np.arange(n_out)
+                self._state.out_inv_perm = inverse
+            if plan is not None:
+                ez.logger.info(
+                    f"AffineTransform: block-diagonal kernel with {len(plan.blocks)} blocks "
+                    f"(sizes: {[(r.stop - r.start, c.stop - c.start) for r, c in plan.blocks]})"
+                )
 
-                # Derive output indices from non-zero weights for each input cluster
-                clusters = []
-                for group in self.settings.channel_clusters:
-                    in_idx = np.asarray(group)
-                    out_idx = np.where(np.any(w_np[in_idx, :] != 0, axis=0))[0]
-                    clusters.append((in_idx, out_idx))
+        if self._state.blocks is None:
+            self._state.weights = weights
+            return
 
-                max_cross = _max_cross_cluster_weight(w_np, clusters)
-                if max_cross > 0:
-                    ez.logger.warning(
-                        f"Non-zero cross-cluster weights detected (max abs: {max_cross:.2e}). "
-                        "These will be ignored in block-diagonal multiplication."
-                    )
-            else:
-                clusters = _find_block_diagonal_clusters(w_np)
-                if clusters is not None:
-                    ez.logger.info(
-                        f"Auto-detected {len(clusters)} block-diagonal clusters "
-                        f"(sizes: {[(len(i), len(o)) for i, o in clusters]})"
-                    )
+        xp = get_namespace(weights)
+        permuted = weights
+        if self._state.in_perm is not None:
+            permuted = xp.take(permuted, self._state.in_perm, axis=0)
+        if self._state.out_perm is not None:
+            permuted = xp.take(permuted, self._state.out_perm, axis=1)
+        # Copy each sub-block rather than keeping a view into *weights*. Views
+        # would pin the whole dense matrix alive to hold the (much smaller) block
+        # diagonal, and would let a caller that recycles its weight buffer mutate
+        # our state between messages.
+        self._state.blocks = [
+            (in_slice, out_slice, xp_copy(permuted[in_slice, out_slice]))
+            for in_slice, out_slice, _ in self._state.blocks
+        ]
+        self._state.weights = None
 
-            # Merge small clusters to avoid excessive loop overhead
-            if clusters is not None:
-                clusters = _merge_small_clusters(clusters, self.settings.min_cluster_size)
+    def _block_matmul(self, xp, data, axis_idx):
+        """Multiply by a block-diagonal weight matrix, one contiguous block at a time.
 
-            if clusters is not None and len(clusters) > 1:
-                self._state.n_out = n_out
-                self._state.clusters = [
-                    (in_idx, out_idx, np.ascontiguousarray(w_np[np.ix_(in_idx, out_idx)]))
-                    for in_idx, out_idx in clusters
-                ]
-                self._state.weights = None
-            else:
-                self._state.weights = weights
-                self._state.clusters = None
-        else:
-            xp = get_namespace(weights)
-            if self._state.clusters is not None:
-                self._state.clusters = [
-                    (in_idx, out_idx, xp.take(xp.take(weights, in_idx, axis=0), out_idx, axis=1))
-                    for in_idx, out_idx, _ in self._state.clusters
-                ]
-            else:
-                self._state.weights = weights
-
-    def _block_diagonal_matmul(self, xp, data, axis_idx):
-        """Perform matmul using block-diagonal decomposition.
-
-        For each cluster, gathers input channels via ``xp.take``, performs a
-        matmul with the cluster's sub-weight matrix, and writes the result
-        directly into the pre-allocated output at the cluster's output indices.
-        Omitted output channels naturally remain zero.
+        Basic slicing gives views on both sides, so there is no gather and no
+        scatter: each block reads a strided window of the input and writes its
+        own window of the output. The blocks tile the output exactly, so the
+        buffer never needs zeroing.
         """
-        needs_permute = axis_idx not in [-1, data.ndim - 1]
+        state = self._state
+        needs_permute = axis_idx not in (-1, data.ndim - 1)
         if needs_permute:
             dim_perm = list(range(data.ndim))
             dim_perm.append(dim_perm.pop(axis_idx))
             data = xp.permute_dims(data, dim_perm)
+        if state.in_perm is not None:
+            data = xp.take(data, state.in_perm, axis=data.ndim - 1)
 
-        # Pre-allocate output (omitted channels stay zero)
-        out_shape = data.shape[:-1] + (self._state.n_out,)
-        result = xp_create(xp.zeros, out_shape, dtype=data.dtype, device=array_device(data))
+        if state.fill_in_place:
+            result = xp_empty(xp, data.shape[:-1] + (state.n_out,), dtype=state.out_dtype, device=state.device)
+            for in_slice, out_slice, sub_weights in state.blocks:
+                xp.matmul(data[..., in_slice], sub_weights, out=result[..., out_slice])
+        else:
+            result = xp.concat(
+                [xp.matmul(data[..., in_slice], sub_weights) for in_slice, _, sub_weights in state.blocks],
+                axis=-1,
+            )
 
-        # Empty input: every cluster write would be zero-size, and MLX's scatter
-        # (indexed assignment) rejects zero-size updates. The zeros allocation is
-        # already the correct result, so skip the assignments.
-        if 0 not in data.shape:
-            for in_idx, out_idx, sub_weights in self._state.clusters:
-                chunk = xp.take(data, in_idx, axis=data.ndim - 1)
-                result[..., out_idx] = xp.matmul(chunk, sub_weights)
-
+        if state.out_inv_perm is not None:
+            result = xp.take(result, state.out_inv_perm, axis=result.ndim - 1)
         if needs_permute:
             inv_dim_perm = list(range(result.ndim))
             inv_dim_perm.insert(axis_idx, inv_dim_perm.pop(-1))
             result = xp.permute_dims(result, inv_dim_perm)
-
         return result
 
     def _process(self, message: AxisArray) -> AxisArray:
@@ -410,8 +387,8 @@ class AffineTransformTransformer(
         axis_idx = message.get_axis_idx(axis)
         data = message.data
 
-        if self._state.clusters is not None:
-            data = self._block_diagonal_matmul(xp, data, axis_idx)
+        if self._state.blocks is not None:
+            data = self._block_matmul(xp, data, axis_idx)
         else:
             if data.shape[axis_idx] == (self._state.weights.shape[0] - 1):
                 # The weights are stacked A|B where A is the transform and B is a single row
@@ -448,8 +425,8 @@ def affine_transform(
     weights: np.ndarray | str | Path | RereferenceKind | Callable[[int], np.ndarray],
     axis: str | None = None,
     right_multiply: bool = True,
-    channel_clusters: list[list[int]] | None = None,
-    min_cluster_size: int = 32,
+    channel_groups: ChannelGroupSpec | None = None,
+    kernel: str = "auto",
 ) -> AffineTransformTransformer:
     """
     Perform affine transformations on streaming data.
@@ -462,10 +439,9 @@ def affine_transform(
             :func:`common_rereference`.
         axis: The name of the axis to apply the transformation to. Defaults to the leading (0th) axis in the array.
         right_multiply: Set False to transpose the weights before applying.
-        channel_clusters: Optional explicit channel cluster specification. See
-            :attr:`AffineTransformSettings.channel_clusters`.
-        min_cluster_size: Minimum channels per cluster; smaller clusters are merged. See
-            :attr:`AffineTransformSettings.min_cluster_size`.
+        channel_groups: Channel grouping used to build kind- or callable-based weights. See
+            :attr:`AffineTransformSettings.channel_groups`.
+        kernel: Matmul kernel selection. See :attr:`AffineTransformSettings.kernel`.
 
     Returns:
         :obj:`AffineTransformTransformer`.
@@ -475,8 +451,8 @@ def affine_transform(
             weights=weights,
             axis=axis,
             right_multiply=right_multiply,
-            channel_clusters=channel_clusters,
-            min_cluster_size=min_cluster_size,
+            channel_groups=channel_groups,
+            kernel=kernel,
         )
     )
 
@@ -495,92 +471,182 @@ class CommonRereferenceSettings(ez.Settings):
     include_current: bool = True
     """Set False to exclude each channel from participating in the calculation of its reference."""
 
-    channel_clusters: list[list[int]] | None = None
-    """Optional channel clusters for per-cluster rereferencing. Each element is a
-    list of channel indices forming one cluster. The common reference is computed
-    independently within each cluster. If None, all channels form a single cluster."""
+    channel_groups: ChannelGroupSpec | None = None
+    """Which channels share a reference. The common reference is computed
+    independently within each group; channels in no group pass through unchanged.
 
-    cluster_by_field: str | None = None
-    """Derive ``channel_clusters`` automatically from a structured field of the
-    channel coordinate axis (e.g. ``"bank"`` to rereference within each electrode
-    bank). Used only when ``channel_clusters`` is None and the axis actually
-    carries that field; otherwise falls back to a single all-channel cluster.
-    Explicit ``channel_clusters`` always takes precedence.
-    Note: the any changes to the field values are not detected. The channel->field
-    map is expected to be static for the stream's life.
-    """
+    ``None`` (default) references every channel against one common average.
+    Pass explicit index groups, or the name of a channel-metadata field to group
+    by -- ``channel_groups="bank"`` rereferences within each electrode bank. See
+    :data:`~ezmsg.sigproc.util.channels.ChannelGroupSpec`.
+
+    A field-derived grouping is resolved when the stream gains or loses that
+    field, not when its values change: the channel-to-field map is expected to be
+    static for a given stream key and channel count."""
 
 
 @processor_state
 class CommonRereferenceState:
-    clusters: list | None = None
-    """list of xp arrays of channel indices, one per cluster."""
+    single: bool = False
+    """Whether one reference covers every channel -- the no-allocation fast path."""
+    passthrough: bool = False
+    """Leave-one-out with nothing to reference against; emit the input unchanged."""
+    project: npt.NDArray | None = None
+    """(n_ch, n_groups) group-mean projector; None on the ``single`` path."""
+    spread: npt.NDArray | None = None
+    """(n_groups, n_ch) indicator that broadcasts each group's reference back."""
+    scale: npt.NDArray | float = 1.0
+    """Per-channel N/(N-1) leave-one-out gain, or 1.0 when it is uniform."""
+    groups: list | None = None
+    """Per-group index arrays; used only by the ``median`` path."""
+    out_dtype: npt.DTypeLike | None = None
 
 
 class CommonRereferenceTransformer(
     BaseStatefulTransformer[CommonRereferenceSettings, AxisArray, AxisArray, CommonRereferenceState]
 ):
+    """Subtract a common reference, computed over all channels or within groups.
+
+    ``mode="mean"`` is expressed as two skinny matmuls rather than a per-group
+    gather/scatter loop, so cost is independent of whether a group's channels are
+    contiguous and there is no Python loop per message.
+
+    Channels belonging to no group pass through unchanged, matching
+    :func:`~ezmsg.sigproc.util.rereference.car_matrix`, which leaves them identity.
+
+    Floating-point input keeps its dtype; integer input promotes to float. (An
+    earlier version promoted float32 to float64, doubling the bandwidth of every
+    downstream stage.)
+    """
+
     def _hash_message(self, message: AxisArray) -> int:
         axis = self.settings.axis or message.dims[-1]
         axis_idx = message.get_axis_idx(axis)
-        components: tuple = (message.key, message.data.shape[axis_idx])
-        # On the cluster_by_field path, re-derive clusters only when the channel
-        # axis gains or loses the target structured field
-        if self.settings.channel_clusters is None and self.settings.cluster_by_field is not None:
-            ax = message.axes.get(axis)
-            names = getattr(getattr(getattr(ax, "data", None), "dtype", None), "names", None)
-            components += (bool(names and self.settings.cluster_by_field in names),)
-        return hash(components)
+        return hash(
+            (message.key, message.data.shape[axis_idx])
+            + group_spec_fingerprint(message, axis, self.settings.channel_groups)
+        )
 
     def _reset_state(self, message: AxisArray) -> None:
         xp = get_namespace(message.data)
+        dev = array_device(message.data)
         axis = self.settings.axis or message.dims[-1]
         axis_idx = message.get_axis_idx(axis)
-        n_chans = message.data.shape[axis_idx]
+        n_ch = message.data.shape[axis_idx]
+        include_current = self.settings.include_current
 
-        clusters = self.settings.channel_clusters
-        if clusters is None and self.settings.cluster_by_field is not None:
-            clusters = channel_clusters_from_field(message, axis, self.settings.cluster_by_field)
-        if clusters is not None:
-            self._state.clusters = [xp.asarray(group) for group in clusters]
-        else:
-            self._state.clusters = [xp.arange(n_chans)]
+        msg_dt = message.data.dtype
+        out_dt = msg_dt if is_float_dtype(xp, msg_dt) else getattr(xp, "float64", None) or xp.float32
+        self._state.out_dtype = out_dt
+
+        groups = resolve_channel_groups(message, axis, self.settings.channel_groups)
+        if groups is None:
+            groups = [np.arange(n_ch, dtype=np.intp)]
+        # A lone channel has no "other" channels to form a leave-one-out
+        # reference from, so it passes through rather than dividing by N - 1 == 0.
+        groups = [g for g in groups if g.size >= (1 if include_current else 2)]
+
+        self._state.groups = [xp_asarray(xp, g, device=dev) for g in groups]
+        self._state.single = len(groups) == 1 and groups[0].size == n_ch
+        self._state.passthrough = not groups
+        self._state.project = None
+        self._state.spread = None
+        self._state.scale = 1.0
+
+        if self._state.passthrough:
+            return
+
+        sizes = np.array([g.size for g in groups], dtype=np.float64)
+        if not include_current:
+            scale = np.ones(n_ch, dtype=np.float64)
+            for group, size in zip(groups, sizes):
+                scale[group] = size / (size - 1.0)
+            uniform = float(scale[groups[0][0]])
+            self._state.scale = uniform if np.all(scale == uniform) else xp_asarray(xp, scale, dtype=out_dt, device=dev)
+
+        if self._state.single:
+            return
+
+        project = np.zeros((n_ch, len(groups)), dtype=np.float64)
+        spread = np.zeros((len(groups), n_ch), dtype=np.float64)
+        for g, (group, size) in enumerate(zip(groups, sizes)):
+            project[group, g] = 1.0 / size
+            spread[g, group] = 1.0
+        self._state.project = xp_asarray(xp, project, dtype=out_dt, device=dev)
+        self._state.spread = xp_asarray(xp, spread, dtype=out_dt, device=dev)
 
     def _process(self, message: AxisArray) -> AxisArray:
-        if self.settings.mode == "passthrough":
+        if self.settings.mode == "passthrough" or self._state.passthrough:
             return message
 
         xp = get_namespace(message.data)
         axis = self.settings.axis or message.dims[-1]
         axis_idx = message.get_axis_idx(axis)
-        func = {"mean": xp.mean, "median": np.median}[self.settings.mode]
+        state = self._state
+        data = message.data
 
-        # Use result_type to match dtype promotion from data - float operations.
-        out_dtype = np.result_type(message.data.dtype, np.float64)
-        output = xp.zeros(message.data.shape, dtype=out_dtype)
+        if self.settings.mode == "median":
+            return replace(message, data=self._median_rereference(xp, data, axis_idx))
 
-        for cluster_idx in self._state.clusters:
-            cluster_data = xp.take(message.data, cluster_idx, axis=axis_idx)
-            ref_data = func(cluster_data, axis=axis_idx, keepdims=True)
+        if state.single:
+            # Only ever one group here, so the leave-one-out gain is a scalar.
+            output = data - xp.mean(data, axis=axis_idx, keepdims=True)
+            if state.scale != 1.0:
+                output = output * state.scale
+            return replace(message, data=output)
 
-            if not self.settings.include_current:
-                N = cluster_data.shape[axis_idx]
-                if N > 1:
-                    ref_data = (N / (N - 1)) * ref_data - cluster_data / (N - 1)
-                else:
-                    # A single-channel cluster has no "other" channels to form a
-                    # leave-one-out reference from, so pass it through unchanged
-                    # rather than dividing by N - 1 == 0. This is reachable via
-                    # cluster_by_field when a derived group (e.g. an electrode
-                    # bank) happens to contain a lone channel.
-                    ref_data = xp.zeros_like(ref_data)
-
-            # Write per-cluster result into output at the correct axis position
-            idx = [slice(None)] * output.ndim
-            idx[axis_idx] = cluster_idx
-            output[tuple(idx)] = cluster_data - ref_data
-
+        # Grouped: reference = (x @ project) @ spread gives every channel its
+        # group's mean (and zero for ungrouped channels) without any gather.
+        needs_permute = axis_idx not in (-1, data.ndim - 1)
+        if needs_permute:
+            dim_perm = list(range(data.ndim))
+            dim_perm.append(dim_perm.pop(axis_idx))
+            data = xp.permute_dims(data, dim_perm)
+        output = data - xp.matmul(xp.matmul(data, state.project), state.spread)
+        # Channels are last here, so a per-channel gain broadcasts as-is.
+        if isinstance(state.scale, float):
+            if state.scale != 1.0:
+                output = output * state.scale
+        else:
+            output = output * state.scale
+        if needs_permute:
+            inv_dim_perm = list(range(output.ndim))
+            inv_dim_perm.insert(axis_idx, inv_dim_perm.pop(-1))
+            output = xp.permute_dims(output, inv_dim_perm)
         return replace(message, data=output)
+
+    def _median_rereference(self, xp, data, axis_idx):
+        """Per-group median reference.
+
+        Unlike the mean, a median is not a linear functional of the channels, so
+        it has no matmul form -- this stays a gather/scatter loop. The output
+        starts as a copy of the input so ungrouped channels pass through.
+
+        This is the only path here that writes into an array elementwise, so the
+        copy has to be a real one. ``asarray`` is not enough: given an
+        ``ndarray`` *subclass* it returns a distinct base-class object that still
+        shares the caller's buffer, and message data may be a view shared with
+        other branches of the graph. Branching on dtype avoids the guesswork --
+        a dtype change always allocates, and otherwise we copy outright.
+        """
+        median = getattr(xp, "median", np.median)
+        scale = self._state.scale
+        out_dtype = self._state.out_dtype
+        output = xp_copy(data) if data.dtype == out_dtype else xp_asarray(xp, data, dtype=out_dtype)
+        index: list = [slice(None)] * data.ndim
+        bcast: list = [1] * data.ndim
+        for group in self._state.groups:
+            index[axis_idx] = group
+            group_data = xp.take(data, group, axis=axis_idx)
+            centered = group_data - median(group_data, axis=axis_idx, keepdims=True)
+            if isinstance(scale, float):
+                if scale != 1.0:
+                    centered = centered * scale
+            else:
+                bcast[axis_idx] = group.shape[0]
+                centered = centered * xp.reshape(xp.take(scale, group, axis=0), tuple(bcast))
+            output[tuple(index)] = centered
+        return output
 
 
 class CommonRereference(
@@ -593,8 +659,7 @@ def common_rereference(
     mode: str = "mean",
     axis: str | None = None,
     include_current: bool = True,
-    channel_clusters: list[list[int]] | None = None,
-    cluster_by_field: str | None = None,
+    channel_groups: ChannelGroupSpec | None = None,
 ) -> CommonRereferenceTransformer:
     """
     Perform common average referencing (CAR) on streaming data.
@@ -603,10 +668,9 @@ def common_rereference(
         mode: The statistical mode to apply -- either "mean" or "median"
         axis: The name of the axis to apply the transformation to.
         include_current: Set False to exclude each channel from participating in the calculation of its reference.
-        channel_clusters: Optional channel clusters for per-cluster rereferencing. See
-            :attr:`CommonRereferenceSettings.channel_clusters`.
-        cluster_by_field: Optionally derive clusters from a structured channel-axis field
-            (e.g. ``"bank"``). See :attr:`CommonRereferenceSettings.cluster_by_field`.
+        channel_groups: Which channels share a reference -- explicit index groups or a
+            channel-metadata field name (e.g. ``"bank"``). See
+            :attr:`CommonRereferenceSettings.channel_groups`.
 
     Returns:
         :obj:`CommonRereferenceTransformer`
@@ -616,7 +680,6 @@ def common_rereference(
             mode=mode,
             axis=axis,
             include_current=include_current,
-            channel_clusters=channel_clusters,
-            cluster_by_field=cluster_by_field,
+            channel_groups=channel_groups,
         )
     )

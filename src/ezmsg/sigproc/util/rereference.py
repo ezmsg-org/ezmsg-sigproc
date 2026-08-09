@@ -1,7 +1,7 @@
 """Deterministic rereferencing schemes expressed as affine weight matrices.
 
-These helpers build weight matrices for deterministic, cluster-aware
-rereferencing — identity passthrough and per-cluster common-average
+These helpers build weight matrices for deterministic, group-aware
+rereferencing — identity passthrough and per-group common-average
 reference (CAR) — suitable for
 :class:`ezmsg.sigproc.affinetransform.AffineTransformTransformer`
 (``y = x @ A``). All returned matrices are symmetric, so the
@@ -27,7 +27,7 @@ import enum
 import numpy as np
 import numpy.typing as npt
 
-from ezmsg.sigproc.util.channels import validate_channel_clusters
+from ezmsg.sigproc.util.channels import validate_channel_groups
 
 
 class RereferenceKind(str, enum.Enum):
@@ -40,49 +40,46 @@ class RereferenceKind(str, enum.Enum):
     """Pass the signal through unchanged."""
 
     CAR = "car"
-    """Per-cluster common-average reference."""
+    """Per-group common-average reference."""
 
 
 def car_matrix(
     n_channels: int,
     *,
-    clusters: list[list[int]] | None = None,
+    groups: list[list[int]] | None = None,
     include_current: bool = True,
     min_reref_size: int = 1,
     dtype: npt.DTypeLike = np.float64,
 ) -> np.ndarray:
-    """Build a per-cluster common-average-reference matrix.
+    """Build a per-group common-average-reference matrix.
 
-    Within each cluster of ``k`` channels the sub-block subtracts the cluster
+    Within each group of ``k`` channels the sub-block subtracts the group
     mean: ``y_i = x_i - mean_j x_j`` (``include_current=True``), or the
     leave-one-out mean ``y_i = x_i - mean_{j != i} x_j``
-    (``include_current=False``). Channels outside every cluster — and all
-    cross-cluster terms — stay identity.
+    (``include_current=False``). Channels outside every group — and all
+    cross-group terms — stay identity.
 
     Args:
         n_channels: Total number of channels (matrix is ``n x n``).
-        clusters: Disjoint channel-index groups, e.g. from
-            :func:`ezmsg.sigproc.util.channels.channel_clusters_from_field`.
-            ``None`` treats all channels as a single cluster.
+        groups: Disjoint channel-index groups, e.g. from
+            :func:`ezmsg.sigproc.util.channels.channel_groups_from_field`.
+            ``None`` treats all channels as a single group.
         include_current: Set False for the leave-one-out reference (each
             channel excluded from its own reference).
-        min_reref_size: Clusters with fewer channels than this stay identity.
-            Note this is distinct from
-            :attr:`~ezmsg.sigproc.affinetransform.AffineTransformSettings.min_cluster_size`,
-            which is a block-diagonal matmul merge threshold.
+        min_reref_size: Groups with fewer channels than this stay identity.
         dtype: Result dtype; must be floating-point.
 
     Returns:
         Symmetric ``(n_channels, n_channels)`` numpy weight matrix.
     """
     A = np.eye(n_channels, dtype=dtype)
-    if clusters is None:
-        clusters = [list(range(n_channels))]
-    validate_channel_clusters(clusters, n_channels)
+    if groups is None:
+        groups = [list(range(n_channels))]
+    validate_channel_groups(groups, n_channels)
     # Leave-one-out needs at least one *other* channel (k == 1 would divide by zero).
     min_k = max(min_reref_size, 1 if include_current else 2)
-    for cluster in clusters:
-        idx = np.asarray(cluster, dtype=np.intp)
+    for group in groups:
+        idx = np.asarray(group, dtype=np.intp)
         k = idx.size
         if k < min_k:
             continue
@@ -98,14 +95,14 @@ def rereference_matrix(
     kind: RereferenceKind | str,
     n_channels: int,
     *,
-    clusters: list[list[int]] | None = None,
+    groups: list[list[int]] | None = None,
     include_current: bool = True,
     min_reref_size: int = 1,
     dtype: npt.DTypeLike = np.float64,
 ) -> np.ndarray:
     """Build the weight matrix for a :class:`RereferenceKind`.
 
-    Dispatches to :func:`car_matrix` for ``CAR``; the cluster/reference
+    Dispatches to :func:`car_matrix` for ``CAR``; the group/reference
     arguments are ignored for ``IDENTITY``. Accepts the enum or its plain
     string value.
     """
@@ -114,7 +111,7 @@ def rereference_matrix(
         return np.eye(n_channels, dtype=dtype)
     return car_matrix(
         n_channels,
-        clusters=clusters,
+        groups=groups,
         include_current=include_current,
         min_reref_size=min_reref_size,
         dtype=dtype,
