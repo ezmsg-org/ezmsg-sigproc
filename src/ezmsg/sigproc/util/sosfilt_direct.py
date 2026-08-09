@@ -41,9 +41,10 @@ try:
 except ImportError:  # pragma: no cover - depends on the installed scipy build
     _HAS_KERNEL = False
 
-#: dtypes the Cython kernel handles and for which we have verified equivalence.
-#: Anything else (longdouble, object, complex) falls back to public scipy.
-_SUPPORTED_DTYPES = frozenset({np.dtype(np.float32), np.dtype(np.float64)})
+#: Promoted dtypes the Cython kernel handles and for which we have verified
+#: equivalence. Anything else (longdouble, object, complex) falls back to public
+#: scipy, which supports the wider set.
+SUPPORTED_DTYPES = frozenset({np.dtype(np.float32), np.dtype(np.float64)})
 
 _verified: bool | None = None
 
@@ -80,11 +81,19 @@ def can_apply(sos: npt.NDArray, data: typing.Any, zi: typing.Any) -> bool:
     """Whether ``data``/``zi`` are shaped and typed for the direct path."""
     if not isinstance(data, np.ndarray) or not isinstance(zi, np.ndarray):
         return False
-    return np.result_type(sos, data, zi) in _SUPPORTED_DTYPES
+    return np.result_type(sos, data, zi) in SUPPORTED_DTYPES
 
 
 class DirectSosfilt:
     """A SOS filter with scipy's per-call setup hoisted to construction.
+
+    Construction reproduces the validation ``scipy.signal.sosfilt`` performs via
+    ``_validate_sos``, and raises the same errors. That is not defensive
+    tidiness: the Cython kernel assumes ``a0 == 1`` and silently filters with
+    whatever it is given, so coefficients public scipy rejects would otherwise be
+    accepted here and produce a different answer. Callers are expected to treat a
+    ``ValueError`` as "fall back to public scipy" and let it raise the
+    authoritative error.
 
     Args:
         sos: ``(n_sections, 6)`` coefficients.
@@ -96,9 +105,17 @@ class DirectSosfilt:
     __slots__ = ("_sos", "_n_sections", "_dtype")
 
     def __init__(self, sos: npt.NDArray, dtype: npt.DTypeLike):
-        sos = np.asarray(sos)
-        if sos.ndim != 2 or sos.shape[1] != 6:
-            raise ValueError(f"sos must have shape (n_sections, 6); got {tuple(sos.shape)}")
+        # atleast_2d, not a bare ndim check: public sosfilt accepts a 1-D
+        # six-element sos as a single section.
+        sos = np.atleast_2d(np.asarray(sos))
+        if sos.ndim != 2:
+            raise ValueError("sos array must be 2D")
+        if sos.shape[1] != 6:
+            raise ValueError("sos array must be shape (n_sections, 6)")
+        if sos.shape[0] == 0:
+            raise ValueError("There must be at least one section")
+        if not np.all(sos[:, 3] == 1):
+            raise ValueError("sos[:, 3] should be all ones")
         self._dtype = np.dtype(dtype)
         # Hoisted: contiguity and dtype conversion of the coefficients.
         self._sos = np.ascontiguousarray(sos, dtype=self._dtype)

@@ -383,6 +383,7 @@ class FilterState:
     sos_method: str | None = None  # 'mlx_metal', 'scipy_numpy', or None (scipy)
     sos_mx: typing.Any | None = None  # cached mlx.core.array of SOS coefs
     sos_direct: typing.Any | None = None  # DirectSosfilt with per-call setup hoisted
+    sos_direct_dtype: typing.Any | None = None  # promoted dtype sos_direct was built for
 
 
 class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisArray, FilterState]):
@@ -546,6 +547,7 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
         # Built lazily on first use, so that a coefficient update which does not
         # force a full reset still rebuilds it (see update_coefficients).
         self.state.sos_direct = None
+        self.state.sos_direct_dtype = None
 
     def update_coefficients(
         self,
@@ -612,29 +614,44 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
         # coefficients. A same-length coefficient change does not reset zi, so
         # without this it would keep filtering with the old coefficients.
         self.state.sos_direct = None
+        self.state.sos_direct_dtype = None
 
     def _sos_direct_for(self, data_np: npt.NDArray, zi_np: npt.NDArray):
-        """Cached direct-kernel SOS filter for the current coefficients, or None.
+        """Cached direct-kernel SOS filter for the current stream, or None.
 
         Built on first use rather than in ``_reset_state`` so that a coefficient
         update which does not force a reset still picks up the new coefficients.
-        ``False`` is cached to mean "checked, not usable", so the availability
-        and dtype probes run once per stream rather than once per chunk.
+
+        The cache is keyed on ``result_type(sos, data, zi)``, because the promoted
+        dtype is baked into the converted coefficients. A stream that starts in
+        float32 and later receives float64 must not keep filtering in the dtype it
+        began with, and one that later receives complex must not have its
+        imaginary part cast away -- public ``sosfilt`` promotes in both cases.
+        ``np.result_type`` costs ~0.09 us against the ~5-7 us this path saves, so
+        it is checked every call rather than assumed to be stable.
+
+        A cached ``None`` means "this dtype is not usable"; the caller falls back
+        to public ``sosfilt``, which handles the dtypes the kernel does not.
         """
-        cached = self.state.sos_direct
-        if cached is False:
-            return None
-        if cached is not None:
-            return cached
         if self.settings.coef_type != "sos" or not self.settings.use_fast_sosfilt:
-            self.state.sos_direct = False
+            return None
+        if not isinstance(data_np, np.ndarray) or not isinstance(zi_np, np.ndarray):
             return None
         _, coefs = _normalize_coefs(self.settings.coefs)
-        if not (sosfilt_direct.available() and sosfilt_direct.can_apply(coefs[0], data_np, zi_np)):
-            self.state.sos_direct = False
-            return None
         dtype = np.result_type(coefs[0], data_np, zi_np)
-        self.state.sos_direct = sosfilt_direct.DirectSosfilt(coefs[0], dtype)
+        # NB: `dtype == None` is True for float64 -- np.dtype(None) is float64 --
+        # so the sentinel has to be excluded explicitly.
+        if self.state.sos_direct_dtype is not None and dtype == self.state.sos_direct_dtype:
+            return self.state.sos_direct
+        self.state.sos_direct_dtype = dtype
+        self.state.sos_direct = None
+        if dtype in sosfilt_direct.SUPPORTED_DTYPES and sosfilt_direct.available():
+            try:
+                self.state.sos_direct = sosfilt_direct.DirectSosfilt(coefs[0], dtype)
+            except ValueError:
+                # Malformed coefficients: leave the authoritative error to public
+                # sosfilt rather than raising a lookalike from here.
+                pass
         return self.state.sos_direct
 
     def _process(self, message: AxisArray) -> AxisArray:
@@ -706,9 +723,6 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
                 _, coefs = _normalize_coefs(self.settings.coefs)
                 filt_func = {"ba": scipy.signal.lfilter, "sos": scipy.signal.sosfilt}[self.settings.coef_type]
                 input_xp = None if is_numpy_array(message.data) else get_namespace(message.data)
-                if input_xp is None:
-                    # Cache that the direct SOS path is not applicable to BA.
-                    self._sos_direct_for(message.data, self.state.zi)
                 if input_xp is not None:
                     # Convert coefs and zi to the input namespace so scipy's
                     # array_namespace sees a single backend and converts back.
