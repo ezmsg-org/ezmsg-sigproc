@@ -43,11 +43,28 @@ class WindowSettings(ez.Settings):
     :obj:`Window` unit yields one message per window, each exactly ``window_dur``
     long with its own absolute offset. The transformer still emits a ``win`` axis
     in that case, because a transformer is 1-in/1-out and several windows may
-    complete at once; the unit is what unbundles them."""
+    complete at once; the unit is what unbundles them.
+
+    Set :attr:`batch_windows` to trade that per-window guarantee for fewer,
+    larger messages."""
     window_dur: float | None = None  # Sec. passthrough if None
     window_shift: float | None = None  # Sec. Use "1:1 mode" if None
     zero_pad_until: str = "full"  # "full", "shift", "input", "none"
     anchor: str | Anchor = Anchor.BEGINNING
+
+    batch_windows: bool = False
+    """Emit all complete windows as one contiguous message ("batcher mode").
+
+    Only meaningful with ``newaxis=None`` and ``window_shift == window_dur``,
+    where consecutive windows tile the target axis exactly; requiring both is
+    validated at construction.
+
+    Off by default, because a message of exactly ``window_dur`` is what asking
+    for a ``window_dur`` most obviously means -- and consumers with a fixed input
+    size (an FFT, a binned aggregation) depend on it. Turn it on to re-chunk a
+    stream purely for throughput, accepting that an emitted message is then a
+    whole-number *multiple* of ``window_dur``, since one oversized input can
+    complete several windows at once."""
 
     buffer_update_strategy: UpdateStrategy = "immediate"
     """When the backlog copies incoming samples into its own memory.
@@ -121,6 +138,24 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
     The `windowing` method is perhaps the most useful and versatile method in ezmsg.sigproc, but its parameterization
     can be difficult. Please read the argument descriptions carefully.
 
+    Several windows can complete on one input, so the transformer -- being
+    1-in/1-out -- represents them along a ``win`` axis. What reaches subscribers
+    depends on the settings:
+
+    ===========================  =========================================
+    settings                     published messages
+    ===========================  =========================================
+    ``newaxis="win"``            one message, ``win`` axis, N windows
+    ``newaxis=None``             N messages, no ``win`` axis, each exactly
+                                 ``window_dur``
+    ``newaxis=None`` +           one message, no ``win`` axis,
+    ``batch_windows=True``       ``N * window_dur`` contiguous samples
+    ===========================  =========================================
+
+    The last row is "batcher mode", available only when ``window_shift ==
+    window_dur`` so that windows tile the target axis exactly. It is the only
+    mode the transformer can produce without a ``win`` axis, because tiling is
+    what makes concatenation lossless.
     """
 
     # `anchor` only affects offset math in `_process`; every other field
@@ -181,6 +216,40 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
             raise ValueError(
                 f"Invalid anchor: {self.settings.anchor}. Valid anchor are: {', '.join([e.value for e in Anchor])}"
             )
+        if self.settings.batch_windows:
+            if self.settings.newaxis is not None:
+                raise ValueError(
+                    f"batch_windows requires newaxis=None, got newaxis={self.settings.newaxis!r}. "
+                    "A window axis already batches windows into one message."
+                )
+            if self.settings.window_shift != self.settings.window_dur:
+                raise ValueError(
+                    f"batch_windows requires window_shift == window_dur, got "
+                    f"window_shift={self.settings.window_shift!r} and window_dur={self.settings.window_dur!r}. "
+                    "Windows that overlap or leave gaps do not tile the target axis, so they cannot be "
+                    "concatenated without losing or duplicating samples."
+                )
+        if self.is_batcher and self.settings.anchor != Anchor.BEGINNING:
+            # `anchor` says which sample of a window maps to 0 on the target axis.
+            # Batcher mode has no per-window axis to anchor -- the target axis
+            # carries absolute time -- so honouring it is impossible and ignoring
+            # it would quietly discard the caller's intent.
+            raise ValueError(
+                f"anchor={self.settings.anchor.value!r} has no meaning with batch_windows=True: "
+                "batched output carries absolute offsets on the target axis, so there is no "
+                "window-relative origin to anchor. Leave batch_windows off to get one anchored "
+                "message per window, or leave anchor at its default."
+            )
+
+    @property
+    def is_batcher(self) -> bool:
+        """Whether complete windows are emitted contiguously, with no ``win`` axis."""
+        return (
+            self.settings.batch_windows
+            and self.settings.newaxis is None
+            and self.settings.window_shift is not None
+            and self.settings.window_shift == self.settings.window_dur
+        )
 
     def _hash_message(self, message: AxisArray) -> int:
         axis = self.settings.axis or message.dims[0]
@@ -246,12 +315,17 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
         # below is derived from one of those.
         self._state.out_axis = None
         self._state.empty_out = None
-        self._state.out_dims = list(message.dims[:axis_idx]) + [_newaxis] + list(message.dims[axis_idx:])
-        self._state.out_newaxis = replace(
-            axis_info,
-            gain=0.0 if self.settings.window_shift is None else axis_info.gain * self._state.window_shift_samples,
-            offset=0.0,  # offset modified per-msg below
-        )
+        if self.is_batcher:
+            # Windows tile the target axis, so they need no axis of their own.
+            self._state.out_dims = list(message.dims)
+            self._state.out_newaxis = None
+        else:
+            self._state.out_dims = list(message.dims[:axis_idx]) + [_newaxis] + list(message.dims[axis_idx:])
+            self._state.out_newaxis = replace(
+                axis_info,
+                gain=0.0 if self.settings.window_shift is None else axis_info.gain * self._state.window_shift_samples,
+                offset=0.0,  # offset modified per-msg below
+            )
 
     def __call__(self, message: AxisArray) -> AxisArray:
         if self.settings.window_dur is None:
@@ -319,6 +393,23 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
         # Preliminary copy of axes without the axes that we are modifying.
         _newaxis = self.settings.newaxis or "win"
         out_axes = {k: v for k, v in message.axes.items() if k not in [_newaxis, axis]}
+
+        if self.is_batcher:
+            # Windows tile the target axis exactly, so emit every complete one as a
+            # single contiguous run and let the target axis keep absolute time.
+            n_emit = (self._state.buffer_len // self._state.window_samples) * self._state.window_samples
+            if n_emit:
+                out_dat = self._buffer_peek(xp, n_emit, axis_idx, sample_shape, message.data.dtype)
+                self._drop_front(n_emit, axis_idx)
+                out_offset = buffer_t0
+            else:
+                if self._state.empty_out is None:
+                    empty_shape = sample_shape[:axis_idx] + (0,) + sample_shape[axis_idx:]
+                    self._state.empty_out = xp.zeros(empty_shape, dtype=message.data.dtype)
+                out_dat = self._state.empty_out
+                out_offset = axis_info.offset
+            out_axes[axis] = replace(axis_info, offset=out_offset)
+            return replace(message, data=out_dat, dims=self._state.out_dims, axes=out_axes)
 
         # Update targeted (windowed) axis so that its offset is relative to the new axis.
         # The result depends only on the axis gain and the settings, both fixed for
@@ -411,8 +502,10 @@ class Window(BaseTransformerUnit[WindowSettings, AxisArray, AxisArray, WindowTra
             # samples) came out; emptiness along other axes (e.g. all channels
             # sliced away upstream) still flows to preserve stream cadence.
             if not is_empty_along(ret, (self.SETTINGS.newaxis or "win", axis)):
-                if self.SETTINGS.newaxis is not None or self.SETTINGS.window_dur is None:
-                    # Multi-win mode or pass-through mode.
+                if self.SETTINGS.newaxis is not None or self.SETTINGS.window_dur is None or "win" not in ret.dims:
+                    # Multi-win mode, pass-through mode, or batcher mode -- the
+                    # last of which already tiled its windows onto the target
+                    # axis, so there is nothing to split.
                     yield self.OUTPUT_SIGNAL, ret
                 else:
                     # We need to split out_msg into multiple yields, dropping newaxis.
@@ -446,6 +539,7 @@ def windowing(
     window_shift: float | None = None,
     zero_pad_until: str = "full",
     anchor: str | Anchor = Anchor.BEGINNING,
+    batch_windows: bool = False,
     buffer_update_strategy: UpdateStrategy = "immediate",
 ) -> WindowTransformer:
     return WindowTransformer(
@@ -456,6 +550,7 @@ def windowing(
             window_shift=window_shift,
             zero_pad_until=zero_pad_until,
             anchor=anchor,
+            batch_windows=batch_windows,
             buffer_update_strategy=buffer_update_strategy,
         )
     )
