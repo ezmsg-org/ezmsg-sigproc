@@ -300,10 +300,47 @@ def test_aggregate_transformer_argminmax(operation: AggregationFunction):
     assert msg_out.data.shape == (10, 5)
     assert "freq" not in msg_out.dims
 
-    # Verify data correctness (returns indices)
+    # Verify data correctness. The result is the *coordinate* of the extremum,
+    # not its index -- the index would refer to an axis this transformer just
+    # dropped. `freq` is gain=2.0, offset=1.0, so the two differ.
     np_func = getattr(np, operation.value)
-    expected = np_func(msg_in.data, axis=2)
-    assert np.array_equal(msg_out.data, expected)
+    expected = msg_in.axes["freq"].value(np_func(msg_in.data, axis=2))
+    assert np.allclose(msg_out.data, expected)
+
+
+@pytest.mark.parametrize("operation", [AggregationFunction.ARGMIN, AggregationFunction.ARGMAX])
+def test_aggregate_argminmax_matches_ranged(operation: AggregationFunction):
+    """Aggregate and RangedAggregate answer ARG* the same way.
+
+    The invariant behind the divergence reported in #192: a band spanning the
+    whole axis is the same question the full-axis reduction asks, so the two
+    must agree. Pinned across both transformers so a future change to either
+    cannot reintroduce the split.
+    """
+    msg_in = get_simple_msg()
+
+    full = AggregateTransformer(AggregateSettings(axis="freq", operation=operation))(msg_in)
+
+    freq = msg_in.axes["freq"].value(np.arange(msg_in.data.shape[2]))
+    ranged = RangedAggregateTransformer(
+        RangedAggregateSettings(axis="freq", bands=[(freq[0], freq[-1])], operation=operation)
+    )(msg_in)
+
+    # RangedAggregate keeps the axis with one entry per band; Aggregate drops it.
+    assert np.allclose(full.data, ranged.data[..., 0])
+
+
+@pytest.mark.parametrize("operation", [AggregationFunction.ARGMIN, AggregationFunction.ARGMAX])
+def test_aggregate_argminmax_bare_axis_is_index(operation: AggregationFunction):
+    """With no axis metadata the coordinates are 0, 1, 2, ... -- i.e. the index."""
+    data = np.arange(3 * 8, dtype=float).reshape(3, 8)
+    np.random.default_rng(0).shuffle(data, axis=1)
+    msg_in = AxisArray(data=data, dims=["ch", "freq"], axes=frozendict({}), key="bare")
+
+    msg_out = AggregateTransformer(AggregateSettings(axis="freq", operation=operation))(msg_in)
+
+    np_func = getattr(np, operation.value)
+    assert np.allclose(msg_out.data, np_func(data, axis=1))
 
 
 def test_aggregate_transformer_trapezoid():
@@ -406,6 +443,36 @@ def test_ranged_aggregate_empty_passthrough():
     empty = make_empty_msg()
     result = proc(empty)
     check_empty_result(result)
+
+
+async def test_ranged_aggregate_passthrough_async():
+    """`bands=None` passes through on the async path too.
+
+    `BaseTransformerUnit` awaits `__acall__`, so this -- not `__call__` -- is
+    the path a RangedAggregate takes inside a graph. It used to fall through to
+    `_reset_state` and raise on iterating `None`.
+    """
+    proc = RangedAggregateTransformer(RangedAggregateSettings(axis="freq", bands=None))
+    msg = get_simple_msg()
+    assert await proc.__acall__(msg) is msg
+
+
+async def test_ranged_aggregate_passthrough_resume_async():
+    """Resuming from passthrough on the async path rebuilds the slices."""
+    msg = get_simple_msg()
+    freq = msg.axes["freq"].value(np.arange(msg.data.shape[2]))
+
+    proc = RangedAggregateTransformer(RangedAggregateSettings(axis="freq", bands=[(freq[0], freq[3])]))
+    first = await proc.__acall__(msg)
+
+    proc.update_settings(RangedAggregateSettings(axis="freq", bands=None))
+    assert await proc.__acall__(msg) is msg
+
+    proc.update_settings(RangedAggregateSettings(axis="freq", bands=[(freq[4], freq[-1])]))
+    second = await proc.__acall__(msg)
+
+    # Different bands -> different means; the first band's slices are not reused.
+    assert not np.allclose(first.data, second.data)
 
 
 # ============== MLX Tests ==============

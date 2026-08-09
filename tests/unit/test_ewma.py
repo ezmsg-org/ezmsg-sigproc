@@ -349,6 +349,71 @@ def test_ewma_passthrough_toggle_preserves_state():
     assert np.allclose(out_toggled.data, out_ref.data)
 
 
+def test_ewma_reset_on_resume_discards_state():
+    """reset_on_resume=True rebuilds from the first message after the gap."""
+    proc_toggled = EWMATransformer(settings=EWMASettings(time_constant=0.1, reset_on_resume=True))
+    proc_fresh = EWMATransformer(settings=EWMASettings(time_constant=0.1, reset_on_resume=True))
+
+    msg1 = _make_ewma_test_msg(np.ones((10, 2)))
+    _ = proc_toggled(msg1)
+    zi_before = proc_toggled._state.zi.copy()
+
+    # During the gap the state is left alone -- only the hash is invalidated, so
+    # the rebuild happens on the next real message rather than eagerly here.
+    proc_toggled.settings = dc_replace(proc_toggled.settings, passthrough=True)
+    msg2 = _make_ewma_test_msg(np.ones((10, 2)) * 100.0)
+    assert proc_toggled(msg2) is msg2
+    assert np.allclose(proc_toggled._state.zi, zi_before)
+    assert proc_toggled._hash == -1
+
+    # Resume: output matches a transformer that has never seen anything, not one
+    # that carries msg1's estimate.
+    proc_toggled.settings = dc_replace(proc_toggled.settings, passthrough=False)
+    msg3 = _make_ewma_test_msg(np.ones((10, 2)) * 2.0)
+    assert np.allclose(proc_toggled(msg3).data, proc_fresh(msg3).data)
+
+
+def test_ewma_reset_on_resume_via_update_settings():
+    """The reset is driven from __call__, so update_settings works too.
+
+    `passthrough` and `reset_on_resume` are both in NONRESET_SETTINGS_FIELDS --
+    toggling either queues no reset by itself, which is correct: a toggle with no
+    messages in between leaves no gap.
+    """
+    proc = EWMATransformer(settings=EWMASettings(time_constant=0.1, reset_on_resume=True))
+
+    _ = proc(_make_ewma_test_msg(np.ones((10, 2))))
+    hash_before = proc._hash
+
+    proc.update_settings(EWMASettings(time_constant=0.1, reset_on_resume=True, passthrough=True))
+    assert proc._hash == hash_before
+
+    msg = _make_ewma_test_msg(np.ones((10, 2)) * 100.0)
+    assert proc(msg) is msg
+    assert proc._hash == -1
+
+
+def test_ewma_reset_on_resume_ignores_empty_messages():
+    """An empty chunk is not a gap -- it passes no samples, so it cannot invalidate zi.
+
+    This is the one case the passthrough and empty short-circuits must not share.
+    """
+    proc = EWMATransformer(settings=EWMASettings(time_constant=0.1, reset_on_resume=True))
+
+    _ = proc(make_msg())
+    hash_before = proc._hash
+    zi_before = proc._state.zi.copy()
+
+    check_empty_result(proc(make_empty_msg()))
+    assert proc._hash == hash_before
+    assert np.allclose(proc._state.zi, zi_before)
+
+    # ... and an empty chunk *during* passthrough is not a gap either.
+    proc.settings = dc_replace(proc.settings, passthrough=True)
+    assert proc(make_empty_msg()) is not None
+    assert proc._hash == hash_before
+
+
 class TestEWMAUpdateSettings:
     """Live settings updates via BaseProcessor.update_settings."""
 

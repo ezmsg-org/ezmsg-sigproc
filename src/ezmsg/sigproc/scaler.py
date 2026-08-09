@@ -104,18 +104,30 @@ class AdaptiveStandardScalerTransformer(
     ]
 ):
     # `accumulate` can be live-propagated into the child EWMAs (see
-    # `update_settings` below) and `passthrough` is read live in
-    # `__call__`/`__acall__`; `time_constant` and `axis` are baked into
+    # `update_settings` below) and `passthrough`/`reset_on_resume` are read live
+    # in `__call__`/`__acall__`; `time_constant` and `axis` are baked into
     # the children during `_reset_state`.
-    NONRESET_SETTINGS_FIELDS = frozenset({"accumulate", "passthrough"})
+    NONRESET_SETTINGS_FIELDS = frozenset({"accumulate", "passthrough", "reset_on_resume"})
+
+    def _skip(self, message: AxisArray) -> bool:
+        """Whether to bypass scaling, flagging a reset if this is a real gap.
+
+        See :obj:`EWMASettings.reset_on_resume`. A reset here is enough for both
+        children: `_reset_state` rebuilds them from scratch.
+        """
+        if not self.settings.passthrough:
+            return False
+        if self.settings.reset_on_resume and np.prod(message.data.shape) != 0:
+            self._request_reset()
+        return True
 
     def __call__(self, message: AxisArray) -> AxisArray:
-        if self.settings.passthrough:
+        if self._skip(message):
             return message
         return super().__call__(message)
 
     async def __acall__(self, message: AxisArray) -> AxisArray:
-        if self.settings.passthrough:
+        if self._skip(message):
             return message
         return await super().__acall__(message)
 

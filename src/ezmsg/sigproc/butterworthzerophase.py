@@ -16,7 +16,7 @@ import scipy.signal
 from array_api_compat import get_namespace, is_numpy_array
 from ezmsg.baseproc import BaseTransformerUnit
 from ezmsg.baseproc.composite import CompositeProcessor
-from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
 from ezmsg.util.messages.util import replace
 
 from .butterworthfilter import (
@@ -31,8 +31,7 @@ from .filter import (
     SOSCoeffs,
     _sosfilt_mlx_metal_xp,
 )
-from .util.array import xp_asarray, xp_empty, xp_flip
-from .util.axisarray_buffer import HybridAxisArrayBuffer
+from .util.array import xp_asarray, xp_copy, xp_empty, xp_flip
 
 if _HAS_MLX_METAL:
     import mlx.core as _mx
@@ -81,10 +80,19 @@ class ButterworthBackwardFilterTransformer(FilterByDesignTransformer[Butterworth
 
     Intended to be used as stage 2 in a zero-phase filter pipeline, receiving
     forward-filtered data from a ButterworthFilterTransformer.
+
+    Retention is a fixed ``pad_length``-sample carry-over rather than a ring
+    buffer: each chunk is filtered together with the tail of the previous one, the
+    settled portion is emitted, and the trailing ``pad_length`` raw samples are kept
+    to be re-filtered with the next chunk. The data are never permuted, so the
+    filter runs along whichever axis the caller laid the time dimension on -- which
+    for time-last input is the contiguous one, and is also the layout the MLX Metal
+    kernel wants.
     """
 
     # Instance attributes (initialized in _reset_state)
-    _buffer: HybridAxisArrayBuffer | None
+    _tail: typing.Any | None  # trailing pad_length input samples, in the input's layout
+    _tail_offset: float  # axis offset of the first sample in _tail
     _coefs_cache: BACoeffs | SOSCoeffs | None
     _zi_tiled: typing.Any | None  # xp array in the namespace of the input data
     _sos_mx: typing.Any | None  # cached mlx.core.array of SOS coefs (SOS + MLX path)
@@ -177,7 +185,8 @@ class ButterworthBackwardFilterTransformer(FilterByDesignTransformer[Butterworth
         self._coefs_cache = None
         self._zi_tiled = None
         self._sos_mx = None
-        self._buffer = None
+        self._tail = None
+        self._tail_offset = 0.0
         # Compute pad_length based on the message's sampling rate
         axis = message.dims[0] if self.settings.axis is None else self.settings.axis
         fs = 1 / message.axes[axis].gain
@@ -231,40 +240,39 @@ class ButterworthBackwardFilterTransformer(FilterByDesignTransformer[Butterworth
             self._pad_length = self._compute_pad_length(fs)
             self._zi_tiled = None  # Invalidate; recomputed on next use.
             self._sos_mx = None
+            self._tail = None
             self.state.needs_redesign = False
-
-            # Initialize buffer with duration based on pad_length
-            # Add some margin to handle variable chunk sizes
-            buffer_duration = (self._pad_length + 1) / fs
-            self._buffer = HybridAxisArrayBuffer(duration=buffer_duration, axis=axis)
 
         # Early exit if filter is effectively disabled
         if self._coefs_cache is None or self.settings.order <= 0 or message.data.size <= 0:
             return message
 
-        # Write new data to buffer
-        self._buffer.write(message)
-        n_available = self._buffer.available()
-        n_output = n_available - self._pad_length
-
         xp = np if is_numpy_array(message.data) else get_namespace(message.data)
 
-        # If we don't have enough data yet, return empty
+        # Prepend the carry-over from the previous chunk. Both are in the input's
+        # layout, so this concatenation involves no transpose.
+        if self._tail is None:
+            combined = message.data
+            combined_offset = message.axes[axis].offset
+        else:
+            combined = xp.concatenate([self._tail, message.data], axis=ax_idx)
+            combined_offset = self._tail_offset
+
+        n_available = combined.shape[ax_idx]
+        n_output = n_available - self._pad_length
+
+        # If we don't have enough data yet, hold everything and return empty.
         if n_output <= 0:
+            self._tail = combined
+            self._tail_offset = combined_offset
             new_shape = list(message.data.shape)
             new_shape[ax_idx] = 0
             empty_data = xp_empty(xp, tuple(new_shape), dtype=message.data.dtype)
             return replace(message, data=empty_data)
 
-        # Peek all available data from buffer
-        # Note: HybridAxisArrayBuffer moves the target axis to position 0
-        buffered = self._buffer.peek(n_available)
-        combined = buffered.data
-        buffer_ax_idx = 0  # Buffer always puts time axis at position 0
-
         # Backward filter on reversed data — stay in the input's namespace.
-        combined_rev = xp_flip(combined, axis=buffer_ax_idx)
-        backward_zi = self._initialize_zi(combined_rev, buffer_ax_idx, xp)
+        combined_rev = xp_flip(combined, axis=ax_idx)
+        backward_zi = self._initialize_zi(combined_rev, ax_idx, xp)
 
         is_mlx = xp is not np and xp.__name__ == "mlx.core"
         use_mlx_metal = (
@@ -280,32 +288,30 @@ class ButterworthBackwardFilterTransformer(FilterByDesignTransformer[Butterworth
             y_bwd_rev, _ = _sosfilt_mlx_metal_xp(
                 self._sos_mx,
                 combined_rev,
-                buffer_ax_idx,
+                ax_idx,
                 backward_zi,
                 self.settings.mlx_metal_chunk_sizes,
             )
         elif self.settings.coef_type == "ba":
             b, a = self._coefs_cache
-            y_bwd_rev, _ = scipy.signal.lfilter(b, a, combined_rev, axis=buffer_ax_idx, zi=backward_zi)
+            y_bwd_rev, _ = scipy.signal.lfilter(b, a, combined_rev, axis=ax_idx, zi=backward_zi)
         else:  # sos via scipy (non-MLX, or use_mlx_metal disabled)
-            y_bwd_rev, _ = scipy.signal.sosfilt(self._coefs_cache, combined_rev, axis=buffer_ax_idx, zi=backward_zi)
+            y_bwd_rev, _ = scipy.signal.sosfilt(self._coefs_cache, combined_rev, axis=ax_idx, zi=backward_zi)
 
         # Reverse back to get output in correct time order
-        y_bwd = xp_flip(y_bwd_rev, axis=buffer_ax_idx)
+        y_bwd = xp_flip(y_bwd_rev, axis=ax_idx)
 
         # Output the settled portion (first n_output samples)
-        y = y_bwd[:n_output]
+        y = slice_along_axis(y_bwd, slice(0, n_output), ax_idx)
 
-        # Advance buffer read head to discard output samples, keep pad_length
-        self._buffer.seek(n_output)
+        # Retain the trailing pad_length *input* samples to be re-filtered with the
+        # next chunk. Copy rather than hold a view: `combined` may be a whole
+        # file-sized chunk, and a view would keep all of it alive.
+        self._tail = xp_copy(slice_along_axis(combined, slice(n_output, None), ax_idx))
+        self._tail_offset = combined_offset + n_output * message.axes[axis].gain
 
-        # Build output with adjusted time axis
-        # LinearAxis offset is already correct from the buffer
-        out_axis = buffered.axes[axis]
-
-        # Move axis back to original position if needed
-        if ax_idx != 0:
-            y = xp.moveaxis(y, 0, ax_idx)
+        # The emitted samples start at the front of `combined`.
+        out_axis = replace(message.axes[axis], offset=combined_offset)
 
         return replace(
             message,

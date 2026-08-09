@@ -43,6 +43,25 @@ def xp_asarray(xp, obj, *, dtype=None, device=None):
     return xp.asarray(obj, **kwargs)
 
 
+def xp_copy(arr):
+    """Return an independent copy of ``arr``, portable across backends.
+
+    Use when retaining a *slice* of a large array beyond the lifetime of the
+    original: a view would keep the whole parent buffer alive. Dispatches to the
+    Array API ``asarray(copy=True)`` where supported, else the namespace's own
+    constructor (MLX's ``mx.array`` copies), else ``.copy()``.
+    """
+    xp = get_namespace(arr)
+    try:
+        return xp.asarray(arr, copy=True)
+    except TypeError:
+        # MLX's asarray predates the `copy` keyword; its array constructor copies.
+        ctor = getattr(xp, "array", None)
+        if ctor is not None:
+            return ctor(arr)
+        return arr.copy()
+
+
 def xp_create(fn, *args, dtype=None, device=None, **extra):
     """Call a creation function (``zeros``, ``ones``, ``eye``) portably.
 
