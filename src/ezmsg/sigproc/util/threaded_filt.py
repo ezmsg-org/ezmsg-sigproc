@@ -105,6 +105,8 @@ def should_thread(
         return False
     if not isinstance(data, np.ndarray) or data.nbytes < min_bytes:
         return False
+    if _worker_count() < 2:
+        return False
     split = _split_axis(data.shape, axis_idx)
     # Need at least two blocks for threading to mean anything.
     return split is not None and data.shape[split] >= 2

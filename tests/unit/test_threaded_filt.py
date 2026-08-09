@@ -131,6 +131,11 @@ def test_should_thread_declines_when_nothing_to_split():
     assert not threaded_filt.should_thread(np.zeros((1, 400_000)), 1)
 
 
+def test_should_thread_declines_with_one_worker(monkeypatch):
+    monkeypatch.setattr(threaded_filt, "_worker_count", lambda: 1)
+    assert not threaded_filt.should_thread(np.zeros((256, 4_000)), 1)
+
+
 def test_should_thread_declines_non_numpy():
     class NotAnArray:
         nbytes = 1 << 30
