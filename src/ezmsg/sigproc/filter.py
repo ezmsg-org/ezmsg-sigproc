@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
+import scipy.ndimage
 import scipy.signal
 from array_api_compat import get_namespace, is_numpy_array
 from ezmsg.baseproc import (
@@ -19,8 +20,12 @@ from ezmsg.baseproc import (
 )
 from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
 from ezmsg.util.messages.util import replace
+from scipy.fft import next_fast_len as _next_fast_len
 
+from .util import sosfilt_direct
 from .util.array import array_device, xp_asarray, xp_create
+from .util.threaded_filt import DEFAULT_MIN_BYTES as _DEFAULT_THREAD_MIN_BYTES
+from .util.threaded_filt import filt_threaded, should_thread
 
 try:
     import mlx.core as _mx
@@ -85,101 +90,49 @@ def _normalize_coefs(
     return coef_type, coefs
 
 
-def _sosfilt_xp(sos, x, axis_idx, zi, xp):
-    """SOS filtering via parallel prefix scan (direct-form II transposed).
+#: Promoted dtypes for which the dedicated numpy FIR paths reproduce
+#: ``lfilter``'s semantics. ``ndimage.correlate1d`` demotes its output to the
+#: input dtype and ``rfft`` rejects complex outright, so anything else -- complex,
+#: integer, extended precision -- goes to scipy rather than being mis-handled.
+_FIR_NUMPY_DTYPES = (np.dtype(np.float32), np.dtype(np.float64))
 
-    Solves the IIR linear recurrence z[n+1] = A @ z[n] + B * x[n] using a
-    Hillis-Steele inclusive prefix scan in O(log N) sequential steps instead
-    of O(N), minimizing Python-level loop overhead for lazy-evaluation
-    backends like MLX.
 
-    Args:
-        sos: (n_sections, 6) SOS coefficient array. Each row is [b0, b1, b2, a0, a1, a2].
-            a0 is assumed to be 1.0 (standard for scipy.signal.butter output).
-        x: Input data array.
-        axis_idx: The axis along which to filter.
-        zi: Initial conditions, shape (n_sections, *x.shape[:axis_idx], 2, *x.shape[axis_idx+1:]).
-        xp: Array API namespace.
+def _is_fir(b: npt.NDArray, a: npt.NDArray) -> bool:
+    """Whether BA coefficients describe a filter with no feedback."""
+    return len(a) == 1 or bool(np.allclose(a[1:], 0))
 
-    Returns:
-        (y, zf) tuple — filtered output and final filter state.
+
+def _fir_taps(b: npt.NDArray, a: npt.NDArray, data: typing.Any) -> tuple[npt.NDArray, typing.Any] | None:
+    """Normalized FIR taps and the dtype to filter in, or None to use scipy.
+
+    ``scipy.signal.lfilter`` divides through by ``a[0]`` and promotes to
+    ``result_type(b, a, x)``; the dedicated paths are only a valid substitute if
+    they do the same. Note ``a`` participates in the promotion even when it is
+    just ``[1.0]``: float32 taps against the default float64 ``a`` still filter
+    in float64 (verified against ``lfilter`` over all eight float32/float64
+    combinations of b, a and x).
+
+    Returns ``None`` for inputs the dedicated paths would silently mis-handle --
+    ``a[0] == 0``, or a promotion outside :data:`_FIR_NUMPY_DTYPES` -- so the
+    caller falls through to ``lfilter``, whose behavior is the reference.
     """
-    n_sections = sos.shape[0]
-    N = x.shape[axis_idx]
-
-    # Move time to axis 0 for uniform batch handling.
-    x = xp.moveaxis(x, axis_idx, 0)  # (N, *batch)
-    zi = xp.moveaxis(zi, axis_idx + 1, 1)  # (n_sections, 2, *batch)
-
-    # Flatten batch dims into one.
-    batch_shape = x.shape[1:]
-    batch_size = 1
-    for s in batch_shape:
-        batch_size *= s
-    x = xp.reshape(x, (N, batch_size))  # (N, B)
-    zi = xp.reshape(zi, (n_sections, 2, batch_size))  # (S, 2, B)
-
-    # Pre-allocate output zi.
-    zi_out = xp.zeros((n_sections, 2, batch_size), dtype=x.dtype)
-
-    for s in range(n_sections):
-        _b0 = float(sos[s, 0])
-        _b1 = float(sos[s, 1])
-        _b2 = float(sos[s, 2])
-        _a1 = float(sos[s, 4])
-        _a2 = float(sos[s, 5])
-
-        z_init = zi[s]  # (2, B)
-
-        # State recurrence: z[n+1] = A @ z[n] + B_vec * x[n]
-        #   A = [[-a1, 1], [-a2, 0]]
-        #   B_vec = [b1 - a1*b0, b2 - a2*b0]
-        # Output: y[n] = b0 * x[n] + z[n][0]
-        A_mat = xp_asarray(xp, np.array([[-_a1, 1.0], [-_a2, 0.0]]))  # (2, 2)
-        B_vec = xp_asarray(xp, np.array([_b1 - _a1 * _b0, _b2 - _a2 * _b0]))  # (2,)
-
-        # Initialize scan elements:
-        #   A_scan[n] = A for all n
-        #   c_scan[n] = B_vec * x[n]
-        A_scan = xp.zeros((N, 2, 2), dtype=A_mat.dtype)
-        A_scan[:] = A_mat  # broadcast A_mat into every row
-        c_scan = B_vec[None, :, None] * x[:, None, :]  # (N, 2, B)
-
-        # Hillis-Steele inclusive prefix scan.
-        # Operator: (A_r, c_r) ∘ (A_l, c_l) = (A_r @ A_l, A_r @ c_l + c_r)
-        # After the scan, A_scan[n] = A^(n+1) and
-        # c_scan[n] = Σ_{k=0..n} A^(n-k) @ B_vec * x[k].
-        stride = 1
-        while stride < N:
-            right_A = A_scan[stride:]  # (N-stride, 2, 2)
-            left_A = A_scan[:-stride]  # (N-stride, 2, 2)
-            right_c = c_scan[stride:]  # (N-stride, 2, B)
-            left_c = c_scan[:-stride]  # (N-stride, 2, B)
-
-            A_scan[stride:] = right_A @ left_A
-            c_scan[stride:] = right_A @ left_c + right_c
-            stride *= 2
-
-        # Recover all states: z[n+1] = A_scan[n] @ z_init + c_scan[n]
-        z_from_scan = A_scan @ z_init[None, :, :] + c_scan  # (N, 2, B)
-
-        # z[0..N-1] for output: prepend z_init, drop z[N].
-        z_needed = xp.zeros((N, 2, batch_size), dtype=x.dtype)
-        z_needed[0] = z_init
-        z_needed[1:] = z_from_scan[:-1]
-
-        # y[n] = b0 * x[n] + z[n][0]; output becomes input for the next section.
-        x = _b0 * x + z_needed[:, 0, :]  # (N, B)
-
-        # Final state for this section: z[N]
-        zi_out[s] = z_from_scan[-1]
-
-    # Restore shapes.
-    x = xp.reshape(x, (N,) + batch_shape)
-    zi_out = xp.reshape(zi_out, (n_sections, 2) + batch_shape)
-    x = xp.moveaxis(x, 0, axis_idx)
-    zi_out = xp.moveaxis(zi_out, 1, axis_idx + 1)
-    return x, zi_out
+    a = np.asarray(a).reshape(-1)
+    if a.size == 0:
+        return None
+    a0 = a[0]
+    if a0 == 0:
+        # scipy warns and yields inf here; defer to it rather than inventing.
+        return None
+    b = np.asarray(b)
+    if a0 != 1:
+        b = b / a0
+    if not is_numpy_array(data):
+        # Device-constrained backends keep filtering in their own dtype.
+        return b, data.dtype
+    dtype = np.result_type(b.dtype, a.dtype, data.dtype)
+    if dtype not in _FIR_NUMPY_DTYPES:
+        return None
+    return b, dtype
 
 
 def _sosfilt_mlx_metal_xp(sos_mx, data, axis_idx, zi, chunk_sizes):
@@ -223,8 +176,13 @@ def _fir_filt_fft(b, data, zi, axis_idx, xp):
     # Prepend state (last M input samples from previous chunk)
     extended = xp.concat([zi, data], axis=axis_idx)
 
-    # FFT convolution
-    fft_len = N + 2 * M
+    # FFT convolution. Round the transform length up to a 5-smooth size: the
+    # natural N + 2M is frequently a bad length (a large prime factor), and
+    # paying for a few extra samples is far cheaper than the resulting
+    # transform. Measured worst case, 17 taps on a 8192-sample chunk:
+    # 56.8 ms at N + 2M = 8224 (= 2**5 * 257) vs 24.9 ms at the next fast
+    # length. next_fast_len itself costs ~40 ns, so it is called inline.
+    fft_len = _next_fast_len(N + 2 * M)
     B = xp.fft.rfft(b, n=fft_len, axis=axis_idx)
     X = xp.fft.rfft(extended, n=fft_len, axis=axis_idx)
     full = xp.fft.irfft(B * X, n=fft_len, axis=axis_idx)
@@ -235,6 +193,52 @@ def _fir_filt_fft(b, data, zi, axis_idx, xp):
     # Update state: last M samples of extended input
     new_zi = slice_along_axis(extended, slice(N, N + M), axis_idx)
 
+    return out, new_zi
+
+
+def _fir_filt_conv1d(b_1d, data, zi, axis_idx):
+    """FIR filtering via scipy.ndimage's C-level 1-D correlation (numpy only).
+
+    The scipy.signal route for a numpy FIR is ``lfilter``, which for ``len(a) == 1``
+    degrades to ``np.apply_along_axis(np.convolve, ...)`` -- a Python-level loop
+    with one ``np.convolve`` call per channel. ``ndimage.correlate1d`` does the
+    same arithmetic in one C call over the whole array, which is 1.9-3.0x faster
+    for short filters.
+
+    It loses to the FFT path once the filter grows (see FIR_FFT_MIN_TAPS), so
+    this is the short-filter branch only.
+
+    Args:
+        b_1d: 1-D FIR taps, shape (M+1,).
+        data: Input array.
+        zi: State holding the last M input samples along axis_idx.
+        axis_idx: The axis along which to filter.
+
+    Returns:
+        (filtered_data, new_zi) tuple.
+    """
+    M = zi.shape[axis_idx]
+
+    if M == 0:
+        return data * b_1d[0], zi
+
+    N = data.shape[axis_idx]
+    extended = np.concatenate([zi, data], axis=axis_idx)
+
+    # correlate1d centers its kernel; origin shifts it. Correlating with the
+    # reversed taps at origin = -(len(b) // 2) makes output index n use the
+    # window starting at n, i.e. y[n] = sum_k b[k] * extended[n + M - k], which
+    # is the causal convolution whose first N samples are the valid output.
+    # Verified for both odd and even tap counts.
+    full = scipy.ndimage.correlate1d(
+        extended,
+        b_1d[::-1],
+        axis=axis_idx,
+        mode="constant",
+        origin=-(len(b_1d) // 2),
+    )
+    out = slice_along_axis(full, slice(0, N), axis_idx)
+    new_zi = slice_along_axis(extended, slice(N, N + M), axis_idx)
     return out, new_zi
 
 
@@ -304,6 +308,20 @@ class FilterBaseSettings(ez.Settings):
     coef_type: str = "ba"
     """The type of filter coefficients. One of "ba" or "sos"."""
 
+    use_fast_sosfilt: bool = True
+    """If True (default), numpy SOS filtering calls scipy's Cython kernel
+    directly instead of going through ``scipy.signal.sosfilt``.
+
+    Output is bit-identical -- same kernel, same dtype promotion, same order of
+    operations -- so this is purely a latency optimization. It removes scipy's
+    fixed ~12-18 us of per-call validation and bookkeeping, which is invisible
+    on offline-sized chunks but dominant online: measured 59.9% of the call at
+    16 channels x 30 samples, 51.0% at 32x30, 16.6% at 256x30, 4.1% at 256x128.
+
+    The fast path depends on a private scipy entry point. It is verified against
+    the public function once per process, and falls back automatically if the
+    private kernel is missing or disagrees. Set False to force the public path."""
+
     use_mlx_metal: bool = True
     """If True (default), SOS filtering on MLX inputs runs on the GPU via the
     bundled Metal kernel (``sosfilt_mlx_metal``) instead of round-tripping
@@ -315,6 +333,38 @@ class FilterBaseSettings(ez.Settings):
     size that fits the remaining samples is selected on each launch; otherwise
     the largest size is repeated. Specializations compile lazily on first use.
     Values must be in ``[1, 512]``."""
+
+    thread_min_bytes: int = _DEFAULT_THREAD_MIN_BYTES
+    """Chunk size (bytes) at or above which scipy IIR filtering is split across
+    threads on a non-sample axis. Channels are independent recurrences, so the
+    result is bit-identical to the single-threaded call.
+
+    Only large chunks benefit: scipy's filters are single-threaded C loops, and
+    below ~1 MB the dispatch cost makes threading a net loss (measured 0.23x at
+    30 samples x 256 channels, 4.5x at 8192). The default keeps online-sized
+    chunks single-threaded while letting offline blocks use the cores. Set to 0
+    to disable threading entirely."""
+
+    fir_fft_min_taps: int = 64
+    """Tap count at or above which a numpy FIR filter is applied by FFT
+    convolution instead of scipy.ndimage's C-level correlation.
+
+    Neither wins everywhere. Measured on 256 channels (best FFT vs ndimage),
+    the FFT is 1.3-6.8x faster at 129-513 taps while ndimage is 1.6-3.0x
+    faster at 17-33 taps, with the crossover near 64 taps.
+
+    The two differ in more than speed, and the difference matters if you rely
+    on an offline run reproducing an online one exactly:
+
+    * The time-domain path is **chunk-size invariant** -- filtering in chunks
+      of 250, chunks of 333, or one shot gives bit-identical output.
+    * The FFT path is not. The transform length depends on the chunk length,
+      so a different chunking gives a different rounding: measured 2.6e-07
+      relative in float32 (~7e-16 in float64).
+
+    Both match scipy's ``lfilter`` to roundoff, so this is about reproducibility
+    across chunkings rather than accuracy. Set this very high to force the
+    time-domain path everywhere and keep FIR output chunk-invariant."""
 
 
 class FilterSettings(FilterBaseSettings):
@@ -329,9 +379,11 @@ class FilterState:
     zi: npt.NDArray | None = None
     fir_b: typing.Any | None = None  # reshaped taps for FFT path (broadcast shape)
     fir_b_1d: typing.Any | None = None  # 1D taps for conv path
-    fir_method: str | None = None  # 'conv', 'fft', or None (scipy)
+    fir_method: str | None = None  # "conv1d", "conv", "fft", or None (scipy)
     sos_method: str | None = None  # 'mlx_metal', 'scipy_numpy', or None (scipy)
     sos_mx: typing.Any | None = None  # cached mlx.core.array of SOS coefs
+    sos_direct: typing.Any | None = None  # DirectSosfilt with per-call setup hoisted
+    sos_direct_dtype: typing.Any | None = None  # promoted dtype sos_direct was built for
 
 
 class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisArray, FilterState]):
@@ -359,6 +411,34 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
         samp_shape = message.data.shape[:axis_idx] + message.data.shape[axis_idx + 1 :]
         return hash((message.key, samp_shape))
 
+    def _build_fir_taps(self, b: npt.NDArray, work_dtype: typing.Any, data: typing.Any, axis_idx: int) -> None:
+        """Cache the converted taps that both dedicated FIR paths read."""
+        xp = get_namespace(data)
+        dev = array_device(data)
+        # 1D taps for the conv paths
+        self.state.fir_b_1d = xp_asarray(xp, b, dtype=work_dtype, device=dev)
+        # Reshape b to broadcast: (1, ..., M+1, ..., 1) for FFT path
+        b_shape = [1] * data.ndim
+        b_shape[axis_idx] = len(b)
+        self.state.fir_b = xp.reshape(self.state.fir_b_1d, tuple(b_shape))
+
+    def _refresh_fir_taps(self, message: AxisArray, axis_idx: int) -> None:
+        """Rebuild the tap caches that ``update_coefficients`` dropped.
+
+        A same-length coefficient swap deliberately keeps ``zi``, so the taps
+        cannot be rebuilt there -- the dtype and device only become known when a
+        message arrives. If the new coefficients no longer route here at all
+        (complex taps, ``a[0] == 0``, a changed order), ``zi`` would mean
+        something different on the path they do route to, so start over instead.
+        """
+        _, coefs = _normalize_coefs(self.settings.coefs)
+        b, a = coefs
+        fir = _fir_taps(b, a, message.data) if _is_fir(b, a) else None
+        if fir is None or len(fir[0]) - 1 != self.state.zi.shape[axis_idx]:
+            self._reset_state(message)
+        else:
+            self._build_fir_taps(fir[0], fir[1], message.data, axis_idx)
+
     def _reset_state(self, message: AxisArray) -> None:
         # __call__ guarantees a non-empty message here. Initial conditions are
         # edge-scaled by the first sample x0 -- the scipy ``lfilter_zi * x[0]``
@@ -373,26 +453,34 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
 
         if self.settings.coef_type == "ba":
             b, a = coefs
-            is_fir = len(a) == 1 or np.allclose(a[1:], 0)
+            fir = _fir_taps(b, a, message.data) if _is_fir(b, a) else None
 
-            if is_fir and not is_numpy_array(message.data):
-                # FIR + non-numpy: use conv_general if available, else FFT.
-                # The zi buffer holds the last M input samples; fill with x0.
+            if fir is not None:
+                # Dedicated FIR paths. scipy's lfilter degrades to a per-channel
+                # Python loop when len(a) == 1, so numpy comes here too rather
+                # than falling through to the generic scipy branch below. Note
+                # these paths define zi as the last M *input* samples, unlike
+                # scipy's lfilter state, which is why the setup differs.
+                b_fir, work_dtype = fir
                 xp = get_namespace(message.data)
                 dev = array_device(message.data)
-                M = len(b) - 1  # filter order
+                M = len(b_fir) - 1  # filter order
                 zi_shape = list(message.data.shape)
                 zi_shape[axis_idx] = M
-                zeros = xp_create(xp.zeros, tuple(zi_shape), dtype=message.data.dtype, device=dev)
+                # zi holds input samples, but in the promoted dtype: it is
+                # concatenated with the incoming chunk, so it is what carries
+                # result_type(b, x) through to the output.
+                zeros = xp_create(xp.zeros, tuple(zi_shape), dtype=work_dtype, device=dev)
                 self.state.zi = zeros + message.data[first_idx]
-                # 1D taps for conv path
-                self.state.fir_b_1d = xp_asarray(xp, b, dtype=message.data.dtype, device=dev)
-                # Reshape b to broadcast: (1, ..., M+1, ..., 1) for FFT path
-                b_shape = [1] * message.data.ndim
-                b_shape[axis_idx] = len(b)
-                self.state.fir_b = xp.reshape(self.state.fir_b_1d, tuple(b_shape))
-                # Choose method
-                self.state.fir_method = "conv" if hasattr(xp, "conv_general") else "fft"
+                self._build_fir_taps(b_fir, work_dtype, message.data, axis_idx)
+                # Choose method. Non-numpy backends prefer their own fused
+                # convolution when they have one. For numpy the choice is
+                # tap-count driven: ndimage's C loop wins for short filters,
+                # the FFT wins once the filter grows (see FIR_FFT_MIN_TAPS).
+                if is_numpy_array(message.data):
+                    self.state.fir_method = "fft" if len(b_fir) >= self.settings.fir_fft_min_taps else "conv1d"
+                else:
+                    self.state.fir_method = "conv" if hasattr(xp, "conv_general") else "fft"
                 self.state.sos_method = None
                 self.state.sos_mx = None
                 return
@@ -456,6 +544,11 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
             self.state.sos_method = None
             self.state.sos_mx = None
 
+        # Built lazily on first use, so that a coefficient update which does not
+        # force a full reset still rebuilds it (see update_coefficients).
+        self.state.sos_direct = None
+        self.state.sos_direct_dtype = None
+
     def update_coefficients(
         self,
         coefs: FilterCoefficients | tuple[npt.NDArray, npt.NDArray] | npt.NDArray,
@@ -490,6 +583,15 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
                         reset_needed = True
                 else:
                     reset_needed = True
+                if not reset_needed:
+                    # A same-length swap can still flip FIR <-> IIR (a=[1, 0] ->
+                    # a=[1, -0.9]). The FIR paths keep zi as the last M *input*
+                    # samples while lfilter keeps filter state, so the carried
+                    # state is not transferable between them: reset.
+                    _, old_ba = _normalize_coefs(old_coefs)
+                    _, new_ba = _normalize_coefs(coefs)
+                    if old_ba is None or _is_fir(*old_ba) != _is_fir(*new_ba):
+                        reset_needed = True
             elif self.settings.coef_type == "sos":
                 if isinstance(old_coefs, np.ndarray) and isinstance(coefs, np.ndarray):
                     if old_coefs.shape != coefs.shape:
@@ -503,12 +605,64 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
         # Always invalidate cached MLX SOS coefs; _reset_state or _process
         # will re-cache them from the new settings.coefs on the next call.
         self.state.sos_mx = None
+        # Likewise the converted FIR taps. A same-length swap does not reset zi,
+        # so without this the filter would keep running the old taps.
+        # _refresh_fir_taps rebuilds them on the next chunk.
+        self.state.fir_b = None
+        self.state.fir_b_1d = None
+        # Likewise the direct-kernel filter, which holds a converted copy of the
+        # coefficients. A same-length coefficient change does not reset zi, so
+        # without this it would keep filtering with the old coefficients.
+        self.state.sos_direct = None
+        self.state.sos_direct_dtype = None
+
+    def _sos_direct_for(self, data_np: npt.NDArray, zi_np: npt.NDArray):
+        """Cached direct-kernel SOS filter for the current stream, or None.
+
+        Built on first use rather than in ``_reset_state`` so that a coefficient
+        update which does not force a reset still picks up the new coefficients.
+
+        The cache is keyed on ``result_type(sos, data, zi)``, because the promoted
+        dtype is baked into the converted coefficients. A stream that starts in
+        float32 and later receives float64 must not keep filtering in the dtype it
+        began with, and one that later receives complex must not have its
+        imaginary part cast away -- public ``sosfilt`` promotes in both cases.
+        ``np.result_type`` costs ~0.09 us against the ~5-7 us this path saves, so
+        it is checked every call rather than assumed to be stable.
+
+        A cached ``None`` means "this dtype is not usable"; the caller falls back
+        to public ``sosfilt``, which handles the dtypes the kernel does not.
+        """
+        if self.settings.coef_type != "sos" or not self.settings.use_fast_sosfilt:
+            return None
+        if not isinstance(data_np, np.ndarray) or not isinstance(zi_np, np.ndarray):
+            return None
+        _, coefs = _normalize_coefs(self.settings.coefs)
+        dtype = np.result_type(coefs[0], data_np, zi_np)
+        # NB: `dtype == None` is True for float64 -- np.dtype(None) is float64 --
+        # so the sentinel has to be excluded explicitly.
+        if self.state.sos_direct_dtype is not None and dtype == self.state.sos_direct_dtype:
+            return self.state.sos_direct
+        self.state.sos_direct_dtype = dtype
+        self.state.sos_direct = None
+        if dtype in sosfilt_direct.SUPPORTED_DTYPES and sosfilt_direct.available():
+            try:
+                self.state.sos_direct = sosfilt_direct.DirectSosfilt(coefs[0], dtype)
+            except ValueError:
+                # Malformed coefficients: leave the authoritative error to public
+                # sosfilt rather than raising a lookalike from here.
+                pass
+        return self.state.sos_direct
 
     def _process(self, message: AxisArray) -> AxisArray:
         if message.data.size > 0:
             axis = message.dims[0] if self.settings.axis is None else self.settings.axis
             axis_idx = message.get_axis_idx(axis)
-            if self.state.fir_method == "conv":
+            if self.state.fir_method is not None and self.state.fir_b_1d is None:
+                self._refresh_fir_taps(message, axis_idx)
+            if self.state.fir_method == "conv1d":
+                dat_out, self.state.zi = _fir_filt_conv1d(self.state.fir_b_1d, message.data, self.state.zi, axis_idx)
+            elif self.state.fir_method == "conv":
                 xp = get_namespace(message.data)
                 dat_out, self.state.zi = _fir_filt_conv(self.state.fir_b_1d, message.data, self.state.zi, axis_idx, xp)
             elif self.state.fir_method == "fft":
@@ -526,15 +680,45 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
                     self.settings.mlx_metal_chunk_sizes,
                 )
             elif self.state.sos_method == "scipy_numpy":
+                data_np, zi_np = np.asarray(message.data), np.asarray(self.state.zi)
                 _, coefs = _normalize_coefs(self.settings.coefs)
-                filt_func = {"ba": scipy.signal.lfilter, "sos": scipy.signal.sosfilt}[self.settings.coef_type]
-                dat_out_np, self.state.zi = filt_func(
-                    *coefs,
-                    np.asarray(message.data),
-                    axis=axis_idx,
-                    zi=np.asarray(self.state.zi),
-                )
+                if should_thread(data_np, axis_idx, self.settings.thread_min_bytes):
+                    dat_out_np, self.state.zi = filt_threaded(
+                        scipy.signal.sosfilt,
+                        coefs,
+                        data_np,
+                        axis_idx,
+                        zi_np,
+                        zi_axis_offset=1,
+                        min_bytes=self.settings.thread_min_bytes,
+                    )
+                else:
+                    direct = self._sos_direct_for(data_np, zi_np)
+                    if direct is not None:
+                        dat_out_np, self.state.zi = direct.apply(data_np, axis_idx, zi_np)
+                    else:
+                        dat_out_np, self.state.zi = scipy.signal.sosfilt(*coefs, data_np, axis=axis_idx, zi=zi_np)
                 dat_out = xp_asarray(get_namespace(message.data), dat_out_np)
+            elif is_numpy_array(message.data) and self.settings.coef_type == "sos":
+                _, coefs = _normalize_coefs(self.settings.coefs)
+                if should_thread(message.data, axis_idx, self.settings.thread_min_bytes):
+                    dat_out, self.state.zi = filt_threaded(
+                        scipy.signal.sosfilt,
+                        coefs,
+                        message.data,
+                        axis_idx,
+                        self.state.zi,
+                        zi_axis_offset=1,
+                        min_bytes=self.settings.thread_min_bytes,
+                    )
+                else:
+                    direct = self._sos_direct_for(message.data, self.state.zi)
+                    if direct is not None:
+                        dat_out, self.state.zi = direct.apply(message.data, axis_idx, self.state.zi)
+                    else:
+                        dat_out, self.state.zi = scipy.signal.sosfilt(
+                            *coefs, message.data, axis=axis_idx, zi=self.state.zi
+                        )
             else:
                 _, coefs = _normalize_coefs(self.settings.coefs)
                 filt_func = {"ba": scipy.signal.lfilter, "sos": scipy.signal.sosfilt}[self.settings.coef_type]
@@ -547,10 +731,21 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
                     # When scipy's bundled copy gains MLX support, the manual
                     # conversion will become a no-op.
                     coefs = tuple(xp_asarray(input_xp, c) for c in coefs)
-                dat_out, self.state.zi = filt_func(*coefs, message.data, axis=axis_idx, zi=self.state.zi)
-                if input_xp is not None:
+                    # Non-numpy arrays are left to scipy's own dispatch;
+                    # filt_threaded declines anything that is not an ndarray.
+                    dat_out, self.state.zi = filt_func(*coefs, message.data, axis=axis_idx, zi=self.state.zi)
                     dat_out = xp_asarray(input_xp, dat_out)
                     self.state.zi = xp_asarray(input_xp, self.state.zi)
+                else:
+                    dat_out, self.state.zi = filt_threaded(
+                        filt_func,
+                        coefs,
+                        message.data,
+                        axis_idx,
+                        self.state.zi,
+                        zi_axis_offset=1 if self.settings.coef_type == "sos" else 0,
+                        min_bytes=self.settings.thread_min_bytes,
+                    )
         else:
             dat_out = message.data
 
