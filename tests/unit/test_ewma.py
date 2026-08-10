@@ -530,3 +530,44 @@ def test_ewma_bias_correction_survives_chunking():
         parts.append(chunked(mk(c, n)).data)
         n += c.shape[0]
     np.testing.assert_allclose(np.concatenate(parts, axis=0), single, rtol=1e-10, atol=1e-10)
+
+
+@pytest.mark.parametrize("n_dim", [2, 3])
+def test_ewma_result_is_independent_of_filter_axis_position(n_dim):
+    """Hoisting the filter axis to last must not change the result.
+
+    ``_process`` moves the filter axis to the end before handing scipy the
+    recurrence, because scipy's IIR loop strides by the trailing dimension
+    otherwise and degrades superlinearly with it. That is purely a memory-layout
+    optimization, so filtering axis 0 of ``(time, ch)`` and axis -1 of the
+    transposed array must agree exactly -- and keep agreeing across chunks, since
+    ``zi`` rides through the same hoist.
+    """
+    fs = 1000.0
+    n_times, n_ch = 137, 24
+    rng = np.random.default_rng(7)
+    shape = (n_times, n_ch) if n_dim == 2 else (n_times, n_ch, 3)
+    data = rng.standard_normal(shape).astype(np.float32)
+    dims = ["time", "ch"] if n_dim == 2 else ["time", "ch", "feat"]
+
+    def run(transpose: bool, chunks: list[int]) -> np.ndarray:
+        proc = EWMATransformer(time_constant=0.5, axis="time", accumulate=True)
+        outs, start = [], 0
+        for n in chunks:
+            block = data[start : start + n]
+            if transpose:
+                block = np.ascontiguousarray(np.moveaxis(block, 0, -1))
+            msg = AxisArray(
+                data=block,
+                dims=(dims[1:] + ["time"]) if transpose else dims,
+                axes={"time": AxisArray.TimeAxis(fs=fs, offset=start / fs)},
+            )
+            out = proc(msg)
+            arr = out.data
+            outs.append(np.moveaxis(arr, -1, 0) if transpose else arr)
+            start += n
+        return np.concatenate(outs, axis=0)
+
+    # Ragged chunks so the hoisted `zi` has to carry correctly across boundaries.
+    chunks = [1, 13, 40, 3, 80]
+    np.testing.assert_array_equal(run(False, chunks), run(True, chunks))
