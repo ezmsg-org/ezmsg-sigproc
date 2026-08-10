@@ -257,6 +257,49 @@ class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray
         self._state.zi = xp.zeros_like(sub_dat)
         self._state.n_seen = 0
 
+    def _lfilter_axis_last(
+        self, data: npt.NDArray, axis_idx: int, zi: npt.NDArray | None
+    ) -> tuple[npt.NDArray, npt.NDArray]:
+        """Run the EWMA recurrence with the filter axis contiguous.
+
+        scipy's IIR loop strides by the trailing dimension whenever the filter
+        axis is not last, and the cost grows *superlinearly* with that dimension:
+        at 300 samples the step from 256 to 1024 channels is 4x the data but 8.7x
+        the time, versus linear when the axis is already last. Acquisition sources
+        emit ``(time, ch)``, so the streaming case hits the bad orientation by
+        default.
+
+        Hoisting the axis to the end and moving the result back costs two copies
+        that pay for themselves at every size measured, and never lose:
+        1.04x at 300x256, 1.78x at 30x1024, 4.41x at 300x1024, 1.72x at 3000x1024
+        -- all *including* the copies. ``filter.py``'s SOS kernel already does
+        this (``util/sosfilt_direct``), which is why ``ButterworthZeroPhase``
+        measures layout-neutral while this did not.
+
+        ``zi`` is one sample slice, so hoisting it too is negligible and keeps the
+        stored state in the caller's layout for anything that inspects it.
+        """
+        b = [self._state.alpha]
+        a = [1.0, self._state.alpha - 1.0]
+        last = data.ndim - 1
+        if axis_idx == last:
+            return sps.lfilter(b, a, data, axis=-1, zi=zi)
+
+        x = np.ascontiguousarray(np.moveaxis(data, axis_idx, last))
+        zi_last = None if zi is None else np.ascontiguousarray(np.moveaxis(zi, axis_idx, last))
+        y, zf = sps.lfilter(b, a, x, axis=-1, zi=zi_last)
+        # Materialize back into the caller's layout rather than returning a
+        # transposed view. The view saves a full-size pass here and is 12-17%
+        # faster *in isolation*, but it loses end to end at the sizes that matter
+        # (measured on the whole scaler at 1024 ch: 6% worse at 300 samples, 2%
+        # worse at 1000, 5% better only by 3000) because every downstream op then
+        # reads strided. Keep the copy; it is also the less surprising contract
+        # for a library consumer.
+        return (
+            np.ascontiguousarray(np.moveaxis(y, last, axis_idx)),
+            np.ascontiguousarray(np.moveaxis(zf, last, axis_idx)),
+        )
+
     def _process(self, message: AxisArray) -> AxisArray:
         axis = self.settings.axis or message.dims[0]
         axis_idx = message.get_axis_idx(axis)
@@ -276,24 +319,12 @@ class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray
             # Normal behavior: update state with new samples.
             if self._state.zi is not None and not is_numpy_array(self._state.zi):
                 self._state.zi = np.asarray(self._state.zi)
-            expected, self._state.zi = sps.lfilter(
-                [self._state.alpha],
-                [1.0, self._state.alpha - 1.0],
-                message.data,
-                axis=axis_idx,
-                zi=self._state.zi,
-            )
+            expected, self._state.zi = self._lfilter_axis_last(message.data, axis_idx, self._state.zi)
         else:
             # Process-only: compute output without updating state.
             if self._state.zi is not None and not is_numpy_array(self._state.zi):
                 self._state.zi = np.asarray(self._state.zi)
-            expected, _ = sps.lfilter(
-                [self._state.alpha],
-                [1.0, self._state.alpha - 1.0],
-                message.data,
-                axis=axis_idx,
-                zi=self._state.zi,
-            )
+            expected, _ = self._lfilter_axis_last(message.data, axis_idx, self._state.zi)
 
         # The zero-initialized EWMA under-counts by 1-(1-alpha)^t at cumulative
         # sample t; dividing it out gives the exact exponentially-weighted
