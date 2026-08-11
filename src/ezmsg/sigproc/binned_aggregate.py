@@ -54,6 +54,7 @@ from ezmsg.util.messages.axisarray import (
 )
 
 from .aggregate import AggregationFunction, aggregate_slices, needs_coordinates
+from .util.array import xp_copy
 from .util.binning import BinSchedule, BinStep
 from .util.message import is_empty_along
 
@@ -269,7 +270,10 @@ class BinnedAggregateTransformer(
 
         if step.n_bins == 0:
             # No bin completes in this chunk; grow the carry and emit nothing.
-            self._state.carry = message.data if carry is None else xp.concat((carry, message.data), axis=axis_idx)
+            # `xp_copy` is intentional.
+            self._state.carry = (
+                xp_copy(message.data) if carry is None else xp.concat((carry, message.data), axis=axis_idx)
+            )
             return self._empty_like(message, axis_idx, step)
 
         # Prepend the carried partial-bin samples so bin 0 spans carry + current.
@@ -288,9 +292,10 @@ class BinnedAggregateTransformer(
 
         # Leftover after the last completed bin becomes the next chunk's carry
         # (its length is step.carry_count, tracked by the schedule).
+        # Copied, not viewed, intentionally.
         last_work = ends_work[-1]
         self._state.carry = (
-            slice_along_axis(work, slice(last_work, None), axis=axis_idx) if step.carry_count > 0 else None
+            xp_copy(slice_along_axis(work, slice(last_work, None), axis=axis_idx)) if step.carry_count > 0 else None
         )
 
         return replace(

@@ -18,6 +18,8 @@ from ezmsg.baseproc import (
 from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
 from ezmsg.util.messages.util import replace
 
+from .util.array import xp_copy
+
 
 class DiffSettings(ez.Settings):
     axis: str | None = None
@@ -50,7 +52,10 @@ class DiffTransformer(BaseStatefulTransformer[DiffSettings, AxisArray, AxisArray
 
     def _reset_state(self, message) -> None:
         ax_idx = message.get_axis_idx(self.settings.axis)
-        self.state.last_dat = slice_along_axis(message.data, slice(0, 1), axis=ax_idx)
+        # Copied for the same reason as in `_process`: state must never alias the
+        # message's (possibly shared-memory-backed) buffer, even though this one
+        # happens to be overwritten before the call returns.
+        self.state.last_dat = xp_copy(slice_along_axis(message.data, slice(0, 1), axis=ax_idx))
         if self.settings.scale_by_fs:
             ax_info = message.get_axis(self.settings.axis)
             if hasattr(ax_info, "data"):
@@ -68,8 +73,8 @@ class DiffTransformer(BaseStatefulTransformer[DiffSettings, AxisArray, AxisArray
             xp.concat((self.state.last_dat, message.data), axis=ax_idx),
             axis=ax_idx,
         )
-        # Prepare last_dat for next iteration
-        self.state.last_dat = slice_along_axis(message.data, slice(-1, None), axis=ax_idx)
+        # Prepare last_dat for next iteration. Copied, not viewed, intentionally.
+        self.state.last_dat = xp_copy(slice_along_axis(message.data, slice(-1, None), axis=ax_idx))
         # Scale by fs if requested. This converts the diff to a derivative. e.g., diff of position becomes velocity.
         if self.settings.scale_by_fs:
             ax_info = message.get_axis(axis)
