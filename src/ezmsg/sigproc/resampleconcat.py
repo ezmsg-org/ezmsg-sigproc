@@ -29,7 +29,6 @@ from __future__ import annotations
 import typing
 
 import ezmsg.core as ez
-import numpy as np
 from ezmsg.util.messages.axisarray import AxisArray
 
 from .concat import ConcatProcessor, ConcatSettings
@@ -48,9 +47,10 @@ class ResampleConcatSettings(ez.Settings):
     # --- Resample passthrough ---
     buffer_duration: float = 2.0
     fill_value: str = "extrapolate"
-    max_chunk_delay: float = np.inf
+    max_chunk_delay: float | None = None
+    """See :attr:`ezmsg.sigproc.resample.ResampleSettings.max_chunk_delay`."""
     buffer_update_strategy: UpdateStrategy = "immediate"
-    reference_reset_after_chunks: float = 3
+    reference_reset_after_chunks: int | None = 3
     """See :attr:`ezmsg.sigproc.resample.ResampleSettings.reference_reset_after_chunks`."""
 
     # --- Concat passthrough ---

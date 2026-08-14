@@ -250,10 +250,15 @@ def test_resample_recovers_from_reference_reset():
     assert sum(counts[14:]) > 0, "Resampler never recovered after the reference reset."
 
 
-def test_resample_reset_disabled_can_stall():
-    """With recovery disabled (inf threshold), a large backward jump stops output."""
+@pytest.mark.parametrize("reset_after", [None, float("inf")], ids=["none", "legacy_inf"])
+def test_resample_reset_disabled_can_stall(reset_after):
+    """With recovery disabled, a large backward jump stops output.
+
+    ``None`` is the canonical "disabled"; the legacy non-finite spelling is folded
+    onto it so pre-existing pipelines keep working (``inf`` does not survive JSON).
+    """
     fs, chunk = 100.0, 30
-    resample = ResampleProcessor(resample_rate=None, buffer_duration=4.0, reference_reset_after_chunks=float("inf"))
+    resample = ResampleProcessor(resample_rate=None, buffer_duration=4.0, reference_reset_after_chunks=reset_after)
     counts = []
     for i in range(25):
         off = i * chunk / fs - (100.0 if i >= 10 else 0.0)
