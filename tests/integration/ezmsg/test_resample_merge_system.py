@@ -214,14 +214,14 @@ def test_resample_merge_healthy_system(test_name: str | None = None):
 def test_resample_merge_seizes_when_recovery_disabled_system(test_name: str | None = None):
     """Documents the original bug: with recovery disabled, a backward reference jump stops output.
 
-    Setting ``reference_reset_after_chunks=inf`` restores the pre-hardening behaviour, so a
+    Setting ``reference_reset_after_chunks=None`` restores the pre-hardening behaviour, so a
     large sustained backward offset jump pushes the reference permanently below the
     resampler's high-water mark and the merged output ceases well before input is exhausted.
     """
     _, _, _, last_t = _run_resample_merge(
         glitch_at=15,
         glitch_back=100.0,
-        reset_after=float("inf"),
+        reset_after=None,
         use_output_reference=False,
         fn=get_test_fn(test_name),
     )

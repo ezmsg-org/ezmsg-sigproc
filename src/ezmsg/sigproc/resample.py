@@ -22,14 +22,30 @@ from .util.buffer import UpdateStrategy
 from .util.message import has_samples_along
 
 
+def _as_limit(value: float | None) -> float | None:
+    """Normalize an optional "no limit" setting to ``None``.
+
+    ``None`` is the canonical way to say "no limit" because it survives JSON
+    serialization, which ``inf`` does not. Non-finite values are accepted and
+    folded onto ``None`` so pipelines that predate this convention keep working.
+    """
+    if value is None or not math.isfinite(value):
+        return None
+    return value
+
+
 class ResampleSettings(ez.Settings):
     axis: str = "time"
 
     resample_rate: float | None = None
     """target resample rate in Hz. If None, the resample rate will be determined by the reference signal."""
 
-    max_chunk_delay: float = np.inf
-    """Maximum delay between outputs in seconds. If the delay exceeds this value, the transformer will extrapolate."""
+    max_chunk_delay: float | None = None
+    """
+    Maximum delay between outputs in seconds. If the delay exceeds this value, the
+    transformer will extrapolate. ``None`` (the default) means no limit: the transformer
+    never extrapolates on wall-clock alone. A non-finite value is treated as ``None``.
+    """
 
     fill_value: str = "extrapolate"
     """
@@ -62,7 +78,7 @@ class ResampleSettings(ez.Settings):
     rate mode the reference grid is synthetic and carries no data.
     """
 
-    reference_reset_after_chunks: float = 3
+    reference_reset_after_chunks: int | None = 3
     """
     Robustness against a non-monotonic reference clock.
 
@@ -78,9 +94,10 @@ class ResampleSettings(ez.Settings):
     resumes on the new clock. Small, self-correcting jitter (a few out-of-order samples)
     does not trigger this and is simply skipped, keeping the output monotonic.
 
-    Set to ``float("inf")`` to disable reset recovery (the transformer may then stall
+    Set to ``None`` to disable reset recovery (the transformer may then stall
     indefinitely on a backward clock jump). Output across a genuine reset is necessarily
     discontinuous; sanitising the reference timestamps upstream remains the robust fix.
+    A non-finite value is treated as ``None``.
     """
 
 
@@ -225,7 +242,8 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
                 self.state.stale_ref_pushes += 1
             else:
                 self.state.stale_ref_pushes = 0
-            if self.state.stale_ref_pushes >= self.settings.reference_reset_after_chunks:
+            reset_after = _as_limit(self.settings.reference_reset_after_chunks)
+            if reset_after is not None and self.state.stale_ref_pushes >= reset_after:
                 first, step = self._axis_first_step(ax)
                 warnings.warn(
                     "ResampleProcessor: reference clock jumped backward and stayed behind "
@@ -297,11 +315,14 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
 
         # If we do not rely on an external reference, and we have not received new data in a while,
         #  then extrapolate our reference vector out beyond the delay limit.
-        b_project = self.settings.resample_rate is not None and time.monotonic() > (
-            self.state.last_write_time + self.settings.max_chunk_delay
+        max_chunk_delay = _as_limit(self.settings.max_chunk_delay)
+        b_project = (
+            self.settings.resample_rate is not None
+            and max_chunk_delay is not None
+            and time.monotonic() > (self.state.last_write_time + max_chunk_delay)
         )
         if b_project:
-            n_append = math.ceil(self.settings.max_chunk_delay / ref_ax.gain)
+            n_append = math.ceil(max_chunk_delay / ref_ax.gain)
             xvec_append = ref_xvec[-1] + np.arange(1, n_append + 1) * ref_ax.gain
             ref_xvec = np.hstack((ref_xvec, xvec_append))
 
@@ -449,8 +470,8 @@ class ResampleUnit(BaseConsumerUnit[ResampleSettings, AxisArray, ResampleProcess
             # the wall-clock extrapolation in `__next__` can fire without input.
             # Reference-driven mode never becomes ready by wall-clock, so there
             # a pure event wait suffices.
-            timeout = self.SETTINGS.max_chunk_delay if self.SETTINGS.resample_rate is not None else np.inf
-            if np.isfinite(timeout):
+            timeout = _as_limit(self.SETTINGS.max_chunk_delay) if self.SETTINGS.resample_rate is not None else None
+            if timeout is not None:
                 try:
                     await asyncio.wait_for(self._wake.wait(), timeout=timeout)
                 except asyncio.TimeoutError:
