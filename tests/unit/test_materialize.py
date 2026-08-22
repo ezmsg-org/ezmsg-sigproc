@@ -6,7 +6,6 @@ from ezmsg.sigproc.materialize import (
     MaterializeMode,
     MaterializeSettings,
     MaterializeTransformer,
-    materialize,
     materialize_array,
 )
 from tests.helpers.empty_time import check_empty_result, make_empty_msg, make_msg
@@ -43,12 +42,6 @@ def test_mode_accepts_str():
 def test_invalid_mode_rejected():
     with pytest.raises(ValueError):
         materialize_array(np.ones(3), "eventually")
-
-
-def test_factory():
-    xformer = materialize("off")
-    assert isinstance(xformer, MaterializeTransformer)
-    assert xformer.settings.mode is MaterializeMode.OFF
 
 
 @requires_mlx

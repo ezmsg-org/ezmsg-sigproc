@@ -164,8 +164,3 @@ class MaterializeTransformer(BaseTransformer[MaterializeSettings, AxisArray, Axi
 
 class Materialize(BaseTransformerUnit[MaterializeSettings, AxisArray, AxisArray, MaterializeTransformer]):
     SETTINGS = MaterializeSettings
-
-
-def materialize(mode: MaterializeMode | str = MaterializeMode.SYNC) -> MaterializeTransformer:
-    """Construct a :obj:`MaterializeTransformer`. See :obj:`MaterializeSettings`."""
-    return MaterializeTransformer(MaterializeSettings(mode=MaterializeMode(mode)))
