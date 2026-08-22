@@ -63,6 +63,62 @@ def _supports_matmul_out(xp, dtype, device) -> bool:
     return True
 
 
+def _matmul_add(xp, data, weights, bias):
+    """``data @ weights + bias``, using the backend's fused kernel when it has one.
+
+    The obvious formulation for stacked ``A|B`` weights is to glue a column of
+    ones onto the data and do one matmul, but that materializes a copy of the
+    whole message every cycle just to carry a constant.
+
+    MLX offers ``addmm``, which folds the add into the matmul epilogue and is
+    the clear win there: measured on an M4 Pro, concat is 1.26-1.33x slower at
+    30x256 and 128x512, 1.07x at 512x1024.
+
+    Without ``addmm`` the choice is narrower than it looks. Dropping the concat
+    saves copying the message but adds a full read-modify-write pass over the
+    *result*, and on NumPy those very nearly cancel: ``matmul(...) + bias``
+    measured 0.80-1.15x against concat from 30x64 to 3000x1024 in both float32
+    and float64 -- a wash. Adding in place is what tips it, by skipping the
+    second allocation that ``+ bias`` would discard:
+
+    ========  ========  ========  ========  ========  ========
+    n_ch      n_t=30    n_t=300   n_t=600   n_t=2000  n_t=6000
+    ========  ========  ========  ========  ========  ========
+    64          0.96x     0.96x     0.98x     0.97x     1.34x
+    256         0.98x     0.93x     1.04x     1.59x     1.57x
+    1024        0.96x     1.28x     1.20x     1.13x     1.24x
+    ========  ========  ========  ========  ========  ========
+
+    So it is 2-10% *slower* while the message still fits in cache and 1.1-1.7x
+    faster once it does not. Shipped unconditionally because the two sides are
+    wildly asymmetric in absolute terms -- +0.13 µs at 30x256 against -233 µs at
+    3000x256 -- not because it wins everywhere.
+
+    The penalty is not about ``n_ch + 1`` making the matmul's inner dimension
+    odd; that was tested and rejected (at n_ch=255, so K=256 exactly, concat is
+    still 1.53x slower at 3000 samples). It is the copy's memory bandwidth,
+    which is why the crossover tracks working-set size rather than shape.
+
+    The in-place add mutates only the buffer ``matmul`` just allocated, which
+    nothing else references -- never the caller's message. ``bias`` is a row of
+    the same weight matrix as ``weights``, so its dtype can never be wider than
+    the matmul result's and the cast is always safe.
+    """
+    addmm = getattr(xp, "addmm", None)
+    if addmm is not None:
+        try:
+            return addmm(bias, data, weights)
+        except (TypeError, ValueError):
+            pass
+    out = xp.matmul(data, weights)
+    try:
+        out += bias
+    except (TypeError, ValueError):
+        # A backend with immutable arrays, or one that refuses the cast.
+        out = out + bias
+    return out
+
+
 def _call_weight_factory(factory: Callable, n_in: int, groups: list[list[int]] | None):
     """Call a user weights factory as ``f(n_in)`` or ``f(n_in, groups)``.
 
@@ -132,6 +188,8 @@ class AffineTransformSettings(ez.Settings):
 class AffineTransformState:
     weights: npt.NDArray | None = None
     """Full weight matrix for the dense kernel; None when blocks are in use."""
+    stacked_split: tuple | None = None
+    """``(A, B)`` views of stacked ``A|B`` weights, built on first use."""
     blocks: list | None = None
     """list of (in_slice, out_slice, sub_weights) for the block-diagonal kernel."""
     in_perm: npt.NDArray | None = None
@@ -262,6 +320,7 @@ class AffineTransformTransformer(
         w_dt = msg_dt if is_float_dtype(xp, msg_dt) else None
         if self._state.weights is not None:
             self._state.weights = xp_asarray(xp, self._state.weights, dtype=w_dt, device=dev)
+            self._state.stacked_split = None
         if self._state.blocks is not None:
             self._state.blocks = [
                 (in_slice, out_slice, xp_asarray(xp, sub_w, dtype=w_dt, device=dev))
@@ -328,6 +387,7 @@ class AffineTransformTransformer(
 
         if self._state.blocks is None:
             self._state.weights = weights
+            self._state.stacked_split = None
             return
 
         xp = get_namespace(weights)
@@ -345,6 +405,7 @@ class AffineTransformTransformer(
             for in_slice, out_slice, _ in self._state.blocks
         ]
         self._state.weights = None
+        self._state.stacked_split = None
 
     def _block_matmul(self, xp, data, axis_idx):
         """Multiply by a block-diagonal weight matrix, one contiguous block at a time.
@@ -381,6 +442,16 @@ class AffineTransformTransformer(
             result = xp.permute_dims(result, inv_dim_perm)
         return result
 
+    def _stacked_split(self, xp):
+        """Split stacked ``A|B`` weights into ``(A, B)``, once per weight matrix.
+
+        Both are views on the stored matrix, so this costs nothing to keep.
+        """
+        if self._state.stacked_split is None:
+            weights = self._state.weights
+            self._state.stacked_split = (weights[:-1], weights[-1:])
+        return self._state.stacked_split
+
     def _process(self, message: AxisArray) -> AxisArray:
         xp = get_namespace(message.data)
         axis = self.settings.axis or message.dims[-1]
@@ -390,22 +461,24 @@ class AffineTransformTransformer(
         if self._state.blocks is not None:
             data = self._block_matmul(xp, data, axis_idx)
         else:
-            if data.shape[axis_idx] == (self._state.weights.shape[0] - 1):
-                # The weights are stacked A|B where A is the transform and B is a single row
-                #  in the equation y = Ax + B. This supports NeuroKey's weights matrices.
-                sample_shape = data.shape[:axis_idx] + (1,) + data.shape[axis_idx + 1 :]
-                data = xp.concat(
-                    (data, xp_create(xp.ones, sample_shape, dtype=data.dtype, device=array_device(data))),
-                    axis=axis_idx,
-                )
+            # Weights stacked A|B express y = xA + B, where B is the last row and
+            # the input is notionally augmented with a column of ones. This
+            # supports NeuroKey's weights matrices.
+            stacked = data.shape[axis_idx] == (self._state.weights.shape[0] - 1)
 
-            if axis_idx in [-1, len(message.dims) - 1]:
-                data = xp.matmul(data, self._state.weights)
-            else:
+            needs_permute = axis_idx not in (-1, data.ndim - 1)
+            if needs_permute:
                 perm = list(range(data.ndim))
                 perm.append(perm.pop(axis_idx))
                 data = xp.permute_dims(data, perm)
+
+            if stacked:
+                a, b = self._stacked_split(xp)
+                data = _matmul_add(xp, data, a, b)
+            else:
                 data = xp.matmul(data, self._state.weights)
+
+            if needs_permute:
                 inv_perm = list(range(data.ndim))
                 inv_perm.insert(axis_idx, inv_perm.pop(-1))
                 data = xp.permute_dims(data, inv_perm)
