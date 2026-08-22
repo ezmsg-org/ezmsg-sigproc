@@ -178,6 +178,42 @@ To force evaluation, call ``mx.eval()``:
     result = proc(message)
     mx.eval(result.data)  # Forces computation to complete
 
+Choosing where to evaluate
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+A lazy backend only pays off while the graph stays lazy, so *where* you force
+evaluation is a property of the graph rather than of any one node. Wire an
+:obj:`~ezmsg.sigproc.materialize.Materialize` node at the point you want the
+barrier and pick a :obj:`~ezmsg.sigproc.materialize.MaterializeMode`:
+
+.. code-block:: python
+
+    from ezmsg.sigproc.materialize import Materialize, MaterializeSettings
+
+    # Bound the graph without stalling the caller
+    MAT = Materialize(MaterializeSettings(mode="async"))
+
+``sync`` (the default) blocks until the device finishes; ``async`` schedules the
+work and returns immediately; ``off`` leaves the data lazy. All three detach the
+pending graph except ``off``, so ``async`` is usually the right choice when the
+guarantee you want is "the graph does not accumulate" rather than "the values are
+on the host now" — it costs no round-trip and leaves the CPU free to build the
+next message.
+
+Two things are worth knowing before placing one:
+
+**Evaluating an output also evaluates the state computed alongside it.** MLX
+evaluates a multi-output primitive once and materializes all of its outputs. The
+Metal kernels in this package emit filter state as a second output of the same
+kernel as the filtered signal (``ewma_mlx_metal``, ``sosfilt_mlx_metal``), so a
+single barrier on the output is enough — the stateful transformers do not need,
+and deliberately do not have, their own internal ``mx.eval`` calls.
+
+**Evaluating an empty message forces nothing.** A branch that withholds output
+on some cycles — a binning stage fed sub-bin chunks, for instance — leaves its
+upstream graph un-evaluated on exactly those cycles. Place the barrier upstream
+of any stage that can emit a zero-length message, not downstream of it.
+
 For ``CompositeProcessor`` pipelines (like ``BandPowerTransformer``), you can
 override ``_post_process`` to call ``mx.eval()`` automatically so that every
 output is fully materialized:
