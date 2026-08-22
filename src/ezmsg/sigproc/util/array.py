@@ -138,6 +138,25 @@ def is_complex_dtype(dtype) -> bool:
     return "complex" in str(dtype).lower()
 
 
+def np_finfo(dtype):
+    """:func:`numpy.finfo` for a dtype from any backend, or ``None`` if unresolvable.
+
+    Backends disagree on what their ``finfo`` exposes -- MLX's, for instance,
+    carries only ``min``/``max``/``eps``, with no ``smallest_normal`` -- and some
+    have none at all. Since the float formats themselves are IEEE and identical
+    across backends, resolving the dtype *by name* against NumPy gives the full
+    set of limits for every backend at once. Falls back to ``None`` for dtypes
+    NumPy does not know (e.g. ``bfloat16``), which callers should treat as "skip
+    the limit-dependent step" rather than guessing.
+    """
+    for candidate in (dtype, str(dtype).rsplit(".", 1)[-1]):
+        try:
+            return np.finfo(np.dtype(candidate))
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
 def is_float_dtype(xp, dtype) -> bool:
     """Check whether *dtype* is a real floating-point type, portably."""
     try:
