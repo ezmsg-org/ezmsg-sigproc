@@ -68,10 +68,41 @@ def _matmul_add(xp, data, weights, bias):
 
     The obvious formulation for stacked ``A|B`` weights is to glue a column of
     ones onto the data and do one matmul, but that materializes a copy of the
-    whole message every cycle just to carry a constant. Broadcasting the bias
-    instead is cheaper everywhere, and MLX additionally offers ``addmm``, which
-    folds the add into the matmul epilogue: measured on an M4 Pro, concat is
-    1.26-1.33x slower than ``addmm`` at 30x256 and 128x512, 1.07x at 512x1024.
+    whole message every cycle just to carry a constant.
+
+    MLX offers ``addmm``, which folds the add into the matmul epilogue and is
+    the clear win there: measured on an M4 Pro, concat is 1.26-1.33x slower at
+    30x256 and 128x512, 1.07x at 512x1024.
+
+    Without ``addmm`` the choice is narrower than it looks. Dropping the concat
+    saves copying the message but adds a full read-modify-write pass over the
+    *result*, and on NumPy those very nearly cancel: ``matmul(...) + bias``
+    measured 0.80-1.15x against concat from 30x64 to 3000x1024 in both float32
+    and float64 -- a wash. Adding in place is what tips it, by skipping the
+    second allocation that ``+ bias`` would discard:
+
+    ========  ========  ========  ========  ========  ========
+    n_ch      n_t=30    n_t=300   n_t=600   n_t=2000  n_t=6000
+    ========  ========  ========  ========  ========  ========
+    64          0.96x     0.96x     0.98x     0.97x     1.34x
+    256         0.98x     0.93x     1.04x     1.59x     1.57x
+    1024        0.96x     1.28x     1.20x     1.13x     1.24x
+    ========  ========  ========  ========  ========  ========
+
+    So it is 2-10% *slower* while the message still fits in cache and 1.1-1.7x
+    faster once it does not. Shipped unconditionally because the two sides are
+    wildly asymmetric in absolute terms -- +0.13 µs at 30x256 against -233 µs at
+    3000x256 -- not because it wins everywhere.
+
+    The penalty is not about ``n_ch + 1`` making the matmul's inner dimension
+    odd; that was tested and rejected (at n_ch=255, so K=256 exactly, concat is
+    still 1.53x slower at 3000 samples). It is the copy's memory bandwidth,
+    which is why the crossover tracks working-set size rather than shape.
+
+    The in-place add mutates only the buffer ``matmul`` just allocated, which
+    nothing else references -- never the caller's message. ``bias`` is a row of
+    the same weight matrix as ``weights``, so its dtype can never be wider than
+    the matmul result's and the cast is always safe.
     """
     addmm = getattr(xp, "addmm", None)
     if addmm is not None:
@@ -79,7 +110,13 @@ def _matmul_add(xp, data, weights, bias):
             return addmm(bias, data, weights)
         except (TypeError, ValueError):
             pass
-    return xp.matmul(data, weights) + bias
+    out = xp.matmul(data, weights)
+    try:
+        out += bias
+    except (TypeError, ValueError):
+        # A backend with immutable arrays, or one that refuses the cast.
+        out = out + bias
+    return out
 
 
 def _call_weight_factory(factory: Callable, n_in: int, groups: list[list[int]] | None):

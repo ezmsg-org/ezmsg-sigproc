@@ -1185,3 +1185,46 @@ def test_common_rereference_mlx():
     out = proc(msg)
     assert isinstance(out.data, mx.array)
     assert np.allclose(np.asarray(out.data), expected, atol=1e-5)
+
+
+@pytest.mark.parametrize("dtype", [np.float32, np.float64, np.int32])
+def test_stacked_bias_does_not_mutate_input(dtype):
+    """The stacked ``A|B`` path adds the bias in place; it must not touch the message.
+
+    ``_matmul_add`` mutates the buffer ``matmul`` just allocated, which nothing
+    else references. If that ever became the caller's array instead, every other
+    subscriber to the same message would silently see transformed data.
+    """
+    rng = np.random.default_rng(0)
+    n_t, n_ch = 40, 64
+    weights = rng.standard_normal((n_ch + 1, n_ch))
+    data = (rng.standard_normal((n_t, n_ch)) * 10).astype(dtype)
+    before = data.copy()
+
+    msg = AxisArray(data, dims=["time", "ch"], axes={"time": AxisArray.TimeAxis(fs=1000.0)}, key="a")
+    out = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch"))(msg)
+
+    assert np.array_equal(msg.data, before), "input message was mutated"
+    assert not np.shares_memory(out.data, msg.data)
+
+    # And the result still equals the ones-column formulation it replaced.
+    augmented = np.concatenate((data, np.ones((n_t, 1), dtype=data.dtype)), axis=-1)
+    expected = augmented.astype(np.result_type(dtype, np.float64)) @ weights
+    assert np.allclose(np.asarray(out.data), expected, rtol=1e-5, atol=1e-5)
+
+
+def test_stacked_bias_repeat_processing_is_stable():
+    """Feeding the same message twice must give the same answer both times."""
+    rng = np.random.default_rng(1)
+    n_t, n_ch = 32, 48
+    weights = rng.standard_normal((n_ch + 1, n_ch))
+    msg = AxisArray(
+        rng.standard_normal((n_t, n_ch)),
+        dims=["time", "ch"],
+        axes={"time": AxisArray.TimeAxis(fs=1000.0)},
+        key="a",
+    )
+    proc = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch"))
+    first = np.asarray(proc(msg).data).copy()
+    second = np.asarray(proc(msg).data)
+    assert np.array_equal(first, second)
