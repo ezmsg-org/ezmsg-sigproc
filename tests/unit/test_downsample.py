@@ -7,7 +7,7 @@ from frozendict import frozendict
 
 from ezmsg.sigproc.downsample import DownsampleTransformer
 from tests.helpers.empty_time import check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
-from tests.helpers.util import assert_messages_equal
+from tests.helpers.util import assert_messages_equal, requires_mlx
 
 
 @pytest.mark.parametrize("block_size", [1, 5, 10, 20])
@@ -104,3 +104,47 @@ def test_downsample_empty_first():
     result = proc(empty)
     check_empty_result(result)
     check_state_not_corrupted(proc, normal)
+
+
+@requires_mlx
+@pytest.mark.parametrize("factor", [1, 2, 4])
+@pytest.mark.parametrize("block_size", [7, 13, 30])
+def test_downsample_mlx_matches_numpy(factor: int, block_size: int):
+    """Downsampling must work on MLX arrays and agree sample-for-sample with NumPy.
+
+    The selection used to be an integer index array, which MLX rejects outright
+    ("Cannot index mlx array using the given type"), so this path was entirely
+    broken on MLX. It is now a strided slice.
+    """
+    import mlx.core as mx
+
+    fs = 100.0
+    n_samples, n_ch = 97, 4
+    rng = np.random.default_rng(0)
+    src = rng.standard_normal((n_samples, n_ch)).astype(np.float32)
+
+    def stream(data):
+        proc = DownsampleTransformer(axis="time", factor=factor)
+        kept = []
+        for start in range(0, n_samples, block_size):
+            chunk = data[start : start + block_size]
+            msg = AxisArray(
+                chunk,
+                dims=["time", "ch"],
+                axes=frozendict({"time": AxisArray.TimeAxis(fs=fs, offset=start / fs)}),
+                key="ds",
+            )
+            out = proc(msg)
+            if out.data.shape[0]:
+                kept.append((np.asarray(out.data), out.axes["time"].offset))
+        return kept
+
+    mlx_kept = stream(mx.array(src))
+    np_kept = stream(src)
+
+    assert [d.shape for d, _ in mlx_kept] == [d.shape for d, _ in np_kept]
+    for (mlx_d, mlx_off), (np_d, np_off) in zip(mlx_kept, np_kept, strict=True):
+        assert np.array_equal(mlx_d, np_d)
+        assert mlx_off == pytest.approx(np_off)
+    # And the concatenation is exactly every `factor`-th input sample.
+    assert np.array_equal(np.concatenate([d for d, _ in mlx_kept]), src[::factor])

@@ -10,6 +10,7 @@ from ezmsg.sigproc.math.log import LogSettings, LogTransformer
 from ezmsg.sigproc.math.pow import PowSettings, PowTransformer
 from ezmsg.sigproc.math.scale import ScaleSettings, ScaleTransformer
 from tests.helpers.empty_time import check_empty_result, make_empty_msg
+from tests.helpers.util import requires_mlx
 
 
 def test_abs():
@@ -157,3 +158,28 @@ def test_scale_empty_time():
     proc = ScaleTransformer(ScaleSettings(scale=2.0))
     result = proc(make_empty_msg())
     check_empty_result(result)
+
+
+@requires_mlx
+@pytest.mark.parametrize("clip_zero", [False, True])
+def test_log_mlx_matches_numpy(clip_zero: bool):
+    """Log must work on MLX arrays and agree with the NumPy path.
+
+    ``clip_zero=True`` used to reach ``xp.isdtype`` and ``finfo.smallest_normal``,
+    neither of which MLX has, so it raised there; and it forced a host sync per
+    message via ``bool(xp.any(data <= 0))``, which is now gone.
+    """
+    import mlx.core as mx
+
+    in_dat = np.linspace(-1.0, 100.0, 130 * 255, dtype=np.float32).reshape(130, 255)
+    settings = LogSettings(base=10.0, clip_zero=clip_zero)
+
+    out_np = LogTransformer(settings)(AxisArray(in_dat, dims=["time", "ch"])).data
+    out_mx = np.asarray(LogTransformer(settings)(AxisArray(mx.array(in_dat), dims=["time", "ch"])).data)
+
+    assert np.array_equal(np.isnan(out_np), np.isnan(out_mx))
+    finite = np.isfinite(out_np) & np.isfinite(out_mx)
+    assert np.allclose(out_np[finite], out_mx[finite], rtol=1e-6, atol=1e-6)
+    if clip_zero:
+        # Nothing may be NaN: every non-positive input was raised to smallest_normal.
+        assert not np.any(np.isnan(out_mx))
