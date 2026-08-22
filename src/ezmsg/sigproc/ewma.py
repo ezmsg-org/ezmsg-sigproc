@@ -1,6 +1,7 @@
 """Exponentially weighted moving average (EWMA) utilities and parameter conversion."""
 
 import functools
+import math
 from dataclasses import field
 
 import ezmsg.core as ez
@@ -11,6 +12,8 @@ from array_api_compat import get_namespace, is_numpy_array
 from ezmsg.baseproc import BaseStatefulTransformer, BaseTransformerUnit, processor_state
 from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
 from ezmsg.util.messages.util import replace
+
+from ezmsg.sigproc.util.array import np_finfo
 
 
 def _ewma_mlx_metal_xp(data, axis_idx: int, zi, alpha: float, chunk_sizes: tuple[int, ...]):
@@ -203,12 +206,41 @@ class EWMASettings(ez.Settings):
     Values must be in ``[1, 1024]``."""
 
 
+def _bias_settle_count(alpha: float, dtype) -> float:
+    """Cumulative sample count past which the bias correction rounds to exactly 1.
+
+    The correction divides by ``1 - (1-alpha)**t``, which rises monotonically
+    toward 1. Once ``(1-alpha)**t < eps/2`` the subtraction is a no-op in the
+    output dtype, so the division is by exactly 1.0 and can be skipped from then
+    on -- permanently, since ``t`` only grows. That is the steady state of any
+    long-running stream: it arrives after ~17 time constants regardless of rate.
+
+    A dtype NumPy cannot identify gets float64's epsilon, the most conservative
+    answer -- a too-small epsilon only forgoes an optimization, while a too-large
+    one would drop a correction that still mattered.
+    """
+    finfo = np_finfo(dtype)
+    eps = float(finfo.eps if finfo is not None else np.finfo(np.float64).eps)
+    if not 0.0 < alpha < 1.0:
+        return math.inf
+    return math.log(0.5 * eps) / math.log1p(-alpha)
+
+
 @processor_state
 class EWMAState:
     alpha: float = field(default_factory=lambda: _alpha_from_tau(1.0, 1000.0))
     zi: npt.NDArray | None = None
     n_seen: int = 0
     """Cumulative sample count since reset, used to bias-correct the output."""
+
+    bias_settle_n: float = math.inf
+    """``n_seen`` past which the bias correction is exactly 1; see :func:`_bias_settle_count`."""
+
+    bias_corr: npt.NDArray | None = None
+    """Cached bias-correction divisor, in the message's namespace and dtype."""
+
+    bias_corr_for: tuple[int, int] | None = None
+    """``(n_seen, n)`` that :attr:`bias_corr` was built for."""
 
 
 class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray, EWMAState]):
@@ -256,6 +288,9 @@ class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray
         xp = np if is_numpy_array(message.data) else get_namespace(message.data)
         self._state.zi = xp.zeros_like(sub_dat)
         self._state.n_seen = 0
+        self._state.bias_corr = None
+        self._state.bias_corr_for = None
+        self._state.bias_settle_n = _bias_settle_count(self._state.alpha, message.data.dtype)
 
     def _lfilter_axis_last(
         self, data: npt.NDArray, axis_idx: int, zi: npt.NDArray | None
@@ -330,13 +365,38 @@ class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray
         # sample t; dividing it out gives the exact exponentially-weighted
         # average of the samples seen so far (the "Adam" bias correction).
         n = message.data.shape[axis_idx]
-        t = self._state.n_seen + np.arange(1, n + 1)
-        corr = 1.0 - (1.0 - self._state.alpha) ** t
-        corr = corr.reshape([n if i == axis_idx else 1 for i in range(message.data.ndim)])
-        expected = expected / xp.asarray(corr, dtype=expected.dtype)
+        expected = self._bias_correct(expected, n, axis_idx, message.data.ndim, xp)
         if self.settings.accumulate:
             self._state.n_seen += n
         return replace(message, data=expected)
+
+    def _bias_correct(self, expected, n: int, axis_idx: int, ndim: int, xp):
+        """Divide out the zero-init bias, skipping the work when it cannot matter.
+
+        Both shortcuts are guarded by integer comparisons, deliberately: an
+        earlier version keyed a cache on ``(n_seen, n, axis_idx, ndim, dtype)``
+        and building that tuple -- ``str()`` on a dtype, every message -- cost
+        more than the transfer it saved, making the node 2% slower end to end
+        even though the isolated rewrite measured 1.15-1.25x faster. Anything on
+        this path has to be cheaper than one small host->device copy.
+
+        * Once ``n_seen`` passes :attr:`~EWMAState.bias_settle_n` the divisor is
+          exactly 1 and the division goes away for good.
+        * Otherwise the divisor is reused whenever ``(n_seen, n)`` repeats, which
+          is every message when ``accumulate`` is False (``n_seen`` is frozen)
+          and never when it is True.
+        """
+        st = self._state
+        if st.n_seen >= st.bias_settle_n:
+            return expected
+
+        if st.bias_corr_for != (st.n_seen, n):
+            t = st.n_seen + np.arange(1, n + 1)
+            corr = 1.0 - (1.0 - st.alpha) ** t
+            corr = corr.reshape([n if i == axis_idx else 1 for i in range(ndim)])
+            st.bias_corr = xp.asarray(corr, dtype=expected.dtype)
+            st.bias_corr_for = (st.n_seen, n)
+        return expected / st.bias_corr
 
 
 class EWMAUnit(BaseTransformerUnit[EWMASettings, AxisArray, AxisArray, EWMATransformer]):
