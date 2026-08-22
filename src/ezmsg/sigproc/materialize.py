@@ -10,6 +10,54 @@ backend only pays off while the graph stays lazy, so every forced evaluation
 trades throughput for a guarantee. :obj:`MaterializeMode` names the three
 positions on that trade so a graph can pick one per site.
 
+Where to place it
+-----------------
+
+``mx.async_eval`` never blocks — not on a dependency still in flight (four
+chained stages enqueued in 2.4 ms against 71 ms of device work), and not when
+the queue is already deep (24 chunks enqueued in 5.7 ms against 201 ms, with no
+stall). Which makes it tempting to evaluate after every node. Don't: each
+evaluation point costs ~17-21 µs of *host* time to submit a command buffer,
+against ~1 µs to build the op graph it replaces — and in a live pipeline that
+host time is the executor's, not the device's.
+
+Measured on an M4 Pro across a three-node MLX segment (Metal SOS filter, scaler,
+abs), µs per message:
+
+==============  ============  ==========  ==========
+chunk           SYNC at tail  ASYNC tail  every node
+==============  ============  ==========  ==========
+30-64 x 256 ch       300-334     139-172     201-223
+128 x 1024 ch        594-641     338-342     328-331
+1024 x 2048 ch     1961-2009   1602-1650   1502-1593
+==============  ============  ==========  ==========
+
+At streaming chunk sizes, evaluating per node is 1.3-1.7x *worse* than one
+evaluation at the tail. It only breaks even once a single node's device work is
+large enough to bury the submission cost, which is well above any chunk a
+real-time graph carries. Fan-out is not a special case either: evaluating each
+branch as it finishes measured 1.3x worse than evaluating once at the join.
+
+What does pay is putting that one evaluation point at the end of the MLX
+segment, *before* whatever else the executor has to do — downstream units, or
+the NumPy conversion at a process boundary (shared memory cannot carry MLX
+arrays, so that conversion forces completion regardless). Against deferring to
+that conversion, as a function of how much other work sits in between:
+
+===============  ========  ================
+other host work  deferred  ASYNC at the end
+===============  ========  ================
+none                1.00x             1.00x
+~0.5 ms             1.00x        1.30-1.41x
+~2 ms               1.00x        1.63-1.69x
+~6 ms               1.00x        1.39-1.42x
+===============  ========  ================
+
+With nothing else to do the two are identical: the gain is entirely overlap
+between device work and host work, so it is worth exactly as much as the host
+has to get on with. ``benchmarks/benchmark_mlx_async_eval_placement.py``
+reproduces all of the above.
+
 .. note::
 
     Evaluating an **empty** message forces nothing. A branch that emits
@@ -45,11 +93,17 @@ class MaterializeMode(str, enum.Enum):
     effective at stopping a lazy graph from accumulating across calls — without
     the round-trip stall, leaving the CPU free to build the next message while
     the device works. Prefer it wherever the guarantee you want is "the graph
-    does not grow" rather than "the values are on the host now".
+    does not grow" rather than "the values are on the host now". Roughly 2x
+    :obj:`SYNC` on a streaming chain; see the module docstring for where to put
+    it.
 
     The trade is that it puts no bound on how far the producer may run ahead of
-    the device. That is a real risk only for a chain with no downstream
-    backpressure and no other evaluation point."""
+    the device, and the run-ahead is held as in-flight intermediates. Replaying
+    400 messages of 512x1024 float32 as fast as the host could build them:
+    2083 MiB in flight at 235 ms wall, against 33 MiB at 366 ms for :obj:`SYNC`
+    — 1.6x the throughput for 60x the transient memory. A live source that paces
+    itself never gets near that; a file replay with no downstream backpressure
+    and no other evaluation point can."""
 
     OFF = "off"
     """Do nothing; leave the data lazy.
