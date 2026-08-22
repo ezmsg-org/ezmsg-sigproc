@@ -22,6 +22,7 @@ from ezmsg.util.messages.modify import ModifyAxisSettings, ModifyAxisTransformer
 from .aggregate import AggregateSettings, AggregateTransformer, AggregationFunction
 from .butterworthfilter import ButterworthFilterSettings, ButterworthFilterTransformer
 from .downsample import DownsampleSettings, DownsampleTransformer
+from .materialize import MaterializeMode, materialize_array
 from .math.pow import PowSettings, PowTransformer
 from .window import WindowTransformer
 
@@ -39,6 +40,15 @@ class RMSBandPowerSettings(ez.Settings):
 
     apply_sqrt: bool = True
     """If True, output is RMS (root-mean-square). If False, output is mean-square power."""
+
+    materialize: MaterializeMode = MaterializeMode.ASYNC
+    """How to evaluate the output on a lazy backend (MLX); see
+    :obj:`~ezmsg.sigproc.materialize.MaterializeMode`. No-op elsewhere.
+
+    Defaults to :obj:`~ezmsg.sigproc.materialize.MaterializeMode.ASYNC`, which
+    keeps a lazy graph from accumulating without blocking the caller for values
+    it has no use for. Set ``OFF`` if a downstream node already materializes
+    every cycle, or ``SYNC`` to time this stage's work as its own."""
 
 
 class RMSBandPowerTransformer(CompositeProcessor[RMSBandPowerSettings, AxisArray, AxisArray]):
@@ -71,13 +81,7 @@ class RMSBandPowerTransformer(CompositeProcessor[RMSBandPowerSettings, AxisArray
 
     def _post_process(self, result: AxisArray | None) -> AxisArray | None:
         if result is not None:
-            try:
-                import mlx.core as mx
-
-                if isinstance(result.data, mx.array):
-                    mx.eval(result.data)
-            except ImportError:
-                pass
+            materialize_array(result.data, self.settings.materialize)
         return result
 
 

@@ -214,9 +214,9 @@ on some cycles — a binning stage fed sub-bin chunks, for instance — leaves i
 upstream graph un-evaluated on exactly those cycles. Place the barrier upstream
 of any stage that can emit a zero-length message, not downstream of it.
 
-For ``CompositeProcessor`` pipelines (like ``BandPowerTransformer``), you can
-override ``_post_process`` to call ``mx.eval()`` automatically so that every
-output is fully materialized:
+A ``CompositeProcessor`` can carry its own barrier rather than relying on a
+separate node, by overriding ``_post_process`` and delegating to
+:obj:`~ezmsg.sigproc.materialize.materialize_array`:
 
 .. code-block:: python
 
@@ -230,27 +230,31 @@ output is fully materialized:
 
         def _post_process(self, result: AxisArray | None) -> AxisArray | None:
             if result is not None:
-                try:
-                    import mlx.core as mx
-
-                    if isinstance(result.data, mx.array):
-                        mx.eval(result.data)
-                except ImportError:
-                    pass
+                materialize_array(result.data, self.settings.materialize)
             return result
 
-This pattern is used by ``BandPowerTransformer`` and ``RMSBandPowerTransformer``.
-It ensures downstream consumers (ezmsg Units, visualization, logging) receive
-fully evaluated arrays without needing to know about MLX internals.
-It also provides a safety valve so the lazy graph does not accumulate if the graph
-is not evaluated at the right time downstream.
+``BandPowerTransformer`` and ``RMSBandPowerTransformer`` do this, each exposing a
+``materialize`` setting that defaults to
+:obj:`~ezmsg.sigproc.materialize.MaterializeMode.ASYNC`. That is a safety valve —
+it keeps the lazy graph from accumulating when nothing downstream evaluates it —
+but it is a *default*, not a decision the node makes for you. A graph that
+already materializes downstream should set ``OFF``; a caller that needs the
+values on the host immediately should set ``SYNC``.
 
 .. note::
 
     The ``_post_process`` hook is defined on ``CompositeProcessor`` in
     ezmsg-baseproc. It runs after the entire processor chain completes and
-    receives the final output. The ``try``/``except ImportError`` pattern
-    keeps MLX as an optional dependency.
+    receives the final output. Routing through ``materialize_array`` keeps MLX
+    an optional dependency: it is a no-op on every other backend, and on a host
+    without MLX installed at all.
+
+A node should **not** force evaluation that its settings do not describe. An
+unconditional ``mx.eval`` inside a transformer is a device round-trip its caller
+did not ask for and cannot remove, and it compounds: a chain of *n* such nodes
+pays *n* stalls per message no matter how few barriers the graph actually needs.
+The stateful transformers in this package therefore have none — see
+"Choosing where to evaluate" above for why their state does not need one.
 
 MLX quirks
 ^^^^^^^^^^

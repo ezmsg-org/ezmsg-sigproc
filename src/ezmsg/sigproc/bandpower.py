@@ -16,6 +16,7 @@ from .aggregate import (
     RangedAggregateSettings,
     RangedAggregateTransformer,
 )
+from .materialize import MaterializeMode, materialize_array
 from .spectrogram import SpectrogramSettings, SpectrogramTransformer
 
 
@@ -37,6 +38,17 @@ class BandPowerSettings(ez.Settings):
     aggregation: AggregationFunction = AggregationFunction.MEAN
     """:obj:`AggregationFunction` to apply to each band."""
 
+    materialize: MaterializeMode = MaterializeMode.ASYNC
+    """How to evaluate the output on a lazy backend (MLX); see
+    :obj:`~ezmsg.sigproc.materialize.MaterializeMode`. No-op elsewhere.
+
+    Defaults to :obj:`~ezmsg.sigproc.materialize.MaterializeMode.ASYNC`: this
+    node's output is the end of a spectrogram chain, so evaluating it here keeps
+    a lazy graph from accumulating even if nothing downstream forces it -- but
+    the caller has no need of the values on the host, so there is nothing to
+    block for. Set ``OFF`` if a downstream node already materializes every
+    cycle, or ``SYNC`` to time this stage's work as its own."""
+
 
 class BandPowerTransformer(CompositeProcessor[BandPowerSettings, AxisArray, AxisArray]):
     @staticmethod
@@ -56,13 +68,7 @@ class BandPowerTransformer(CompositeProcessor[BandPowerSettings, AxisArray, Axis
 
     def _post_process(self, result: AxisArray | None) -> AxisArray | None:
         if result is not None:
-            try:
-                import mlx.core as mx
-
-                if isinstance(result.data, mx.array):
-                    mx.eval(result.data)
-            except ImportError:
-                pass
+            materialize_array(result.data, self.settings.materialize)
         return result
 
 
@@ -77,6 +83,7 @@ def bandpower(
         (70, 170),
     ],
     aggregation: AggregationFunction = AggregationFunction.MEAN,
+    materialize: MaterializeMode = MaterializeMode.ASYNC,
 ) -> BandPowerTransformer:
     """
     Calculate the average spectral power in each band.
@@ -89,5 +96,6 @@ def bandpower(
             spectrogram_settings=spectrogram_settings,
             bands=bands,
             aggregation=aggregation,
+            materialize=materialize,
         )
     )

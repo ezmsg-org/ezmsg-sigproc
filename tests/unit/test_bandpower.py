@@ -10,6 +10,7 @@ from ezmsg.sigproc.bandpower import (
     BandPowerTransformer,
     SpectrogramSettings,
 )
+from ezmsg.sigproc.materialize import MaterializeMode
 from tests.helpers.util import assert_messages_equal, create_messages_with_periodic_signal, requires_mlx
 
 
@@ -130,3 +131,29 @@ def test_bandpower_benchmark(backend, n_channels, benchmark):
 
         last_mx = next(o for o in reversed(results) if np.asarray(o.data).size > 0)
         assert isinstance(last_mx.data, mx.array), f"Expected mx.array, got {type(last_mx.data)}"
+
+
+def test_materialize_defaults_to_async():
+    """A node may not force a device stall its settings do not describe."""
+    assert BandPowerSettings().materialize is MaterializeMode.ASYNC
+
+
+@requires_mlx
+@pytest.mark.parametrize("mode", list(MaterializeMode))
+def test_materialize_mode_does_not_change_values(mode):
+    """The mode governs *when* the graph is evaluated, never the result."""
+    mx = pytest.importorskip("mlx.core")
+    messages = create_messages_with_periodic_signal(fs=500.0, msg_dur=1.0, win_step_dur=None)
+    mlx_messages = [AxisArray(mx.array(m.data.astype(np.float32)), dims=m.dims, axes=m.axes) for m in messages]
+
+    def run(m):
+        settings = BandPowerSettings(
+            spectrogram_settings=SpectrogramSettings(window_dur=0.5, window_shift=0.25),
+            bands=[(15, 25)],
+            materialize=m,
+        )
+        xformer = BandPowerTransformer(settings)
+        outputs = [xformer(msg) for msg in mlx_messages]
+        return np.concatenate([np.asarray(o.data) for o in outputs if o.data.size > 0])
+
+    np.testing.assert_allclose(run(mode), run(MaterializeMode.SYNC), rtol=1e-6, atol=1e-6)

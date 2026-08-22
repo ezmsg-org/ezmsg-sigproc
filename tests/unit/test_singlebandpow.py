@@ -4,6 +4,7 @@ from ezmsg.util.messages.axisarray import AxisArray
 
 from ezmsg.sigproc.butterworthfilter import ButterworthFilterSettings
 from ezmsg.sigproc.downsample import DownsampleSettings
+from ezmsg.sigproc.materialize import MaterializeMode
 from ezmsg.sigproc.singlebandpow import (
     RMSBandPowerSettings,
     RMSBandPowerTransformer,
@@ -228,3 +229,30 @@ def test_rms_bandpower_benchmark(backend, n_channels, benchmark):
         return outputs
 
     benchmark(process_all_chunks)
+
+
+def test_materialize_defaults_to_async():
+    """A node may not force a device stall its settings do not describe."""
+    assert RMSBandPowerSettings().materialize is MaterializeMode.ASYNC
+
+
+@requires_mlx
+@pytest.mark.parametrize("mode", list(MaterializeMode))
+def test_materialize_mode_does_not_change_values(mode):
+    """The mode governs *when* the graph is evaluated, never the result."""
+    mx = pytest.importorskip("mlx.core")
+    msg_np = _make_sinusoid(freq=50.0, amplitude=2.0, fs=1000.0, duration=2.0, n_channels=2)
+
+    def run(m):
+        msg = AxisArray(mx.array(msg_np.data.astype(np.float32)), dims=msg_np.dims, axes=msg_np.axes)
+        xformer = RMSBandPowerTransformer(
+            RMSBandPowerSettings(
+                bandpass=ButterworthFilterSettings(order=4, coef_type="sos", cuton=30.0, cutoff=70.0),
+                bin_duration=0.1,
+                apply_sqrt=True,
+                materialize=m,
+            )
+        )
+        return np.asarray(xformer(msg).data)
+
+    np.testing.assert_allclose(run(mode), run(MaterializeMode.SYNC), rtol=1e-6, atol=1e-6)
