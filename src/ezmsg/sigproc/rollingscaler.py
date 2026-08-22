@@ -199,7 +199,10 @@ class RollingScalerProcessor(BaseAdaptiveTransformer[RollingScalerSettings, Axis
         std = xp.where(xp.isnan(raw_std), raw_std, xp.clip(raw_std, min=1e-8))
         result = (message.data - self._state.mean) / std
         # Replace NaN/inf with 0 (equivalent to nan_to_num with nan=0, posinf=0, neginf=0)
-        result = xp.where(xp.isfinite(result), result, xp.asarray(0.0, dtype=result.dtype))
+        # Python scalar, not ``xp.asarray(0.0, dtype=...)``: the wrapped form
+        # allocates a device array per message and takes the strong promotion
+        # path. See the same change in :mod:`ezmsg.sigproc.scaler`.
+        result = xp.where(xp.isfinite(result), result, 0.0)
         if self.settings.clip is not None:
             result = xp.clip(result, -self.settings.clip, self.settings.clip)
 

@@ -571,3 +571,62 @@ def test_ewma_result_is_independent_of_filter_axis_position(n_dim):
     # Ragged chunks so the hoisted `zi` has to carry correctly across boundaries.
     chunks = [1, 13, 40, 3, 80]
     np.testing.assert_array_equal(run(False, chunks), run(True, chunks))
+
+
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+def test_ewma_bias_correction_settles_without_changing_output(dtype):
+    """Dropping the settled bias correction must be exactly a no-op.
+
+    ``_bias_correct`` stops dividing once ``1 - (1-alpha)**t`` rounds to exactly
+    1 in the output dtype. That threshold has to be conservative: crossing it
+    early would silently leave a real correction unapplied.
+    """
+    fs, n_ch, chunk = 1000.0, 3, 50
+    tau = 0.02  # settles quickly enough to exercise both sides in one stream
+    rng = np.random.default_rng(0)
+    src = rng.standard_normal((6000, n_ch)).astype(dtype)
+
+    proc = EWMATransformer(time_constant=tau, axis="time")
+    outs = []
+    for start in range(0, src.shape[0], chunk):
+        msg = AxisArray(
+            src[start : start + chunk],
+            dims=["time", "ch"],
+            axes={"time": AxisArray.TimeAxis(fs=fs, offset=start / fs)},
+            key="ewma",
+        )
+        outs.append(proc(msg).data)
+    got = np.concatenate(outs)
+
+    assert np.isfinite(proc.state.bias_settle_n)
+    assert proc.state.n_seen > proc.state.bias_settle_n, "stream too short to reach the settled path"
+
+    # Reference: the correction applied for every sample, never dropped.
+    import scipy.signal as sps
+
+    alpha = _alpha_from_tau(tau, 1.0 / fs)
+    y, _ = sps.lfilter([alpha], [1.0, alpha - 1.0], src.astype(np.float64), axis=0, zi=np.zeros((1, n_ch)))
+    t = np.arange(1, src.shape[0] + 1)[:, None]
+    ref = (y / (1.0 - (1.0 - alpha) ** t)).astype(dtype)
+
+    assert np.allclose(got, ref, rtol=10 * np.finfo(dtype).eps, atol=10 * np.finfo(dtype).eps)
+
+
+def test_ewma_bias_correction_reused_when_not_accumulating():
+    """With ``accumulate=False`` the divisor is frozen, so it is built once."""
+    fs, n_ch, chunk = 1000.0, 3, 50
+    rng = np.random.default_rng(0)
+    src = rng.standard_normal((500, n_ch)).astype(np.float32)
+
+    proc = EWMATransformer(time_constant=1.0, axis="time", accumulate=False)
+    for start in range(0, src.shape[0], chunk):
+        msg = AxisArray(
+            src[start : start + chunk],
+            dims=["time", "ch"],
+            axes={"time": AxisArray.TimeAxis(fs=fs, offset=start / fs)},
+            key="ewma",
+        )
+        proc(msg)
+
+    assert proc.state.n_seen == 0
+    assert proc.state.bias_corr_for == (0, chunk)

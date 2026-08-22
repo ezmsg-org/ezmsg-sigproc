@@ -179,12 +179,14 @@ class AdaptiveStandardScalerTransformer(
         # Get step: safe division avoids warnings from zero/negative variance
         varis = var_sq_message.data - mean_message.data**2
         mask = varis > 0
-        safe_varis = xp.where(mask, varis, xp.asarray(0.0, dtype=varis.dtype))
-        std = safe_varis**0.5
-        safe_std = xp.where(mask, std, xp.asarray(1.0, dtype=std.dtype))
-        result = xp.where(
-            mask, (message.data - mean_message.data) / safe_std, xp.asarray(0.0, dtype=message.data.dtype)
-        )
+        # Python scalars rather than ``xp.asarray(0.0, dtype=...)``: a wrapped
+        # scalar is a real array that has to be built (and, on a GPU backend,
+        # shipped) every message, and it drags the operands through the full
+        # promotion rules instead of the weak-scalar ones. 1.09-1.32x on MLX,
+        # M4 Pro, 30x256 through 512x1024.
+        safe_varis = xp.where(mask, varis, 0.0)
+        safe_std = xp.where(mask, xp.sqrt(safe_varis), 1.0)
+        result = xp.where(mask, (message.data - mean_message.data) / safe_std, 0.0)
         return replace(message, data=result)
 
 
