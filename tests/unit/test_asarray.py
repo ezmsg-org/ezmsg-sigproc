@@ -13,6 +13,7 @@ from ezmsg.sigproc.asarray import (
     _get_backend_module,
 )
 from tests.helpers.empty_time import check_empty_result, make_empty_msg, make_msg
+from tests.helpers.util import requires_mlx
 
 # -- Helpers ------------------------------------------------------------------
 
@@ -187,3 +188,93 @@ def test_empty_time_cross_backend(backend):
     # The time dimension should still be 0.
     time_idx = result.dims.index("time")
     assert result.data.shape[time_idx] == 0
+
+
+# -- MLX buffer cache limit ----------------------------------------------------
+
+
+def test_mlx_cache_limit_default_is_set():
+    """A default, not None: the growth it prevents is invisible in RSS.
+
+    MLX buffers are IOKit allocations, so a graph whose message length varies
+    can put gigabytes into the allocator's per-size cache while RSS stays flat.
+    Users do not go looking for a knob they have no symptom for.
+    """
+    assert AsArraySettings().mlx_cache_limit_mb == 512.0
+
+
+def test_mlx_cache_limit_not_applied_for_numpy_target(monkeypatch):
+    """Converting TO numpy must not touch a process-global MLX setting."""
+    import ezmsg.sigproc.asarray as asarray_module
+
+    calls = []
+    monkeypatch.setattr(asarray_module, "_apply_mlx_cache_limit", lambda mb: calls.append(mb))
+    proc = AsArrayTransformer(AsArraySettings(backend=ArrayBackend.numpy, mlx_cache_limit_mb=128.0))
+    proc(make_msg())
+    assert calls == []
+
+
+@requires_mlx
+def test_mlx_cache_limit_applied_once_for_mlx_target(monkeypatch):
+    import ezmsg.sigproc.asarray as asarray_module
+
+    calls = []
+    monkeypatch.setattr(asarray_module, "_apply_mlx_cache_limit", lambda mb: calls.append(mb))
+    proc = AsArrayTransformer(AsArraySettings(backend=ArrayBackend.mlx, mlx_cache_limit_mb=128.0))
+    for _ in range(3):
+        proc(make_msg())
+    # Called per message, but the applier itself is what dedupes -- see below.
+    assert calls == [128.0, 128.0, 128.0]
+
+
+@requires_mlx
+def test_apply_mlx_cache_limit_is_idempotent_and_warns_on_conflict(monkeypatch):
+    """The limit is process-global, so a second, different value is a conflict.
+
+    Silently letting the last node win would make the effective limit depend on
+    which unit happened to convert first.
+    """
+    import mlx.core as mx
+
+    import ezmsg.sigproc.asarray as asarray_module
+
+    sets = []
+    monkeypatch.setattr(mx, "set_cache_limit", lambda n: sets.append(n))
+    monkeypatch.setattr(asarray_module, "_MLX_CACHE_LIMIT_APPLIED", None)
+    warnings = []
+    monkeypatch.setattr(asarray_module.ez.logger, "warning", lambda msg, *a: warnings.append(msg))
+
+    asarray_module._apply_mlx_cache_limit(128.0)
+    asarray_module._apply_mlx_cache_limit(128.0)  # same value: no-op
+    assert sets == [128 * 1024 * 1024]
+    assert warnings == []
+
+    asarray_module._apply_mlx_cache_limit(256.0)  # different value: warn, override
+    assert sets == [128 * 1024 * 1024, 256 * 1024 * 1024]
+    assert len(warnings) == 1 and "process-global" in warnings[0]
+
+
+@requires_mlx
+def test_mlx_cache_limit_actually_bounds_the_cache():
+    """End to end: the setting reaches the allocator and caps it."""
+    import mlx.core as mx
+
+    import ezmsg.sigproc.asarray as asarray_module
+
+    previous = mx.set_cache_limit(2**40)
+    applied = asarray_module._MLX_CACHE_LIMIT_APPLIED
+    try:
+        asarray_module._MLX_CACHE_LIMIT_APPLIED = None
+        proc = AsArrayTransformer(AsArraySettings(backend=ArrayBackend.mlx, mlx_cache_limit_mb=32.0))
+        proc(make_msg())
+        mx.clear_cache()
+        # Churn many distinct sizes; without a limit this cache grows unbounded.
+        for n in range(1, 60):
+            a = mx.zeros((256, 300 * n))
+            mx.eval(a)
+            del a
+        assert mx.get_cache_memory() <= 32 * 1024 * 1024
+    finally:
+        mx.clear_cache()
+        mx.set_cache_limit(previous)
+        asarray_module._MLX_CACHE_LIMIT_APPLIED = applied
