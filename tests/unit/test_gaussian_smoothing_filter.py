@@ -42,6 +42,7 @@ def test_gaussian_smoothing_settings_defaults():
     assert settings.sigma == 0.01  # seconds; ~13.2 Hz low-pass (-3 dB)
     assert settings.width == 4
     assert settings.kernel_size is None
+    assert settings.causal is False  # default preserves the symmetric kernel
 
 
 def test_gaussian_smoothing_settings_custom():
@@ -276,6 +277,144 @@ def test_gaussian_sigma_is_in_seconds():
     len_1000 = _kernel_len(1000.0)  # sigma = 20 samples
     assert len_100 == int(2 * 4 * 0.02 * 100.0 + 1)
     assert len_1000 == int(2 * 4 * 0.02 * 1000.0 + 1)
+
+
+def _dc_group_delay(b: np.ndarray) -> float:
+    """Group delay at DC, in samples, of the FIR kernel ``b``."""
+    from scipy.signal import group_delay
+
+    _w, gd = group_delay((b, np.array([1.0])), w=[0.0])
+    return float(gd[0])
+
+
+@pytest.mark.parametrize("causal", [False, True])
+@pytest.mark.parametrize("sigma", [1.0, 2.0, 5.0, 20.0])
+def test_gaussian_kernel_unit_sum(causal, sigma):
+    """Both modes yield a unit-sum kernel, so DC gain is exactly 1."""
+    b, a = gaussian_smoothing_filter_design(sigma=sigma, causal=causal)
+    assert np.isclose(np.sum(b), 1.0)
+    assert np.all(b > 0)
+    assert len(a) == 1 and a[0] == 1.0
+
+
+@pytest.mark.parametrize("sigma", [1.0, 2.0, 5.0, 20.0])
+def test_gaussian_causal_kernel_shape(sigma):
+    """The causal kernel peaks at lag 0 and decays monotonically into the past."""
+    b, _a = gaussian_smoothing_filter_design(sigma=sigma, width=4, causal=True)
+
+    assert len(b) == int(4 * sigma + 1)  # width * sigma taps, one side only
+    assert np.argmax(b) == 0  # peak at lag 0: no acausal half
+    assert np.all(np.diff(b) < 0)  # strictly decreasing tail
+
+    # It is exactly the causal half of the symmetric kernel of the same sigma,
+    # up to renormalization.
+    b_sym, _ = gaussian_smoothing_filter_design(sigma=sigma, width=4)
+    half = b_sym[len(b_sym) // 2 :]
+    assert np.allclose(b, half / np.sum(half))
+
+
+@pytest.mark.parametrize("sigma", [2.0, 5.0, 10.0, 20.0])
+def test_gaussian_causal_group_delay_matches_half_gaussian_centroid(sigma):
+    """Measured DC group delay of the causal kernel is the half-Gaussian
+    centroid, sigma * sqrt(2 / pi). Discrete truncation biases it low by a
+    fixed ~1/pi tap, so allow one tap of slack."""
+    b, _a = gaussian_smoothing_filter_design(sigma=sigma, causal=True)
+    assert _dc_group_delay(b) == pytest.approx(sigma * np.sqrt(2 / np.pi), abs=1.0)
+
+
+@pytest.mark.parametrize("sigma", [2.0, 5.0, 10.0])
+def test_gaussian_symmetric_group_delay_is_half_the_kernel(sigma):
+    """The symmetric kernel's delay is pure group delay of (n_taps - 1) / 2,
+    which is the lag the causal option exists to avoid."""
+    b, _a = gaussian_smoothing_filter_design(sigma=sigma, width=4)
+    assert _dc_group_delay(b) == pytest.approx((len(b) - 1) / 2, abs=1e-6)
+
+
+@pytest.mark.parametrize(
+    "sym_sigma,causal_sigma",
+    [
+        (2.0, 3.8),  # noise gain ~0.141: 8 samples of lag vs ~2.7
+        (5.0, 9.8),  # noise gain ~0.056: 20 samples of lag vs ~7.5
+    ],
+)
+def test_gaussian_causal_wins_on_lag_at_matched_noise_gain(sym_sigma, causal_sigma):
+    """Matched on white-noise variance reduction -- not on nominal sigma -- the
+    causal kernel achieves the same noise gain at substantially lower delay."""
+    b_sym, _ = gaussian_smoothing_filter_design(sigma=sym_sigma, width=4)
+    b_causal, _ = gaussian_smoothing_filter_design(sigma=causal_sigma, width=4, causal=True)
+
+    gain_sym = np.sum(b_sym**2)
+    gain_causal = np.sum(b_causal**2)
+    assert gain_causal == pytest.approx(gain_sym, rel=0.02)  # matched on noise gain
+
+    delay_sym = _dc_group_delay(b_sym)
+    delay_causal = _dc_group_delay(b_causal)
+    assert delay_causal < delay_sym / 2  # and the causal one is much cheaper in lag
+
+
+def test_gaussian_causal_kernel_size_counts_causal_taps():
+    """kernel_size overrides the automatic length in causal mode too, and is
+    interpreted as the number of causal taps."""
+    b, _a = gaussian_smoothing_filter_design(sigma=2.0, width=4, kernel_size=9, causal=True)
+    assert len(b) == 9
+    assert np.isclose(np.sum(b), 1.0)
+    assert np.argmax(b) == 0
+
+
+def test_gaussian_causal_small_kernel_size_warns():
+    """The too-small-kernel warning applies to the causal branch, against the
+    one-sided recommended length (width * sigma + 1)."""
+    with pytest.warns(UserWarning, match="smaller than recommended"):
+        b, _a = gaussian_smoothing_filter_design(sigma=5.0, width=4, kernel_size=5, causal=True)
+    assert len(b) == 5
+
+    # ...and the one-sided length itself does not trip it, though the same
+    # length would be undersized for a symmetric kernel.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        gaussian_smoothing_filter_design(sigma=5.0, width=4, kernel_size=21, causal=True)
+    with pytest.warns(UserWarning, match="smaller than recommended"):
+        gaussian_smoothing_filter_design(sigma=5.0, width=4, kernel_size=21, causal=False)
+
+
+def test_gaussian_causal_identity_kernel_warns():
+    """A single causal tap is still an identity kernel."""
+    with pytest.warns(UserWarning, match="identity"):
+        gaussian_smoothing_filter_design(sigma=2.0, kernel_size=1, causal=True)
+
+
+def test_gaussian_causal_transformer_end_to_end():
+    """The causal setting reaches the designed kernel through design_wrapper,
+    with sigma still interpreted in seconds and scaled by fs."""
+    fs = 100.0
+    sigma_s = 0.05
+
+    def _kernel(causal: bool) -> np.ndarray:
+        proc = GaussianSmoothingFilterTransformer(
+            GaussianSmoothingSettings(axis="time", sigma=sigma_s, width=4, causal=causal)
+        )
+        msg = AxisArray(
+            data=np.random.randn(200, 2),
+            dims=["time", "ch"],
+            axes={
+                "time": AxisArray.TimeAxis(fs=fs, offset=0),
+                "ch": AxisArray.CoordinateAxis(data=np.arange(2).astype(str), dims=["ch"]),
+            },
+            key="test_gaussian_causal",
+        )
+        out = proc(msg)
+        assert np.isfinite(out.data).all()
+        b, _a = proc.state.filter.settings.coefs
+        return b
+
+    b_causal = _kernel(True)
+    b_sym = _kernel(False)
+
+    # sigma = 5 samples at 100 Hz
+    assert len(b_causal) == int(4 * sigma_s * fs + 1)
+    assert len(b_sym) == int(2 * 4 * sigma_s * fs + 1)
+    assert np.argmax(b_causal) == 0
+    assert _dc_group_delay(b_causal) < _dc_group_delay(b_sym)
 
 
 def test_gaussian_identity_kernel_design_warns():
