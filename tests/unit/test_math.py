@@ -326,3 +326,54 @@ def test_inverse_anscombe_mlx_matches_numpy(method: InverseMethod):
     out_mx = np.asarray(xformer(AxisArray(mx.array(in_dat), dims=["time", "ch"])).data)
 
     assert np.allclose(out_np, out_mx, rtol=1e-5, atol=1e-5)
+
+
+def test_math_unit_settings_type_matches_transformer():
+    """Every math Unit must declare a SETTINGS whose type the paired transformer accepts.
+
+    A Unit that declares no SETTINGS gets a bare ``ez.Settings()`` from ezmsg's
+    metaclass, which then trips the ``isinstance(settings, settings_type)``
+    assert in ``_unify_settings`` the moment the Unit builds its processor --
+    i.e. at ``initialize()``, inside a running pipeline. Parameterless
+    transforms are the ones at risk, since ``SETTINGS = None`` is not
+    expressible (the metaclass requires an ``ez.Settings`` subclass), which
+    makes it tempting to leave SETTINGS off entirely.
+
+    The whole package is swept in one test, at call time rather than at
+    collection time: importing every ``ezmsg.sigproc.math`` submodule during
+    collection perturbs import order for the rest of the suite.
+    """
+    import importlib
+    import pkgutil
+
+    from ezmsg.baseproc import BaseTransformerUnit
+    from ezmsg.baseproc.units import get_base_transformer_type
+
+    import ezmsg.sigproc.math as math_pkg
+
+    units = []
+    for mod_info in pkgutil.iter_modules(math_pkg.__path__):
+        mod = importlib.import_module(f"{math_pkg.__name__}.{mod_info.name}")
+        units.extend(
+            obj
+            for obj in vars(mod).values()
+            if isinstance(obj, type) and issubclass(obj, BaseTransformerUnit) and obj.__module__ == mod.__name__
+        )
+    assert units, "no math Units discovered; the sweep is not testing anything"
+
+    problems = []
+    for unit_cls in sorted(units, key=lambda c: (c.__module__, c.__name__)):
+        settings_type = get_base_transformer_type(unit_cls).get_settings_type()
+        if settings_type is type(None):
+            problems.append(f"{unit_cls.__name__}: transformer is parameterized with None, needs an ez.Settings")
+            continue
+        if not issubclass(unit_cls.SETTINGS, settings_type):
+            problems.append(f"{unit_cls.__name__}: SETTINGS is {unit_cls.SETTINGS.__name__}, want {settings_type}")
+            continue
+        # The failure mode is at processor construction, so exercise it directly.
+        unit = unit_cls()
+        unit.create_processor()
+        if not isinstance(unit.processor.settings, settings_type):
+            problems.append(f"{unit_cls.__name__}: processor got {type(unit.processor.settings)}")
+
+    assert not problems, "Units with unusable SETTINGS:\n  " + "\n  ".join(problems)

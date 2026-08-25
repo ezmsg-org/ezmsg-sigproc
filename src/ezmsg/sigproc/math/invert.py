@@ -6,17 +6,24 @@ Compute the multiplicative inverse (1/x) of the data.
     enabling use with NumPy, CuPy, PyTorch, and other compatible array libraries.
 """
 
+import ezmsg.core as ez
 from ezmsg.baseproc import BaseTransformer, BaseTransformerUnit
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
 
-class InvertTransformer(BaseTransformer[None, AxisArray, AxisArray]):
+class InvertSettings(ez.Settings):
+    """This transform takes no parameters. See :obj:`AnscombeSettings` for why
+    an empty settings class is needed rather than ``SETTINGS = None``."""
+
+
+class InvertTransformer(BaseTransformer[InvertSettings, AxisArray, AxisArray]):
     def _process(self, message: AxisArray) -> AxisArray:
         return replace(message, data=1 / message.data)
 
 
-class Invert(BaseTransformerUnit[None, AxisArray, AxisArray, InvertTransformer]): ...  # SETTINGS = None
+class Invert(BaseTransformerUnit[InvertSettings, AxisArray, AxisArray, InvertTransformer]):
+    SETTINGS = InvertSettings
 
 
 def invert() -> InvertTransformer:
