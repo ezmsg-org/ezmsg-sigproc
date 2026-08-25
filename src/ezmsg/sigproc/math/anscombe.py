@@ -33,13 +33,24 @@ _D_MIN = 2.0 * math.sqrt(_OFFSET)
 _SQRT_1P5 = math.sqrt(1.5)
 
 
-class AnscombeTransformer(BaseTransformer[None, AxisArray, AxisArray]):
+class AnscombeSettings(ez.Settings):
+    """The forward transform takes no parameters.
+
+    This empty class exists because a Unit cannot express "no settings":
+    ``SETTINGS = None`` is rejected by ezmsg's Unit metaclass, and omitting
+    ``SETTINGS`` makes the metaclass substitute a bare :obj:`ez.Settings`,
+    which the transformer then rejects.
+    """
+
+
+class AnscombeTransformer(BaseTransformer[AnscombeSettings, AxisArray, AxisArray]):
     def _process(self, message: AxisArray) -> AxisArray:
         xp = get_namespace(message.data)
         return replace(message, data=2.0 * xp.sqrt(message.data + _OFFSET))
 
 
-class Anscombe(BaseTransformerUnit[None, AxisArray, AxisArray, AnscombeTransformer]): ...  # SETTINGS = None
+class Anscombe(BaseTransformerUnit[AnscombeSettings, AxisArray, AxisArray, AnscombeTransformer]):
+    SETTINGS = AnscombeSettings
 
 
 class InverseMethod(OptionsEnum):
