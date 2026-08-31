@@ -19,6 +19,8 @@ class ScaleSettings(ez.Settings):
 
 class ScaleTransformer(BaseTransformer[ScaleSettings, AxisArray, AxisArray]):
     def _process(self, message: AxisArray) -> AxisArray:
+        if self.settings.scale == 1.0:
+            return message
         return replace(message, data=self.settings.scale * message.data)
 
 
