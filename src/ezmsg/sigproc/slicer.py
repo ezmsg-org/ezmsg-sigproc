@@ -191,10 +191,29 @@ class SlicerState:
 
 
 class SlicerTransformer(BaseStatefulTransformer[SlicerSettings, AxisArray, AxisArray, SlicerState]):
+    def _resolves_by_position(self) -> bool:
+        """True iff the selection can only ever mean array positions.
+
+        Every token is a slice expression, so no part of it is matched against
+        the axis's coordinate values and the resolved indices cannot depend on
+        them. 
+
+        It is only a small case, because otherwise we will just use a more complicated hash.
+        """
+        if self.settings.field is not None:
+            return False
+        return all(":" in token for token in self.settings.selection.split(",") if token.strip())
+    
     def _hash_message(self, message: AxisArray) -> int:
         axis = self.settings.axis or message.dims[-1]
         axis_idx = message.get_axis_idx(axis)
-        return hash((message.key, message.data.shape[axis_idx]))
+        key = (message.key, message.data.shape[axis_idx])
+        if self._resolves_by_position():
+            return hash(key)
+        # new cache includes the coordinate-axis bytes when the selection can resolve
+        # against them.
+        data = getattr(message.axes.get(axis), "data", None)
+        return hash((*key, None if data is None else np.asarray(data).tobytes()))
 
     def _selects_positional_int(self, axinfo: AxisArray.CoordinateAxis | None) -> bool:
         """True iff the selection is a single bare-integer token that parse_slice

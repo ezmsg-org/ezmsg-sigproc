@@ -447,3 +447,122 @@ def test_slicer_order_single_slice_untouched():
 def test_slicer_order_invalid():
     with pytest.raises(ValueError, match="order"):
         SlicerTransformer(SlicerSettings(selection="0:2", axis="ch", order="token"))(_make_order_msg())
+
+
+def _labelled_msg(labels: list[str], key: str = "test_relabel") -> AxisArray:
+    """One message whose every column carries its own index as its value.
+
+    That is what lets these tests say *which* channel came out, rather than
+    only what the output axis claims came out -- the distinction the bug turns
+    on, since the axis is cached alongside the indices.
+
+    ``_labelled_msg(["Ch5", "Ch7", "Ch10"])`` gives dims ``["time", "ch"]``,
+    a 100 Hz time axis and::
+
+        .data             [[0., 1., 2.],      column i carries i, so a slice
+                           [0., 1., 2.],      of the data reports the position
+                           [0., 1., 2.],      it was taken from
+                           [0., 1., 2.]]
+        .axes["ch"].data  ["Ch5", "Ch7", "Ch10"]
+        .key              "test_relabel"      constant, so the base hash sees
+                                              the same stream every time
+
+    Calling it again with ``["Ch7", "Ch5", "Ch10"]`` returns identical data
+    under a reordered axis: same key, same channel count, different labels --
+    the one thing a hash keyed on ``(key, n_ch)`` cannot see.
+    """
+    n_times = 4
+    data = np.tile(np.arange(len(labels), dtype=float), (n_times, 1))
+    return AxisArray(
+        data,
+        dims=["time", "ch"],
+        axes={
+            "time": AxisArray.TimeAxis(fs=100.0, offset=0.0),
+            "ch": AxisArray.CoordinateAxis(data=np.array(labels), dims=["ch"]),
+        },
+        key=key,
+    )
+
+
+def test_slicer_relabelled_axis_reresolves_selection():
+    """A label selection must follow its label when the axis is reordered.
+
+    The channel count and the message key are unchanged, so state keyed on
+    those alone would keep the indices resolved against the previous axis --
+    and, because the output axis is cached with them, keep labelling the wrong
+    channel's samples "Ch7" without raising anything.
+    """
+    xformer = SlicerTransformer(SlicerSettings(selection="Ch7", axis="ch"))
+
+    out = xformer(_labelled_msg(["Ch5", "Ch7", "Ch10"]))
+    assert out.data[0, 0] == 1  # Ch7 is at position 1
+    assert np.array_equal(out.axes["ch"].data, np.array(["Ch7"]))
+
+    out = xformer(_labelled_msg(["Ch7", "Ch5", "Ch10"]))
+    assert out.data[0, 0] == 0  # ... and now at position 0
+    assert np.array_equal(out.axes["ch"].data, np.array(["Ch7"]))
+
+
+def test_slicer_label_gone_from_axis_is_no_longer_selected():
+    """Test relabeling.
+    A relabel that removes the selected channel must stop returning one.
+    """
+    xformer = SlicerTransformer(SlicerSettings(selection="Ch7", axis="ch", on_empty="warn"))
+    xformer(_labelled_msg(["Ch5", "Ch7", "Ch10"]))
+
+    out = xformer(_labelled_msg(["Ch1", "Ch2", "Ch3"]))
+    assert out.data.shape[1] == 0
+    assert out.axes["ch"].data.size == 0
+
+
+def test_slicer_regex_selection_follows_a_relabel():
+    xformer = SlicerTransformer(SlicerSettings(selection="C.*", axis="ch"))
+    assert xformer(_labelled_msg(["Fp1", "C3", "C4"])).data[0].tolist() == [1.0, 2.0]
+    assert xformer(_labelled_msg(["C3", "C4", "Fp1"])).data[0].tolist() == [0.0, 1.0]
+
+
+def test_slicer_field_selection_follows_a_relabel():
+    """Structured axes too: the field values are what the tokens matched."""
+    dt = np.dtype([("bank", "U2"), ("elec", "<i4")])
+
+    def msg(banks: list[str]) -> AxisArray:
+        data = np.zeros(len(banks), dtype=dt)
+        for i, bank in enumerate(banks):
+            data[i] = (bank, i + 1)
+        return AxisArray(
+            np.tile(np.arange(len(banks), dtype=float), (4, 1)),
+            dims=["time", "ch"],
+            axes={
+                "time": AxisArray.TimeAxis(fs=100.0, offset=0.0),
+                "ch": AxisArray.CoordinateAxis(data=data, dims=["ch"]),
+            },
+            key="test_field_relabel",
+        )
+
+    xformer = SlicerTransformer(SlicerSettings(selection="B", axis="ch", field="bank"))
+    assert xformer(msg(["A", "B", "B"])).data[0].tolist() == [1.0, 2.0]
+    assert xformer(msg(["B", "A", "A"])).data[0].tolist() == [0.0]
+
+
+def test_slicer_positional_selection_ignores_the_axis_values():
+    """A slice selection cannot depend on the labels, so it must not re-resolve.
+
+    Also the reason the hash may skip the axis entirely for such selections:
+    hashing coordinate data no positional selection can consult is pure cost.
+    """
+    xformer = SlicerTransformer(SlicerSettings(selection="0:2", axis="ch"))
+    assert xformer(_labelled_msg(["Ch5", "Ch7", "Ch10"])).data[0].tolist() == [0.0, 1.0]
+    assert xformer(_labelled_msg(["Ch9", "Ch8", "Ch1"])).data[0].tolist() == [0.0, 1.0]
+
+
+def test_slicer_unchanged_axis_does_not_reset_state():
+    """An equal axis rebuilt per message must not look like a change.
+
+    Sources commonly rebuild an identical ch axis for every message; if that
+    counted as a change, the selection would be re-parsed at the sample rate.
+    """
+    xformer = SlicerTransformer(SlicerSettings(selection="Ch7", axis="ch"))
+    xformer(_labelled_msg(["Ch5", "Ch7", "Ch10"]))
+    first = xformer._hash
+    xformer(_labelled_msg(["Ch5", "Ch7", "Ch10"]))
+    assert xformer._hash == first
