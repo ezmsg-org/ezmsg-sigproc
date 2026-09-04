@@ -313,8 +313,16 @@ def _validate_shared_axes(
     concat_dim: str,
     align_dim: str | None,
     assert_flag: bool,
+    chunk_dim: str | None = None,
 ) -> None:
-    """Raise ValueError if shared CoordinateAxis .data arrays differ."""
+    """Raise ValueError if a shared axis describes A and B differently.
+
+    ``offset`` is compared everywhere except the chunk dimension, where the two
+    inputs are separate streams whose elapsed-sample counts have no reason to
+    agree bit for bit. Everywhere else it locates the axis: two spectra merged
+    along ``ch`` whose ``freq`` axes start 70 Hz apart are not the same axis, and
+    the output can only claim one of them.
+    """
     if not assert_flag:
         return
     skip = {concat_dim, align_dim}
@@ -328,6 +336,65 @@ def _validate_shared_axes(
         if hasattr(ax_a, "gain") and hasattr(ax_b, "gain"):
             if ax_a.gain != ax_b.gain:
                 raise ValueError(f"Shared axis {name!r} has different gain: {ax_a.gain} vs {ax_b.gain}")
+        if name != chunk_dim and hasattr(ax_a, "offset") and hasattr(ax_b, "offset"):
+            if ax_a.offset != ax_b.offset:
+                raise ValueError(f"Shared axis {name!r} has different offset: {ax_a.offset} vs {ax_b.offset}")
+
+
+def _linear_axes_fingerprint(
+    message: AxisArray,
+    chunk_dim: str | None,
+    exclude: tuple[str, ...],
+) -> tuple:
+    """Digest the axes that carry no coordinate data, as ``((name, ...), ...)``.
+
+    :class:`AxisFingerprintMemo` skips these, on the reasoning that a
+    ``LinearAxis`` compares by value for free -- true, but only if something
+    compares it, and nothing did. So a ``freq`` axis whose gain diverged between
+    A and B mid-stream never invalidated the cache, and
+    :func:`_validate_shared_axes` -- which runs only on rebuild -- never re-ran
+    to catch it. Caught on the first message, silent on every one after.
+
+    ``offset`` is dropped for the chunk dimension alone, where it counts off
+    elapsed samples and would rebuild the cache on every message. Its ``gain``
+    is kept: a sample-rate change is a configuration change, and nothing else in
+    the fingerprint would notice one.
+
+    Returns empty when the message does not declare ``chunk_dim``. Without it
+    there is no way to tell which linear axis advances, and folding in an
+    advancing offset would rebuild the cache at the sample rate -- so the same
+    condition that stops :func:`_build_cached_axes` caching these also stops
+    them being watched. An axis read live is always current; what is lost is
+    only the revalidation.
+    """
+    if chunk_dim is None:
+        return ()
+    parts = []
+    for name, ax in message.axes.items():
+        if name in exclude or getattr(ax, "data", None) is not None:
+            continue
+        gain = getattr(ax, "gain", None)
+        if gain is None:
+            continue
+        parts.append((name, gain) if name == chunk_dim else (name, gain, ax.offset))
+    return tuple(parts)
+
+
+def _validate_new_axis_shapes(a: AxisArray, b: AxisArray, concat_dim: str) -> None:
+    """Every dimension must match when stacking A and B along a *new* one.
+
+    Checked per message rather than on cache rebuild. The chunk dimension is one
+    of the dimensions that has to agree, and its length is deliberately not part
+    of the cache fingerprint -- so a divergence appearing mid-stream would
+    otherwise reach ``xp.concat`` and surface as a backend shape error naming
+    neither input. The check is a zip over two or three dims.
+    """
+    for dim, size_a, size_b in zip(a.dims, a.data.shape, b.data.shape):
+        if size_a != size_b:
+            raise ValueError(
+                f"Cannot concatenate along new axis {concat_dim!r}: "
+                f"dimension {dim!r} has size {size_a} in A but {size_b} in B"
+            )
 
 
 def _build_cached_axes(
@@ -335,24 +402,43 @@ def _build_cached_axes(
     concat_dim: str,
     align_dim: str | None,
     merged_concat_axis: CoordinateAxis | None,
+    chunk_dim: str | None,
 ) -> dict[str, AxisBase]:
-    """Build an owned output-axis cache of the *coordinate* axes.
+    """Build an owned output-axis cache of the axes that describe the stream.
 
     Input axes may be views into an ezmsg transport buffer whose lifetime ends
-    after the current subscriber callback. Axes kept across calls must therefore
-    be copied into processor-owned memory.
+    after the current subscriber callback. Axes carrying ``.data`` are therefore
+    copied into processor-owned memory.
 
-    Only axes carrying ``.data`` are cached. A ``LinearAxis`` describes itself
-    with ``gain``/``offset`` scalars, and ``offset`` advances on *every* message
-    -- caching one freezes the output's time base at whatever the first message
-    said, which is what ``align_dim`` has been quietly working around (it is the
-    one axis excluded from the cache, so it alone is re-read from the live
-    message). Excluding every such axis fixes that generally, costs nothing to
-    carry live, and saves a deepcopy per rebuild.
+    A ``LinearAxis`` has no buffer to own, but is still cached when it describes
+    the *configuration* rather than the chunk -- its ``gain`` and ``offset`` say
+    where the axis starts and how far it steps, and both belong to the same
+    validated snapshot as the coordinate axes beside it. Reading half the output
+    axes from a snapshot and half from the live message is what let a divergence
+    on one of the live ones go unnoticed.
+
+    Two are deliberately left live:
+
+    * the chunk dimension, whose ``offset`` advances on every message -- caching
+      it would freeze the output's time base at whatever the first message said;
+    * ``align_dim``, for the same reason, which is what it was quietly working
+      around before the chunk dimension could be named.
+
+    A message that does not declare ``chunk_dim`` gives no way to tell which
+    linear axis advances, so none of them is cached. That is the old behaviour,
+    and it is the safe direction: an axis read live is always current.
     """
+    stay_live = {align_dim, chunk_dim} if chunk_dim is not None else None
     axes: dict[str, AxisBase] = {}
     for name, ax in a.axes.items():
-        if name == align_dim or getattr(ax, "data", None) is None:
+        if name == align_dim:
+            continue
+        if getattr(ax, "data", None) is None:
+            # No coordinate data: a linear axis, cacheable only if we can be sure
+            # it is not the one that advances.
+            if stay_live is None or name in stay_live or getattr(ax, "gain", None) is None:
+                continue
+            axes[name] = ax  # scalars only -- nothing to copy, nothing to alias
             continue
         if name == concat_dim and merged_concat_axis is not None:
             axes[name] = merged_concat_axis
@@ -508,6 +594,7 @@ class ConcatProcessor:
 
         # expand_dims for new-axis concatenation.
         if new_axis:
+            _validate_new_axis_shapes(a, b, concat_dim)
             a = replace(a, data=xp.expand_dims(a.data, axis=-1), dims=[*a.dims, concat_dim])
             b = replace(b, data=xp.expand_dims(b.data, axis=-1), dims=[*b.dims, concat_dim])
 
@@ -570,7 +657,17 @@ class ConcatProcessor:
             if memo is not None:
                 memo.attrs_obj, memo.attrs_fp = attrs, attrs_fp
 
-        return (tuple(msg.dims), msg.data.shape, axes_fp, attrs_fp)
+        linear_fp = _linear_axes_fingerprint(msg, msg.chunk_dim, exclude)
+        # The chunk dimension's length is however much arrived, not a property of
+        # the stream. Leaving it in rebuilt the cache on every chunk-size jitter
+        # -- a deepcopy of every coordinate axis per message, which is the exact
+        # cost `cached_axes` exists to avoid. Measured on a jittering source: 4
+        # rebuilds in 4 messages before, 0 after.
+        shape = msg.data.shape
+        if msg.chunk_dim is not None and msg.chunk_dim in msg.dims:
+            chunk_ix = msg.dims.index(msg.chunk_dim)
+            shape = shape[:chunk_ix] + shape[chunk_ix + 1 :]
+        return (tuple(msg.dims), shape, axes_fp, linear_fp, attrs_fp)
 
     def _rebuild_cache(self, a: AxisArray, b: AxisArray) -> None:
         concat_dim = self.settings.axis
@@ -582,16 +679,8 @@ class ConcatProcessor:
             concat_dim,
             align_dim=self.settings.align_axis,
             assert_flag=self.settings.assert_identical_shared_axes,
+            chunk_dim=a.chunk_dim,
         )
-
-        # New-axis validation: all other dims must match.
-        if concat_dim not in a.dims or concat_dim not in b.dims:
-            for i, (d, sa, sb) in enumerate(zip(a.dims, a.data.shape, b.data.shape)):
-                if sa != sb:
-                    raise ValueError(
-                        f"Cannot concatenate along new axis {concat_dim!r}: "
-                        f"dimension {d!r} has size {sa} in A but {sb} in B"
-                    )
 
         # Build merged concat axis.
         ax_a = a.axes.get(concat_dim)
@@ -645,6 +734,7 @@ class ConcatProcessor:
             concat_dim,
             align_dim=self.settings.align_axis,
             merged_concat_axis=self._state.merged_concat_axis,
+            chunk_dim=a.chunk_dim,
         )
 
 
