@@ -273,6 +273,17 @@ def test_mlx_cache_limit_actually_bounds_the_cache():
             a = mx.zeros((256, 300 * n))
             mx.eval(a)
             del a
+        # One more allocation before reading the total. MLX admits a freed
+        # buffer to the cache and trims down to the limit on the *next*
+        # allocation, not on the free, so sampling right after the loop catches
+        # a transient in which the last buffer -- up to 17 MB here -- is still
+        # above the line. That is what made this assert 33.7 MB against a 32 MB
+        # limit on CI every run since it landed, and fail roughly one local run
+        # in six. Measured across six fresh processes: 34.30 MB once and 17.00
+        # MB otherwise before this line, 17.30 MB every time after it.
+        settle = mx.zeros((16, 16))
+        mx.eval(settle)
+        del settle
         assert mx.get_cache_memory() <= 32 * 1024 * 1024
     finally:
         mx.clear_cache()
