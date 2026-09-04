@@ -269,22 +269,29 @@ def test_mlx_cache_limit_actually_bounds_the_cache():
         proc(make_msg())
         mx.clear_cache()
         # Churn many distinct sizes; without a limit this cache grows unbounded.
-        for n in range(1, 60):
-            a = mx.zeros((256, 300 * n))
+        n_ch, step, n_sizes = 256, 300, 60
+        for n in range(1, n_sizes):
+            a = mx.zeros((n_ch, step * n))
             mx.eval(a)
             del a
-        # One more allocation before reading the total. MLX admits a freed
-        # buffer to the cache and trims down to the limit on the *next*
-        # allocation, not on the free, so sampling right after the loop catches
-        # a transient in which the last buffer -- up to 17 MB here -- is still
-        # above the line. That is what made this assert 33.7 MB against a 32 MB
-        # limit on CI every run since it landed, and fail roughly one local run
-        # in six. Measured across six fresh processes: 34.30 MB once and 17.00
-        # MB otherwise before this line, 17.30 MB every time after it.
-        settle = mx.zeros((16, 16))
-        mx.eval(settle)
-        del settle
-        assert mx.get_cache_memory() <= 32 * 1024 * 1024
+
+        # MLX evicts down to the limit *before* admitting a freed buffer, then
+        # admits it, so the cache is a high-water mark that one buffer can
+        # exceed -- `set_cache_limit` never promised a hard ceiling. Which side
+        # of the limit it lands on varies run to run: measured here it settles
+        # at either the largest churned buffer (17.0 MB) or the largest two
+        # (34.3 MB), against a 32 MB limit.
+        #
+        # Asserting `<= limit` therefore sampled a state MLX does not guarantee.
+        # It failed every CI run from 2026-08-24; forcing a trim with one extra
+        # allocation first (the previous attempt at this) worked 12/12 locally
+        # and still failed one macOS job in four.
+        #
+        # The bound below is the one the allocator actually honours, and it is
+        # not a loose one: the same churn with no limit leaves ~500 MB cached,
+        # ten times this ceiling. It is what the test meant to prove.
+        largest_buffer = n_ch * step * (n_sizes - 1) * 4  # float32
+        assert mx.get_cache_memory() <= 32 * 1024 * 1024 + largest_buffer
     finally:
         mx.clear_cache()
         mx.set_cache_limit(previous)
