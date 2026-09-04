@@ -22,6 +22,8 @@ from ezmsg.baseproc import (
 )
 from ezmsg.util.messages.axisarray import AxisArray, replace
 
+from .util.message import with_fingerprint
+
 # -- Utility functions for coordinate transformations --
 
 
@@ -142,7 +144,7 @@ class CoordinateSpacesTransformer(BaseTransformer[CoordinateSpacesSettings, Axis
                 new_labels = np.array(["r", "theta"])
             else:
                 new_labels = np.array(["x", "y"])
-            axes = {**axes, axis: replace(axes[axis], data=new_labels)}
+            axes = {**axes, axis: with_fingerprint(replace(axes[axis], data=new_labels))}
 
         return replace(message, data=result, axes=axes)
 

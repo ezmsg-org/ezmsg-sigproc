@@ -29,6 +29,7 @@ from ezmsg.util.messages.axisarray import (
 )
 
 from .spectral import OptionsEnum
+from .util.message import with_fingerprint
 
 
 class AggregationFunction(OptionsEnum):
@@ -258,17 +259,6 @@ class RangedAggregateTransformer(
             return message
         return await super().__acall__(message)
 
-    def _hash_message(self, message: AxisArray) -> int:
-        axis = self.settings.axis or message.dims[0]
-        target_axis = message.get_axis(axis)
-
-        hash_components = (message.key,)
-        if hasattr(target_axis, "data"):
-            hash_components += (len(target_axis.data),)
-        elif isinstance(target_axis, AxisArray.LinearAxis):
-            hash_components += (target_axis.gain, target_axis.offset)
-        return hash(hash_components)
-
     def _reset_state(self, message: AxisArray) -> None:
         axis = self.settings.axis or message.dims[0]
         target_axis = message.get_axis(axis)
@@ -294,10 +284,12 @@ class RangedAggregateTransformer(
             ax_dat.append(sl_dat)
 
         self._state.slices = slices
-        self._state.out_axis = AxisArray.CoordinateAxis(
-            data=np.array(ax_dat),
-            dims=[axis],
-            unit=target_axis.unit,
+        self._state.out_axis = with_fingerprint(
+            AxisArray.CoordinateAxis(
+                data=np.array(ax_dat),
+                dims=[axis],
+                unit=target_axis.unit,
+            )
         )
 
     def _process(self, message: AxisArray) -> AxisArray:
@@ -405,6 +397,9 @@ class AggregateTransformer(BaseTransformer[AggregateSettings, AxisArray, AxisArr
             data=agg_data,
             dims=new_dims,
             axes=new_axes,
+            # Reducing over the dimension messages appended along leaves nothing
+            # to append along: each output is one aggregate.
+            chunk_dim=message.chunk_dim if message.chunk_dim in new_dims else None,
         )
 
 

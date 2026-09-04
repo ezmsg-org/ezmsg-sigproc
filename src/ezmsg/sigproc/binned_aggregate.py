@@ -56,7 +56,7 @@ from ezmsg.util.messages.axisarray import (
 from .aggregate import AggregationFunction, aggregate_slices, needs_coordinates
 from .util.array import xp_copy
 from .util.binning import BinSchedule, BinStep
-from .util.message import is_empty_along
+from .util.message import is_empty_along, with_fingerprint
 
 
 class BinnedAggregateSettings(ez.Settings):
@@ -166,9 +166,6 @@ class BinnedAggregateTransformer(
             return message
         return await super().__acall__(message)
 
-    def _hash_message(self, message: AxisArray) -> int:
-        return hash((message.axes[self.settings.axis].gain, message.key))
-
     def _reset_state(self, message: AxisArray) -> None:
         axis_info = message.get_axis(self.settings.axis)
         schedule = BinSchedule(
@@ -178,9 +175,11 @@ class BinnedAggregateTransformer(
         schedule.reset(1.0 / axis_info.gain)
         self._state.schedule = schedule
         self._state.metric_axis = (
-            AxisArray.CoordinateAxis(
-                data=np.array([op.value for op in self._operations]),
-                dims=[self.settings.newaxis],
+            with_fingerprint(
+                AxisArray.CoordinateAxis(
+                    data=np.array([op.value for op in self._operations]),
+                    dims=[self.settings.newaxis],
+                )
             )
             if self._multi
             else None

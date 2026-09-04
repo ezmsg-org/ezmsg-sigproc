@@ -127,6 +127,7 @@ class WindowState:
     """Target axis re-anchored per ``anchor``; constant for the life of the state."""
 
     out_dims: list[str] | None = None
+    out_chunk_dim: str | None = None
 
     empty_out: npt.NDArray | sparse.SparseArray | None = None
     """Cached zero-window output, returned unchanged whenever no window is due."""
@@ -251,15 +252,6 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
             and self.settings.window_shift == self.settings.window_dur
         )
 
-    def _hash_message(self, message: AxisArray) -> int:
-        axis = self.settings.axis or message.dims[0]
-        axis_idx = message.get_axis_idx(axis)
-        axis_info = message.get_axis(axis)
-        fs = 1.0 / axis_info.gain
-        samp_shape = message.data.shape[:axis_idx] + message.data.shape[axis_idx + 1 :]
-
-        return hash(samp_shape + (fs, message.key))
-
     def _reset_state(self, message: AxisArray) -> None:
         _newaxis = self.settings.newaxis or "win"
         if not self._state.newaxis_warned and _newaxis in message.dims:
@@ -316,9 +308,11 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
         self._state.out_axis = None
         self._state.empty_out = None
         if self.is_batcher:
-            # Windows tile the target axis, so they need no axis of their own.
+            # Windows tile the target axis, so they need no axis of their own,
+            # and the stream still grows along whichever dim it did before.
             self._state.out_dims = list(message.dims)
             self._state.out_newaxis = None
+            self._state.out_chunk_dim = message.chunk_dim
         else:
             self._state.out_dims = list(message.dims[:axis_idx]) + [_newaxis] + list(message.dims[axis_idx:])
             self._state.out_newaxis = replace(
@@ -326,6 +320,12 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
                 gain=0.0 if self.settings.window_shift is None else axis_info.gain * self._state.window_shift_samples,
                 offset=0.0,  # offset modified per-msg below
             )
+            # Successive messages now append along `newaxis`: its length is the
+            # number of windows this message happened to yield, while the target
+            # axis has become a fixed-length within-window axis. Declaring it
+            # spares every downstream consumer from having to guess, and gets
+            # the guess right where a "time" convention would not.
+            self._state.out_chunk_dim = _newaxis
 
     def __call__(self, message: AxisArray) -> AxisArray:
         if self.settings.window_dur is None:
@@ -409,7 +409,13 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
                 out_dat = self._state.empty_out
                 out_offset = axis_info.offset
             out_axes[axis] = replace(axis_info, offset=out_offset)
-            return replace(message, data=out_dat, dims=self._state.out_dims, axes=out_axes)
+            return replace(
+                message,
+                data=out_dat,
+                dims=self._state.out_dims,
+                axes=out_axes,
+                chunk_dim=self._state.out_chunk_dim,
+            )
 
         # Update targeted (windowed) axis so that its offset is relative to the new axis.
         # The result depends only on the axis gain and the settings, both fixed for
@@ -474,6 +480,7 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
             data=out_dat,
             dims=self._state.out_dims,
             axes={**out_axes, _newaxis: self._state.out_newaxis},
+            chunk_dim=self._state.out_chunk_dim,
         )
         return msg_out
 
@@ -523,6 +530,10 @@ class Window(BaseTransformerUnit[WindowSettings, AxisArray, AxisArray, WindowTra
                             data=slice_along_axis(ret.data, msg_ix, axis_idx),
                             dims=ret.dims[:axis_idx] + ret.dims[axis_idx + 1 :],
                             axes=_out_axes,
+                            # Unbundling drops `win`, so the published stream is
+                            # back to appending along the target axis: one
+                            # message per window, each carrying its own offset.
+                            chunk_dim=axis,
                         )
                         yield self.OUTPUT_SIGNAL, _ret
 

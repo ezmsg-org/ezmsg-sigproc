@@ -287,11 +287,6 @@ class AdaptiveLNCTransformer(
     # num_harmonics shape the state, so those do force a reset.
     NONRESET_SETTINGS_FIELDS = frozenset({"adapt_time_constant", "freq_time_constant"})
 
-    def _hash_message(self, message: AxisArray) -> int:
-        ax_idx = message.get_axis_idx(self.settings.axis)
-        sample_shape = message.data.shape[:ax_idx] + message.data.shape[ax_idx + 1 :]
-        return hash((message.key, message.axes[self.settings.axis].gain, sample_shape))
-
     def _reset_state(self, message: AxisArray) -> None:
         ax_idx = message.get_axis_idx(self.settings.axis)
         sample_shape = message.data.shape[:ax_idx] + message.data.shape[ax_idx + 1 :]

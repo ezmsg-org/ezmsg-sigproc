@@ -14,6 +14,9 @@ from array_api_compat import get_namespace
 from ezmsg.util.messages.axisarray import AxisArray, AxisBase, CoordinateAxis
 from ezmsg.util.messages.util import replace
 
+from ezmsg.sigproc.util.channels import AxisFingerprintMemo
+from ezmsg.sigproc.util.message import with_fingerprint
+
 logger = logging.getLogger(__name__)
 
 # Sentinel for "attr key was missing on this side". Distinct from any user value.
@@ -333,15 +336,23 @@ def _build_cached_axes(
     align_dim: str | None,
     merged_concat_axis: CoordinateAxis | None,
 ) -> dict[str, AxisBase]:
-    """Build an owned output-axis cache (everything except the alignment axis).
+    """Build an owned output-axis cache of the *coordinate* axes.
 
     Input axes may be views into an ezmsg transport buffer whose lifetime ends
     after the current subscriber callback. Axes kept across calls must therefore
     be copied into processor-owned memory.
+
+    Only axes carrying ``.data`` are cached. A ``LinearAxis`` describes itself
+    with ``gain``/``offset`` scalars, and ``offset`` advances on *every* message
+    -- caching one freezes the output's time base at whatever the first message
+    said, which is what ``align_dim`` has been quietly working around (it is the
+    one axis excluded from the cache, so it alone is re-read from the live
+    message). Excluding every such axis fixes that generally, costs nothing to
+    carry live, and saves a deepcopy per rebuild.
     """
     axes: dict[str, AxisBase] = {}
     for name, ax in a.axes.items():
-        if name == align_dim:
+        if name == align_dim or getattr(ax, "data", None) is None:
             continue
         if name == concat_dim and merged_concat_axis is not None:
             axes[name] = merged_concat_axis
@@ -407,6 +418,24 @@ class ConcatSettings(ez.Settings):
 
 
 @dataclass
+class _FingerprintMemo:
+    """Last-seen objects and their digests, for one input side.
+
+    The axis half is :class:`~ezmsg.sigproc.util.channels.AxisFingerprintMemo`,
+    shared with the other transformers that cache axis-derived state; ``attrs``
+    gets the same identity treatment here because concat is the only consumer
+    that fingerprints them.
+
+    The cost of *not* doing this: fingerprinting was 63% of ``_concat``'s total
+    per-message time, against 10% for the concatenate it guards.
+    """
+
+    axes: AxisFingerprintMemo = field(default_factory=lambda: AxisFingerprintMemo(label="ConcatProcessor"))
+    attrs_obj: object = None
+    attrs_fp: frozenset | None = None
+
+
+@dataclass
 class ConcatState:
     queue_a: "asyncio.Queue[AxisArray]" = field(default_factory=asyncio.Queue)
     queue_b: "asyncio.Queue[AxisArray]" = field(default_factory=asyncio.Queue)
@@ -416,6 +445,8 @@ class ConcatState:
     # Fingerprints for cache invalidation.
     a_fingerprint: tuple | None = None
     b_fingerprint: tuple | None = None
+    memo_a: _FingerprintMemo = field(default_factory=_FingerprintMemo)
+    memo_b: _FingerprintMemo = field(default_factory=_FingerprintMemo)
 
 
 class ConcatProcessor:
@@ -452,8 +483,8 @@ class ConcatProcessor:
     def _concat(self, a: AxisArray, b: AxisArray) -> AxisArray:
         """Concatenate *a* and *b* along the configured axis."""
         concat_dim = self.settings.axis
-        fp_a = self._fingerprint(a)
-        fp_b = self._fingerprint(b)
+        fp_a = self._fingerprint(a, self._state.memo_a)
+        fp_b = self._fingerprint(b, self._state.memo_b)
         if fp_a != self._state.a_fingerprint or fp_b != self._state.b_fingerprint:
             self._rebuild_cache(a, b)
             self._state.a_fingerprint = fp_a
@@ -483,23 +514,63 @@ class ConcatProcessor:
         concat_idx = a.dims.index(concat_dim)
         data = xp.concat([a.data, b.data], axis=concat_idx)
 
-        # Build axes: use cached axes + live alignment axis from a.
-        axes = dict(self._state.cached_axes) if self._state.cached_axes is not None else dict(a.axes)
-        # Re-insert any axis that changes per-message (e.g. time offset).
-        for name, ax in a.axes.items():
-            if name not in axes:
-                axes[name] = ax
+        # Build axes: owned coordinate axes from the cache, everything else
+        # (alignment axis, LinearAxes) live from a, in a's original order.
+        cached = self._state.cached_axes
+        if cached is None:
+            axes = dict(a.axes)
+        else:
+            axes = {name: cached.get(name, ax) for name, ax in a.axes.items()}
+            # A concat axis created for a *new* dimension is not in a.axes.
+            for name, ax in cached.items():
+                if name not in axes:
+                    axes[name] = ax
 
         key = self.settings.new_key if self.settings.new_key is not None else a.key
         attrs = dict(self._state.merged_attrs) if self._state.merged_attrs else {}
-        return AxisArray(data, dims=list(a.dims), axes=axes, key=key, attrs=attrs)
+        # Built fresh rather than by replace(), so the layout has to be carried
+        # over explicitly. A concat along a *new* dimension leaves A's chunk
+        # dimension intact; concatenating along the chunk dimension itself would
+        # not, hence the membership check.
+        chunk_dim = a.chunk_dim if a.chunk_dim in a.dims else None
+        return AxisArray(data, dims=list(a.dims), axes=axes, key=key, attrs=attrs, chunk_dim=chunk_dim)
 
-    def _fingerprint(self, msg: AxisArray) -> tuple:
-        concat_dim = self.settings.axis
-        ax = msg.axes.get(concat_dim)
-        ax_hash = hash(ax.data.tobytes()) if ax is not None and hasattr(ax, "data") else None
-        attrs_fp = frozenset((k, type(v).__name__, repr(v)) for k, v in (msg.attrs or {}).items())
-        return (tuple(msg.dims), msg.data.shape, ax_hash, attrs_fp)
+    def _fingerprint(self, msg: AxisArray, memo: _FingerprintMemo | None = None) -> tuple:
+        """Summarize everything ``_rebuild_cache`` reads, so the cache invalidates.
+
+        Every coordinate axis, not just the concat axis: ``_build_cached_axes``
+        copies all of them into ``cached_axes``, so a *different* axis changing
+        its values (e.g. a band axis relabelled mid-stream) leaves the output
+        carrying the first message's copy. Axes without ``.data`` are read live
+        rather than cached, so they contribute nothing here.
+
+        *memo* short-circuits the content digests on object identity; see
+        :class:`_FingerprintMemo`. Passing ``None`` computes everything from
+        scratch, which is what the tests compare against.
+        """
+        exclude = () if self.settings.align_axis is None else (self.settings.align_axis,)
+        axes_memo = memo.axes if memo is not None else AxisFingerprintMemo()
+        axes_fp = axes_memo.fingerprint(msg, exclude=exclude)
+
+        attrs = msg.attrs
+        if memo is not None and attrs is memo.attrs_obj:
+            attrs_fp = memo.attrs_fp
+        else:
+            # _check_attr_type restricts merged attrs to str/int/float/bool, all
+            # hashable, so the value goes in as itself -- repr() would be both
+            # slower and, for anything numpy summarizes past 1000 elements,
+            # unable to tell two different values apart. But this runs *before*
+            # that validation, so an unsupported value must not raise here or it
+            # would mask _check_attr_type's much clearer error.
+            items = (attrs or {}).items()
+            try:
+                attrs_fp = frozenset((k, type(v).__name__, v) for k, v in items)
+            except TypeError:
+                attrs_fp = frozenset((k, type(v).__name__, repr(v)) for k, v in items)
+            if memo is not None:
+                memo.attrs_obj, memo.attrs_fp = attrs, attrs_fp
+
+        return (tuple(msg.dims), msg.data.shape, axes_fp, attrs_fp)
 
     def _rebuild_cache(self, a: AxisArray, b: AxisArray) -> None:
         concat_dim = self.settings.axis
@@ -565,6 +636,9 @@ class ConcatProcessor:
                 concat_dim,
             )
         self._state.merged_attrs = equal_attrs
+
+        if self._state.merged_concat_axis is not None:
+            with_fingerprint(self._state.merged_concat_axis)
 
         self._state.cached_axes = _build_cached_axes(
             a,

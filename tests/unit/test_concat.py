@@ -502,6 +502,140 @@ class TestCachedAxes:
         proc._concat(msg_a, msg_b)
         assert proc.state.cached_axes is first_cache  # Same dict object.
 
+    def test_time_offset_is_taken_from_the_live_message(self):
+        """A LinearAxis must never be served from the cache.
+
+        ``offset`` advances every message, so caching the time axis pins every
+        output to the first message's time base. ``align_axis`` used to be the
+        only thing that saved you from this, because the alignment axis is the
+        one axis excluded from the cache — but it defaults to None.
+        """
+        proc = ConcatProcessor(ConcatSettings(axis="ch"))
+        offsets = [0.0, 0.04, 0.08]
+        out = [
+            proc._concat(
+                _make_msg(np.ones((4, 2)), offset=t, ch_labels=["A0", "A1"]),
+                _make_msg(np.ones((4, 2)), offset=t, ch_labels=["B0", "B1"]),
+            )
+            for t in offsets
+        ]
+        assert [o.axes["time"].offset for o in out] == offsets
+        # The cache is not rebuilt to achieve it: a changing offset is not a
+        # configuration change.
+        assert proc.state.cached_axes is not None
+        assert "time" not in proc.state.cached_axes
+
+    def test_non_concat_coordinate_axis_change_invalidates_cache(self):
+        """Every cached axis has to be fingerprinted, not just the concat axis.
+
+        ``_build_cached_axes`` copies all coordinate axes into the cache, so a
+        relabelled *band* axis would otherwise keep emitting the first
+        message's labels — the concat-axis hash cannot see it.
+        """
+
+        def msg(band: list[str], fill: float) -> AxisArray:
+            return AxisArray(
+                np.full((4, 2, 3), fill),
+                dims=["time", "ch", "band"],
+                axes={
+                    "time": AxisArray.TimeAxis(fs=100.0),
+                    "ch": CoordinateAxis(data=np.array(["c0", "c1"]), dims=["ch"]),
+                    "band": CoordinateAxis(data=np.array(band), dims=["band"]),
+                },
+            )
+
+        proc = ConcatProcessor(ConcatSettings(axis="ch", relabel_axis=False))
+        first = proc._concat(msg(["alpha", "beta", "gamma"], 1.0), msg(["alpha", "beta", "gamma"], 2.0))
+        assert list(first.axes["band"].data) == ["alpha", "beta", "gamma"]
+
+        second = proc._concat(msg(["delta", "theta", "mu"], 1.0), msg(["delta", "theta", "mu"], 2.0))
+        assert list(second.axes["band"].data) == ["delta", "theta", "mu"]
+
+    def test_unchanged_coordinate_axes_do_not_invalidate_cache(self):
+        """The converse: equal axes rebuilt per message must not look like a
+        change, or the cache would be rebuilt at the sample rate."""
+        proc = ConcatProcessor(ConcatSettings(axis="ch"))
+
+        def pair(offset: float):
+            return (
+                _make_msg(np.ones((4, 2)), offset=offset, ch_labels=["A0", "A1"]),
+                _make_msg(np.ones((4, 2)), offset=offset, ch_labels=["B0", "B1"]),
+            )
+
+        proc._concat(*pair(0.0))
+        first_cache = proc.state.cached_axes
+        for i in range(1, 4):
+            proc._concat(*pair(i * 0.04))
+        assert proc.state.cached_axes is first_cache
+
+    def test_cached_axes_are_still_owned(self):
+        """Coordinate axes are copied, not aliased: input axes may be views into
+        a transport buffer whose lifetime ends with the callback."""
+        proc = ConcatProcessor(ConcatSettings(axis="ch", relabel_axis=False))
+        band = CoordinateAxis(data=np.array(["b0", "b1", "b2"]), dims=["band"])
+
+        def msg(fill: float) -> AxisArray:
+            return AxisArray(
+                np.full((4, 2, 3), fill),
+                dims=["time", "ch", "band"],
+                axes={
+                    "time": AxisArray.TimeAxis(fs=100.0),
+                    "ch": CoordinateAxis(data=np.array(["c0", "c1"]), dims=["ch"]),
+                    "band": band,
+                },
+            )
+
+        a = msg(1.0)
+        out = proc._concat(a, msg(2.0))
+        assert out.axes["band"] is not a.axes["band"]
+        assert out.axes["band"].data is not a.axes["band"].data
+        assert list(out.axes["band"].data) == ["b0", "b1", "b2"]
+
+    def test_output_axes_follow_input_dim_order(self):
+        """Serving some axes from the cache and some live must not reorder them."""
+        proc = ConcatProcessor(ConcatSettings(axis="ch", relabel_axis=False))
+
+        def msg(fill: float) -> AxisArray:
+            return AxisArray(
+                np.full((4, 2, 3), fill),
+                dims=["time", "ch", "band"],
+                axes={
+                    "time": AxisArray.TimeAxis(fs=100.0),
+                    "ch": CoordinateAxis(data=np.array(["c0", "c1"]), dims=["ch"]),
+                    "band": CoordinateAxis(data=np.array(["b0", "b1", "b2"]), dims=["band"]),
+                },
+            )
+
+        out = proc._concat(msg(1.0), msg(2.0))
+        assert list(out.axes.keys()) == ["time", "ch", "band"]
+
+    def test_memoized_fingerprint_matches_the_uncached_one(self):
+        """The identity fast path must be invisible: same answer, every message.
+
+        Covers both regimes — a source reusing one axis object (memo hits) and
+        one rebuilding an equal axis per message (memo misses).
+        """
+        proc = ConcatProcessor(ConcatSettings(axis="ch"))
+        shared = CoordinateAxis(data=np.array(["A0", "A1"]), dims=["ch"], unit="label")
+        for reuse in (True, False):
+            for i in range(4):
+                msg = _make_msg(
+                    np.ones((4, 2)),
+                    offset=i * 0.04,
+                    ch_axis=shared if reuse else CoordinateAxis(data=np.array(["A0", "A1"]), dims=["ch"], unit="label"),
+                )
+                memoized = proc._fingerprint(msg, proc.state.memo_a)
+                assert memoized == proc._fingerprint(msg, None)
+
+    def test_memo_notices_a_new_axis_object_with_new_values(self):
+        """A memo miss must fall through to the content digest, not reuse."""
+        proc = ConcatProcessor(ConcatSettings(axis="ch"))
+        first = proc._fingerprint(_make_msg(np.ones((4, 2)), ch_labels=["A0", "A1"]), proc.state.memo_a)
+        same = proc._fingerprint(_make_msg(np.ones((4, 2)), ch_labels=["A0", "A1"]), proc.state.memo_a)
+        other = proc._fingerprint(_make_msg(np.ones((4, 2)), ch_labels=["Z0", "Z1"]), proc.state.memo_a)
+        assert first == same
+        assert first != other
+
     def test_cache_invalidated_on_shape_change(self):
         settings = ConcatSettings(axis="ch", relabel_axis=False)
         proc = ConcatProcessor(settings)

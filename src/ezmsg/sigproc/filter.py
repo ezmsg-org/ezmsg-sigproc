@@ -405,12 +405,6 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
             self._hash = self._hash_message(message)
         return super().__call__(message)
 
-    def _hash_message(self, message: AxisArray) -> int:
-        axis = message.dims[0] if self.settings.axis is None else self.settings.axis
-        axis_idx = message.get_axis_idx(axis)
-        samp_shape = message.data.shape[:axis_idx] + message.data.shape[axis_idx + 1 :]
-        return hash((message.key, samp_shape))
-
     def _build_fir_taps(self, b: npt.NDArray, work_dtype: typing.Any, data: typing.Any, axis_idx: int) -> None:
         """Cache the converted taps that both dedicated FIR paths read."""
         xp = get_namespace(data)
@@ -841,13 +835,6 @@ class FilterByDesignTransformer(
             self.state.needs_redesign = False
 
         return super().__call__(message)
-
-    def _hash_message(self, message: AxisArray) -> int:
-        axis = message.dims[0] if self.settings.axis is None else self.settings.axis
-        gain = message.axes[axis].gain if hasattr(message.axes[axis], "gain") else 1
-        axis_idx = message.get_axis_idx(axis)
-        samp_shape = message.data.shape[:axis_idx] + message.data.shape[axis_idx + 1 :]
-        return hash((message.key, samp_shape, gain))
 
     def _reset_state(self, message: AxisArray) -> None:
         design_fun = self.get_design_function()

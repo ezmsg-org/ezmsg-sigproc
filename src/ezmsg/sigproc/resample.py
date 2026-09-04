@@ -164,13 +164,6 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
     # `resample_rate` / `buffer_duration` / `axis` all size cached buffers.
     NONRESET_SETTINGS_FIELDS = frozenset({"max_chunk_delay", "fill_value", "reference_reset_after_chunks"})
 
-    def _hash_message(self, message: AxisArray) -> int:
-        ax_idx: int = message.get_axis_idx(self.settings.axis)
-        sample_shape = message.data.shape[:ax_idx] + message.data.shape[ax_idx + 1 :]
-        ax = message.axes[self.settings.axis]
-        gain = ax.gain if hasattr(ax, "gain") else None
-        return hash((message.key, gain) + sample_shape)
-
     def _reset_state(self, message: AxisArray) -> None:
         """
         Reset the internal state based on the incoming message.

@@ -32,11 +32,6 @@ class SignalInjectorState:
 class SignalInjectorTransformer(
     BaseAsyncTransformer[SignalInjectorSettings, AxisArray, AxisArray, SignalInjectorState]
 ):
-    def _hash_message(self, message: AxisArray) -> int:
-        time_ax_idx = message.get_axis_idx(self.settings.time_dim)
-        sample_shape = message.data.shape[:time_ax_idx] + message.data.shape[time_ax_idx + 1 :]
-        return hash((message.key,) + sample_shape)
-
     def _reset_state(self, message: AxisArray) -> None:
         if self._state.cur_frequency is None:
             self._state.cur_frequency = self.settings.frequency

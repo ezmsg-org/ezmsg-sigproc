@@ -89,19 +89,13 @@ class FilterbankState:
 
 class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArray, AxisArray, FilterbankState]):
     def _hash_message(self, message: AxisArray) -> int:
-        axis = self.settings.axis or message.dims[0]
-        gain = message.axes[axis].gain if axis in message.axes else 1.0
-        targ_ax_ix = message.get_axis_idx(axis)
-        in_shape = message.data.shape[:targ_ax_ix] + message.data.shape[targ_ax_ix + 1 :]
+        """Extend the default with the input dtype.
 
-        return hash(
-            (
-                message.key,
-                gain if self.settings.mode in [FilterbankMode.FFT, FilterbankMode.AUTO] else None,
-                message.data.dtype.kind,
-                in_shape,
-            )
-        )
+        The kernels are cast to the message's dtype at reset, so a real input
+        followed by a complex one needs a rebuild even though nothing about the
+        stream's shape or channels changed. The default cannot see dtype.
+        """
+        return self._message_hash(message, extra=(message.data.dtype.kind,))
 
     def _reset_state(self, message: AxisArray) -> None:
         axis = self.settings.axis or message.dims[0]

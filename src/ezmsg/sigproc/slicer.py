@@ -17,6 +17,8 @@ from ezmsg.util.messages.axisarray import (
     slice_along_axis,
 )
 
+from .util.message import with_fingerprint
+
 """
 Slicer:Select a subset of data along a particular axis.
 """
@@ -191,11 +193,6 @@ class SlicerState:
 
 
 class SlicerTransformer(BaseStatefulTransformer[SlicerSettings, AxisArray, AxisArray, SlicerState]):
-    def _hash_message(self, message: AxisArray) -> int:
-        axis = self.settings.axis or message.dims[-1]
-        axis_idx = message.get_axis_idx(axis)
-        return hash((message.key, message.data.shape[axis_idx]))
-
     def _selects_positional_int(self, axinfo: AxisArray.CoordinateAxis | None) -> bool:
         """True iff the selection is a single bare-integer token that parse_slice
         resolved positionally (its int() path) rather than via a label match."""
@@ -296,7 +293,7 @@ class SlicerTransformer(BaseStatefulTransformer[SlicerSettings, AxisArray, AxisA
                 out_data = in_data[self._state.slice_ : self._state.slice_ + 1]
             else:
                 out_data = in_data[self._state.slice_]
-            self._state.new_axis = replace(message.axes[axis], data=out_data)
+            self._state.new_axis = with_fingerprint(replace(message.axes[axis], data=out_data))
 
     def _process(self, message: AxisArray) -> AxisArray:
         axis = self.settings.axis or message.dims[-1]

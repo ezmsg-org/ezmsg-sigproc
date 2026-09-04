@@ -45,11 +45,6 @@ class DiffTransformer(BaseStatefulTransformer[DiffSettings, AxisArray, AxisArray
             return message
         return await super().__acall__(message)
 
-    def _hash_message(self, message: AxisArray) -> int:
-        ax_idx = message.get_axis_idx(self.settings.axis)
-        sample_shape = message.data.shape[:ax_idx] + message.data.shape[ax_idx + 1 :]
-        return hash((sample_shape, message.key))
-
     def _reset_state(self, message) -> None:
         ax_idx = message.get_axis_idx(self.settings.axis)
         # Copied for the same reason as in `_process`: state must never alias the

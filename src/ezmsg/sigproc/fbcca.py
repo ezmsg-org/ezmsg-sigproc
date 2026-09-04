@@ -22,6 +22,7 @@ from .filterbankdesign import (
 )
 from .kaiser import KaiserFilterSettings
 from .sampler import SampleTriggerMessage
+from .util.message import with_fingerprint
 from .window import WindowSettings, WindowTransformer
 
 
@@ -158,8 +159,8 @@ class FBCCATransformer(BaseTransformer[FBCCASettings, AxisArray, AxisArray]):
             if axis_name not in rm_dims
             and not (isinstance(axis, AxisArray.CoordinateAxis) and any(d in rm_dims for d in axis.dims))
         }
-        out_axes[self.settings.target_freq_dim] = AxisArray.CoordinateAxis(
-            np.array(test_freqs), [self.settings.target_freq_dim]
+        out_axes[self.settings.target_freq_dim] = with_fingerprint(
+            AxisArray.CoordinateAxis(np.array(test_freqs), [self.settings.target_freq_dim])
         )
 
         if message.data.size == 0:

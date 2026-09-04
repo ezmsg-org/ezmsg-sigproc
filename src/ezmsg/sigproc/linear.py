@@ -62,14 +62,6 @@ class LinearTransformTransformer(
         ... ))
     """
 
-    def _hash_message(self, message: AxisArray) -> int:
-        """Hash based on shape and axis to detect when broadcast shapes need recalculation."""
-        axis = self.settings.axis
-        if axis is not None:
-            axis_idx = message.get_axis_idx(axis)
-            return hash((message.data.ndim, axis_idx, message.data.shape[axis_idx]))
-        return hash(message.data.ndim)
-
     def _reset_state(self, message: AxisArray) -> None:
         """Prepare scale/offset arrays with proper broadcast shapes."""
         xp = get_namespace(message.data)

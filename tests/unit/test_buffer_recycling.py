@@ -190,3 +190,87 @@ def test_binned_aggregate_multi_op_does_not_retain():
         ),
         _msgs(_equal_blocks(4, 12, seed=0)),
     )
+
+
+def _axis_equality_is_content_based() -> bool:
+    """Whether the installed ezmsg compares coordinate axes by value.
+
+    Before ezmsg-org/ezmsg#258's stack, ``CoordinateAxis.__eq__`` resolved
+    through the MRO to ``AxisBase.__eq__``, which compares only ``unit`` -- so
+    two axes with different labels compared equal and this suite could not see a
+    retained coordinate axis at all.
+    """
+    ch = AxisArray.CoordinateAxis
+    return ch(data=np.array(["A"]), dims=["ch"]) != ch(data=np.array(["B"]), dims=["ch"])
+
+
+requires_content_axis_equality = pytest.mark.skipif(
+    not _axis_equality_is_content_based(),
+    reason="ezmsg's CoordinateAxis.__eq__ compares only `unit`; axis retention is undetectable",
+)
+
+
+class _RetainsChAxis:
+    """Caches the first message's ch axis and re-emits it -- a view into the slot."""
+
+    def __init__(self) -> None:
+        self.cached = None
+
+    def __call__(self, msg: AxisArray) -> AxisArray:
+        if self.cached is None:
+            self.cached = msg.axes["ch"]
+        return replace(msg, axes={**msg.axes, "ch": self.cached})
+
+
+class _CopiesChAxis(_RetainsChAxis):
+    """The same thing done correctly: the cached axis owns its memory."""
+
+    def __call__(self, msg: AxisArray) -> AxisArray:
+        if self.cached is None:
+            axis = msg.axes["ch"]
+            self.cached = replace(axis, data=np.array(axis.data))
+        return replace(msg, axes={**msg.axes, "ch": self.cached})
+
+
+def _msgs_with_distinct_ch_labels(n: int = 3, n_time: int = 8) -> list[AxisArray]:
+    """Messages whose ch labels differ, so a stale axis view is observable.
+
+    With identical labels on every message a retained view reads the *same*
+    bytes back out of the recycled slot and the corruption is invisible.
+    """
+    out, offset = [], 0.0
+    for i in range(n):
+        out.append(
+            AxisArray(
+                data=np.random.default_rng(i).standard_normal((n_time, N_CH)),
+                dims=["time", "ch"],
+                axes=frozendict(
+                    {
+                        "time": AxisArray.TimeAxis(fs=FS, offset=offset),
+                        "ch": AxisArray.CoordinateAxis(data=np.array([f"m{i}c{c}" for c in range(N_CH)]), dims=["ch"]),
+                    }
+                ),
+                key="test_buffer_recycling",
+            )
+        )
+        offset += n_time / FS
+    return out
+
+
+@requires_content_axis_equality
+def test_harness_detects_a_retained_coordinate_axis():
+    """The suite's own check: a retained *axis* must fail, not just retained data.
+
+    Coordinate axes are views onto the transport slot exactly as the samples
+    are, so a transformer that caches one across calls reads recycled bytes.
+    Without this, a helper that forgot to compare axes would leave every
+    transformer here untested for axis retention and nothing would say so.
+    """
+    with pytest.raises(AssertionError, match="axis 'ch' differs"):
+        assert_survives_buffer_recycling(_RetainsChAxis, _msgs_with_distinct_ch_labels())
+
+
+@requires_content_axis_equality
+def test_harness_accepts_a_copied_coordinate_axis():
+    """...and does not cry wolf when the transformer copies it properly."""
+    assert_survives_buffer_recycling(_CopiesChAxis, _msgs_with_distinct_ch_labels())

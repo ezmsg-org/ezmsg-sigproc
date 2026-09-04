@@ -273,12 +273,6 @@ class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray
             return message
         return await super().__acall__(message)
 
-    def _hash_message(self, message: AxisArray) -> int:
-        axis = self.settings.axis or message.dims[0]
-        axis_idx = message.get_axis_idx(axis)
-        sample_shape = message.data.shape[:axis_idx] + message.data.shape[axis_idx + 1 :]
-        return hash((sample_shape, message.axes[axis].gain, message.key))
-
     def _reset_state(self, message: AxisArray) -> None:
         axis = self.settings.axis or message.dims[0]
         axis_idx = message.get_axis_idx(axis)

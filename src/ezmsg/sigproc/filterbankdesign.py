@@ -107,11 +107,11 @@ class FilterbankDesignTransformer(
         return super().__call__(message)
 
     def _hash_message(self, message: AxisArray) -> int:
-        axis = message.dims[0] if self.settings.axis is None else self.settings.axis
-        gain = message.axes[axis].gain if hasattr(message.axes[axis], "gain") else 1
-        axis_idx = message.get_axis_idx(axis)
-        samp_shape = message.data.shape[:axis_idx] + message.data.shape[axis_idx + 1 :]
-        return hash((message.key, samp_shape, gain))
+        # The only state is a FilterbankTransformer whose kernels are a function
+        # of the sample rate. That inner transformer keeps its own hash and
+        # rebuilds itself when the channels change, so folding the channel
+        # fingerprint in here would only redesign kernels that came out the same.
+        return hash((message.key, getattr(message.axes.get(self.settings.axis), "gain", None)))
 
     def _reset_state(self, message: AxisArray) -> None:
         axis_obj = message.axes[self.settings.axis]

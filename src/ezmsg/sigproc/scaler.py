@@ -138,6 +138,14 @@ class AdaptiveStandardScalerTransformer(
             self.accumulate = new_settings.accumulate
         super().update_settings(new_settings)
 
+    def _hash_message(self, message: AxisArray) -> int:
+        # This transformer owns no array state of its own -- only the two child
+        # EWMATransformers, which hash the message themselves and rebuild on
+        # exactly the changes that matter. Hashing here would duplicate that work
+        # and, on a reset, discard the children wholesale rather than letting
+        # each rebuild the part of its state that actually went stale.
+        return 0
+
     def _reset_state(self, message: AxisArray) -> None:
         self._state.samps_ewma = EWMATransformer(
             time_constant=self.settings.time_constant,

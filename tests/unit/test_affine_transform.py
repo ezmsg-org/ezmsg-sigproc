@@ -389,12 +389,16 @@ def test_common_rereference_all_singleton_groups_exclude_current():
     assert np.array_equal(xformer(AxisArray(in_dat, dims=["time", "ch"])).data, in_dat)
 
 
-def test_common_rereference_field_values_change_is_not_detected():
-    """Intentional concession: a live bank remap at fixed key + channel count is
-    NOT re-derived. _hash_message folds only an O(1) "field present" boolean, not
-    the field's bytes, to keep the per-message hash from scaling with channel
-    count. A genuine remap on real hardware arrives with a new key or channel
-    count (see the escape-hatch assertion below)."""
+def test_common_rereference_field_values_change_is_detected():
+    """A live bank remap at a fixed key and channel count re-derives the groups.
+
+    This used to be a documented concession: the hash folded only an O(1)
+    "is the field present" boolean, so a remap that kept the same key and
+    channel count went unnoticed and the channels were referenced against the
+    wrong neighbours. The base-class hash now folds in the channel axis's
+    content fingerprint, which is computed once per axis object and cached on
+    it, so detecting the remap no longer costs a per-message walk of the field.
+    """
     n_times = 80
     rng = np.random.default_rng(11)
     in_dat = rng.standard_normal((n_times, 4))
@@ -406,16 +410,16 @@ def test_common_rereference_field_values_change_is_not_detected():
     xformer(msg1)
     assert [list(g) for g in xformer._state.groups] == [[0, 1], [2, 3]]
 
-    # Same key and channel count, different bank assignment -> hash unchanged,
-    # so the cached groups are (deliberately) NOT re-derived.
+    # Same key, same channel count, different bank assignment -> re-derived.
     msg2 = AxisArray(in_dat, dims=["time", "ch"], axes={"ch": _banked_ch_axis(["A", "B", "A", "B"])}, key="dev")
     xformer(msg2)
-    assert [list(g) for g in xformer._state.groups] == [[0, 1], [2, 3]]
-
-    # Escape hatch: a new key (as a real remap would carry) forces re-derivation.
-    msg3 = AxisArray(in_dat, dims=["time", "ch"], axes={"ch": _banked_ch_axis(["A", "B", "A", "B"])}, key="dev2")
-    xformer(msg3)
     assert [list(g) for g in xformer._state.groups] == [[0, 2], [1, 3]]
+
+    # An unchanged layout must not re-derive, or every message would pay for it.
+    before = xformer._hash
+    msg3 = AxisArray(in_dat, dims=["time", "ch"], axes={"ch": _banked_ch_axis(["A", "B", "A", "B"])}, key="dev")
+    xformer(msg3)
+    assert xformer._hash == before
 
 
 def test_common_rereference_explicit_groups_beat_field():
@@ -1228,3 +1232,47 @@ def test_stacked_bias_repeat_processing_is_stable():
     first = np.asarray(proc(msg).data).copy()
     second = np.asarray(proc(msg).data)
     assert np.array_equal(first, second)
+
+
+def test_affine_transform_non_square_follows_a_relabel():
+    """A non-square transform caches an output axis selected from the input
+    labels, so a relabel at a fixed channel count has to re-derive it."""
+    weights = np.array([[1.0, 0.0], [0.0, 1.0], [0.0, 0.0]])  # drops channel 3
+
+    def msg(labels):
+        return AxisArray(
+            np.zeros((4, 3), np.float32),
+            dims=["time", "ch"],
+            axes={
+                "time": AxisArray.TimeAxis(fs=100.0),
+                "ch": AxisArray.CoordinateAxis(data=np.array(labels), dims=["ch"]),
+            },
+            key="dev",
+        )
+
+    xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch"))
+    assert [str(x) for x in xformer(msg(["A", "B", "C"])).axes["ch"].data] == ["A", "B"]
+    assert [str(x) for x in xformer(msg(["X", "Y", "Z"])).axes["ch"].data] == ["X", "Y"]
+
+
+def test_affine_transform_unchanged_labels_do_not_reset():
+    """An equal axis rebuilt per message must not look like a change, or the
+    weights would be re-derived at the sample rate."""
+    weights = np.eye(3)
+
+    def msg():
+        return AxisArray(
+            np.zeros((4, 3), np.float32),
+            dims=["time", "ch"],
+            axes={
+                "time": AxisArray.TimeAxis(fs=100.0),
+                "ch": AxisArray.CoordinateAxis(data=np.array(["A", "B", "C"]), dims=["ch"]),
+            },
+            key="dev",
+        )
+
+    xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch"))
+    xformer(msg())
+    first_hash = xformer._hash
+    xformer(msg())
+    assert xformer._hash == first_hash

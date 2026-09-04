@@ -16,6 +16,7 @@ from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
 from .filterbank import FilterbankMode, MinPhaseMode, filterbank
+from .util.message import with_fingerprint
 
 
 class CWTSettings(ez.Settings):
@@ -42,16 +43,8 @@ class CWTState:
 
 class CWTTransformer(BaseStatefulTransformer[CWTSettings, AxisArray, AxisArray, CWTState]):
     def _hash_message(self, message: AxisArray) -> int:
-        ax_idx = message.get_axis_idx(self.settings.axis)
-        in_shape = message.data.shape[:ax_idx] + message.data.shape[ax_idx + 1 :]
-        return hash(
-            (
-                message.data.dtype.kind,
-                message.axes[self.settings.axis].gain,
-                in_shape,
-                message.key,
-            )
-        )
+        """Extend the default with the input dtype, which sizes the output buffer."""
+        return self._message_hash(message, extra=(message.data.dtype.kind,))
 
     def _reset_state(self, message: AxisArray) -> None:
         if "freq" in message.dims:
@@ -121,7 +114,7 @@ class CWTTransformer(BaseStatefulTransformer[CWTSettings, AxisArray, AxisArray, 
             dims=message.dims[:ax_idx] + message.dims[ax_idx + 1 :] + ["freq", self.settings.axis],
             axes={
                 **{k: deepcopy(v) for k, v in message.axes.items()},
-                "freq": AxisArray.CoordinateAxis(unit="Hz", data=freqs, dims=["freq"]),
+                "freq": with_fingerprint(AxisArray.CoordinateAxis(unit="Hz", data=freqs, dims=["freq"])),
             },
             key=message.key,
         )

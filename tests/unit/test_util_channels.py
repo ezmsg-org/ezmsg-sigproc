@@ -4,6 +4,7 @@ from ezmsg.util.messages.axisarray import AxisArray
 
 from ezmsg.sigproc.util.channels import (
     channel_groups_from_field,
+    coord_value_fingerprint,
     group_spec_fields,
     group_spec_fingerprint,
     resolve_channel_groups,
@@ -232,3 +233,139 @@ class TestGroupSpecFingerprint:
         assert group_spec_fingerprint(_msg(["A", "B"]), "ch", "bank") == group_spec_fingerprint(
             _msg(["B", "A"]), "ch", "bank"
         )
+
+
+def _multifield_msg(labels: list[str], banks: list[str], xs: list[float] | None = None) -> AxisArray:
+    """Message with a ChannelMap-shaped structured ch axis (label/bank/x)."""
+    dt = np.dtype([("label", "U8"), ("bank", "U2"), ("x", "<f8")])
+    ch = np.zeros(len(labels), dtype=dt)
+    ch["label"] = labels
+    ch["bank"] = banks
+    ch["x"] = np.arange(len(labels), dtype=float) if xs is None else xs
+    return AxisArray(
+        data=np.zeros((3, len(labels))),
+        dims=["time", "ch"],
+        axes={"ch": AxisArray.CoordinateAxis(data=ch, dims=["ch"])},
+    )
+
+
+def _plain_msg(labels: list[str]) -> AxisArray:
+    return AxisArray(
+        data=np.zeros((3, len(labels))),
+        dims=["time", "ch"],
+        axes={"ch": AxisArray.CoordinateAxis(data=np.array(labels), dims=["ch"])},
+    )
+
+
+class TestCoordValueFingerprint:
+    def test_no_coordinate_data_is_empty(self):
+        """Nothing to fingerprint, so it contributes nothing to the hash."""
+        bare = AxisArray(data=np.zeros((3, 2)), dims=["time", "ch"])
+        assert coord_value_fingerprint(bare, "ch", None) == ()
+        assert coord_value_fingerprint(bare, "ch", ["bank"]) == ()
+
+    def test_equal_axes_rebuilt_per_message_agree(self):
+        """Sources commonly rebuild an identical axis every message; that must
+        not read as a change, or the state would reset at the sample rate."""
+        assert coord_value_fingerprint(_plain_msg(["a", "b"]), "ch") == coord_value_fingerprint(
+            _plain_msg(["a", "b"]), "ch"
+        )
+
+    def test_reorder_and_rename_are_detected(self):
+        base = coord_value_fingerprint(_plain_msg(["Ch5", "Ch7", "Ch10"]), "ch")
+        assert coord_value_fingerprint(_plain_msg(["Ch7", "Ch5", "Ch10"]), "ch") != base
+        assert coord_value_fingerprint(_plain_msg(["Ch1", "Ch2", "Ch3"]), "ch") != base
+
+    def test_axis_defaults_to_last_dim(self):
+        msg = _plain_msg(["a", "b"])
+        assert coord_value_fingerprint(msg, None) == coord_value_fingerprint(msg, "ch")
+
+    def test_only_requested_fields_matter(self):
+        """The whole point of the restriction: an unrelated field churning must
+        not invalidate a selection that never reads it."""
+        a = _multifield_msg(["e1", "e2"], ["A", "B"], xs=[0.0, 1.0])
+        b = _multifield_msg(["e1", "e2"], ["A", "B"], xs=[9.9, 8.8])
+        assert coord_value_fingerprint(a, "ch", ["label"]) == coord_value_fingerprint(b, "ch", ["label"])
+        assert coord_value_fingerprint(a, "ch", ["x"]) != coord_value_fingerprint(b, "ch", ["x"])
+        # ...and with no restriction, it does invalidate.
+        assert coord_value_fingerprint(a, "ch", None) != coord_value_fingerprint(b, "ch", None)
+
+    def test_requested_field_values_are_detected(self):
+        a = _multifield_msg(["e1", "e2"], ["A", "B"])
+        b = _multifield_msg(["e1", "e2"], ["B", "A"])
+        assert coord_value_fingerprint(a, "ch", ["bank"]) != coord_value_fingerprint(b, "ch", ["bank"])
+        assert coord_value_fingerprint(a, "ch", ["label"]) == coord_value_fingerprint(b, "ch", ["label"])
+
+    def test_missing_field_is_distinct_from_present(self):
+        """Gaining or losing the field still registers, as it does for
+        group_spec_fingerprint."""
+        present = _multifield_msg(["e1", "e2"], ["A", "B"])
+        plain = _plain_msg(["e1", "e2"])
+        assert coord_value_fingerprint(present, "ch", ["nosuch"]) == (None,)
+        # A plain axis has no fields at all, so it digests whole rather than
+        # reporting every requested field as absent.
+        assert coord_value_fingerprint(plain, "ch", ["bank"]) == coord_value_fingerprint(plain, "ch", None)
+
+    def test_multiple_fields_are_order_sensitive_and_independent(self):
+        msg = _multifield_msg(["e1", "e2"], ["A", "B"])
+        both = coord_value_fingerprint(msg, "ch", ["label", "bank"])
+        assert both == coord_value_fingerprint(msg, "ch", ["label"]) + coord_value_fingerprint(msg, "ch", ["bank"])
+        assert both != coord_value_fingerprint(msg, "ch", ["bank", "label"])
+
+    def test_result_is_hashable(self):
+        """Callers fold it into hash((key, n_ch) + fingerprint)."""
+        msg = _multifield_msg(["e1", "e2"], ["A", "B"])
+        for fields in (None, ["label"], ["label", "bank"], ["nosuch"]):
+            hash(("key", 2) + coord_value_fingerprint(msg, "ch", fields))
+
+    def test_object_dtype_axis_is_content_based(self):
+        """An object array's buffer is pointers, so checksumming it directly
+        would make two equal axes disagree and reset the state every message."""
+        a = AxisArray(
+            data=np.zeros((3, 3)),
+            dims=["time", "ch"],
+            axes={"ch": AxisArray.CoordinateAxis(data=np.array(["c1", "c2", "c3"], dtype=object), dims=["ch"])},
+        )
+        b = AxisArray(
+            data=np.zeros((3, 3)),
+            dims=["time", "ch"],
+            axes={
+                "ch": AxisArray.CoordinateAxis(
+                    data=np.array(["".join(["c", str(i)]) for i in (1, 2, 3)], dtype=object), dims=["ch"]
+                )
+            },
+        )
+        assert coord_value_fingerprint(a, "ch") == coord_value_fingerprint(b, "ch")
+        c = AxisArray(
+            data=np.zeros((3, 3)),
+            dims=["time", "ch"],
+            axes={"ch": AxisArray.CoordinateAxis(data=np.array(["c1", "c9", "c3"], dtype=object), dims=["ch"])},
+        )
+        assert coord_value_fingerprint(a, "ch") != coord_value_fingerprint(c, "ch")
+
+    def test_non_contiguous_coordinate_data(self):
+        """A sliced/strided coordinate array has no C-contiguous buffer; the
+        digest must gather rather than raise."""
+        labels = np.array(["a", "X", "b", "X", "c", "X"])[::2]
+        assert not labels.flags["C_CONTIGUOUS"]
+        msg = AxisArray(
+            data=np.zeros((3, 3)),
+            dims=["time", "ch"],
+            axes={"ch": AxisArray.CoordinateAxis(data=labels, dims=["ch"])},
+        )
+        assert coord_value_fingerprint(msg, "ch") == coord_value_fingerprint(_plain_msg(["a", "b", "c"]), "ch")
+
+    def test_dtype_change_alone_is_detected(self):
+        """Same values, different width -- shape and dtype ride along so this
+        does not depend on the checksum alone."""
+        wide = AxisArray(
+            data=np.zeros((3, 2)),
+            dims=["time", "ch"],
+            axes={"ch": AxisArray.CoordinateAxis(data=np.array([1, 2], dtype=np.int64), dims=["ch"])},
+        )
+        narrow = AxisArray(
+            data=np.zeros((3, 2)),
+            dims=["time", "ch"],
+            axes={"ch": AxisArray.CoordinateAxis(data=np.array([1, 2], dtype=np.int32), dims=["ch"])},
+        )
+        assert coord_value_fingerprint(wide, "ch") != coord_value_fingerprint(narrow, "ch")
