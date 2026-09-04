@@ -36,13 +36,28 @@ class ChebyForDecimate(BaseTransformerUnit[ChebyshevFilterSettings, AxisArray, A
     SETTINGS = ChebyshevFilterSettings
 
 
+class DecimateSettings(DownsampleSettings):
+    """Settings for :obj:`Decimate`.
+
+    Adds the anti-aliasing filter's ``axis`` on top of the downsampler's
+    settings. The filter has one because a filter legitimately runs along any
+    dimension; the downsampler does not, because its phase counter only means
+    something along the dimension messages accumulate along. Leave ``axis``
+    matching the stream's chunk dimension -- filtering one dimension and
+    decimating another is not decimation.
+    """
+
+    axis: str = "time"
+    """Axis for the anti-aliasing lowpass filter."""
+
+
 class Decimate(ez.Collection):
     """
     A :obj:`Collection` chaining a :obj:`Filter` node configured as a lowpass Chebyshev filter
     and a :obj:`Downsample` node.
     """
 
-    SETTINGS = DownsampleSettings
+    SETTINGS = DecimateSettings
 
     INPUT_SIGNAL = ez.InputTopic(AxisArray)
     OUTPUT_SIGNAL = ez.OutputTopic(AxisArray)
@@ -60,7 +75,11 @@ class Decimate(ez.Collection):
             wn_hz=True,
         )
         self.FILTER.apply_settings(cheby_settings)
-        self.DOWNSAMPLE.apply_settings(self.SETTINGS)
+        # `axis` is the filter's, not the downsampler's -- pass only what
+        # DownsampleSettings still declares.
+        self.DOWNSAMPLE.apply_settings(
+            DownsampleSettings(target_rate=self.SETTINGS.target_rate, factor=self.SETTINGS.factor)
+        )
 
     def network(self) -> ez.NetworkDefinition:
         return (

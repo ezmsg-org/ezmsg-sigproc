@@ -63,6 +63,21 @@ class AlignAlongAxisProcessor(
 
     # -- Helpers -------------------------------------------------------------
 
+    def _hash_message(self, message: AxisArray) -> int:
+        """Deliberately narrow: only the align axis's sample spacing.
+
+        This processor is fed from two streams in alternation, and they differ
+        in key, in channel count and in channel labels by construction -- B is a
+        different device. The default hash would therefore see a change on every
+        single message and reset the buffers each time. The only property that
+        must force a reset here is a change in sample spacing, since that is
+        what the alignment arithmetic depends on.
+
+        `_message_hash` cannot express this: for a coordinate-valued align axis
+        the spacing is derived from the values rather than read off a `gain`.
+        """
+        return hash(self._extract_gain(message))
+
     def _extract_gain(self, message: AxisArray) -> float | None:
         align_name = self.settings.axis or message.dims[0]
         ax = message.axes.get(align_name)
@@ -104,9 +119,6 @@ class AlignAlongAxisProcessor(
         self._state.buf_b = HybridAxisArrayBuffer(duration=self.settings.buffer_dur, axis=self._state.align_axis)
 
     # -- BaseStatefulTransformer interface ------------------------------------
-
-    def _hash_message(self, message: AxisArray) -> int:
-        return hash(self._extract_gain(message))
 
     def _request_reset(self) -> None:
         # update_settings() calls this (via the base class) when a reset-relevant

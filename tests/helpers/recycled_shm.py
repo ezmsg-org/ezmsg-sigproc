@@ -72,10 +72,22 @@ def _detach(result):
     The output of a transformer may itself alias the message it came from, which
     is legitimate -- it is handed straight downstream and not retained -- but it
     means the collected outputs have to be copied before the next publish.
+
+    Coordinate axes are copied too, not just ``data``. A passed-through ``ch``
+    axis is as much a view onto the slot as the samples are, so leaving it
+    attached made every collected output's labels turn to garbage on the next
+    publish -- which the comparison could not see while
+    ``CoordinateAxis.__eq__`` compared only ``unit`` (ezmsg-org/ezmsg#258
+    stack). With that fixed, failing to copy here reports every transformer as
+    retaining its axes.
     """
     if result is None:
         return None
-    return replace(result, data=np.array(result.data))
+    axes = {
+        name: (replace(ax, data=np.array(ax.data)) if getattr(ax, "data", None) is not None else ax)
+        for name, ax in result.axes.items()
+    }
+    return replace(result, data=np.array(result.data), axes=axes)
 
 
 def run_recycled(proc, messages: typing.Sequence[AxisArray], *, slot_bytes: int = SLOT_BYTES) -> list:

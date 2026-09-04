@@ -2,10 +2,10 @@ import copy
 
 import numpy as np
 import pytest
-from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.axisarray import AxisArray, CoordinateAxis
 from frozendict import frozendict
 
-from ezmsg.sigproc.downsample import DownsampleTransformer
+from ezmsg.sigproc.downsample import DownsampleSettings, DownsampleTransformer
 from tests.helpers.empty_time import check_empty_result, check_state_not_corrupted, make_empty_msg, make_msg
 from tests.helpers.util import assert_messages_equal, requires_mlx
 
@@ -48,7 +48,7 @@ def test_downsample_core(block_size: int, target_rate: float, factor: int | None
     in_msgs = list(msg_generator())
     backup = [copy.deepcopy(msg) for msg in in_msgs]
 
-    proc = DownsampleTransformer(axis="time", target_rate=target_rate, factor=factor)
+    proc = DownsampleTransformer(target_rate=target_rate, factor=factor)
     out_msgs = []
     for msg in in_msgs:
         res = proc(msg)
@@ -74,7 +74,7 @@ def test_downsample_core(block_size: int, target_rate: float, factor: int | None
 def test_downsample_empty_after_init():
     from ezmsg.sigproc.downsample import DownsampleTransformer
 
-    proc = DownsampleTransformer(axis="time", factor=2)
+    proc = DownsampleTransformer(factor=2)
     normal = make_msg()
     empty = make_empty_msg()
     _ = proc(normal)
@@ -86,7 +86,7 @@ def test_downsample_empty_after_init():
 def test_downsample_empty_target_rate():
     from ezmsg.sigproc.downsample import DownsampleTransformer
 
-    proc = DownsampleTransformer(axis="time", target_rate=25.0)
+    proc = DownsampleTransformer(target_rate=25.0)
     normal = make_msg()
     empty = make_empty_msg()
     _ = proc(normal)
@@ -98,7 +98,7 @@ def test_downsample_empty_target_rate():
 def test_downsample_empty_first():
     from ezmsg.sigproc.downsample import DownsampleTransformer
 
-    proc = DownsampleTransformer(axis="time", factor=2)
+    proc = DownsampleTransformer(factor=2)
     empty = make_empty_msg()
     normal = make_msg()
     result = proc(empty)
@@ -124,7 +124,7 @@ def test_downsample_mlx_matches_numpy(factor: int, block_size: int):
     src = rng.standard_normal((n_samples, n_ch)).astype(np.float32)
 
     def stream(data):
-        proc = DownsampleTransformer(axis="time", factor=factor)
+        proc = DownsampleTransformer(factor=factor)
         kept = []
         for start in range(0, n_samples, block_size):
             chunk = data[start : start + block_size]
@@ -148,3 +148,105 @@ def test_downsample_mlx_matches_numpy(factor: int, block_size: int):
         assert mlx_off == pytest.approx(np_off)
     # And the concatenation is exactly every `factor`-th input sample.
     assert np.array_equal(np.concatenate([d for d, _ in mlx_kept]), src[::factor])
+
+
+class TestTheDimensionIsAlwaysTheChunkDimension:
+    """``s_idx`` carries across messages so the kept samples form one arithmetic
+    sequence over the whole stream rather than restarting per chunk. That is the
+    point along the accumulating dimension and meaningless along any other, so
+    there is no setting to get wrong -- the dimension comes from the message.
+    """
+
+    @staticmethod
+    def _msg(i, chunk_dim="time", n_freq=5, n_time=4):
+        data = np.arange(n_freq, dtype=float)[None, :] + i * 100
+        kwargs = {"chunk_dim": chunk_dim} if chunk_dim else {}
+        return AxisArray(
+            np.tile(data, (n_time, 1)),
+            dims=["time", "freq"],
+            axes={
+                "time": AxisArray.TimeAxis(fs=100.0, offset=i * n_time / 100.0),
+                "freq": AxisArray.LinearAxis(gain=2.0, offset=0.0),
+            },
+            key="dev",
+            **kwargs,
+        )
+
+    def test_settings_no_longer_carry_an_axis(self):
+        """Removed rather than validated: a rejected setting is still a setting
+        someone has to understand before they can not use it."""
+        assert "axis" not in DownsampleSettings.__dataclass_fields__
+        with pytest.raises(TypeError):
+            DownsampleSettings(axis="freq", factor=2)
+
+    def test_it_follows_the_declared_chunk_dim(self):
+        proc = DownsampleTransformer(DownsampleSettings(factor=2))
+        out = proc(self._msg(0))
+        assert proc.state.axis == "time"
+        assert out.data.shape == (2, 5)
+
+    def test_the_static_axis_is_left_untouched(self):
+        proc = DownsampleTransformer(DownsampleSettings(factor=2))
+        out = proc(self._msg(0))
+        assert out.data.shape[1] == 5, "freq must pass through whole"
+        assert out.axes["freq"].gain == 2.0
+
+    def test_what_a_configurable_axis_would_have_allowed(self):
+        """Decimating a static axis rotates the selection between messages,
+        because the phase counter carries across chunk boundaries. Slicer is the
+        tool for that job and selects the same elements every time."""
+        from ezmsg.sigproc.slicer import SlicerSettings, SlicerTransformer
+
+        sliced = SlicerTransformer(SlicerSettings(selection="::2", axis="freq"))
+        kept = [(sliced(self._msg(i)).data[0] - i * 100).astype(int).tolist() for i in range(4)]
+        assert kept == [[0, 2, 4]] * 4
+
+    def test_an_undeclared_chunk_dim_falls_back_to_streaming_dims(self):
+        proc = DownsampleTransformer(DownsampleSettings(factor=2))
+        proc(self._msg(0, chunk_dim=None))
+        assert proc.state.axis == DownsampleTransformer.STREAMING_DIMS[0] == "time"
+
+
+class TestTheDimensionFollowsTheMessage:
+    def test_it_follows_a_windowing_stage_onto_win(self):
+        """The payoff for removing the setting: a Downsample after a Window
+        decimates *windows* with no reconfiguration. Left at the old ``"time"``
+        default it would have decimated within each window instead."""
+        from ezmsg.sigproc.window import WindowSettings, WindowTransformer
+
+        windowed = WindowTransformer(WindowSettings(axis="time", newaxis="win", window_dur=0.02, window_shift=0.01))(
+            AxisArray(
+                np.zeros((40, 3), np.float32),
+                dims=["time", "ch"],
+                axes={"time": AxisArray.TimeAxis(fs=100.0)},
+                key="dev",
+                chunk_dim="time",
+            )
+        )
+        assert windowed.chunk_dim == "win"
+
+        proc = DownsampleTransformer(DownsampleSettings(factor=2))
+        out = proc(windowed)
+        assert proc.state.axis == "win"
+        assert out.data.shape[1:] == windowed.data.shape[1:], "the window contents must be untouched"
+
+    def test_it_uses_the_declaration_not_the_first_dimension(self):
+        """``dims[0]`` is a tempting stand-in and a wrong one. A transposed
+        stream is ``(ch, time)``: the first dimension is static and the one that
+        accumulates is second."""
+        msg = AxisArray(
+            np.arange(24, dtype=float).reshape(3, 8),
+            dims=["ch", "time"],
+            axes={
+                "ch": CoordinateAxis(data=np.array(["a", "b", "c"]), dims=["ch"]),
+                "time": AxisArray.TimeAxis(fs=100.0),
+            },
+            key="dev",
+            chunk_dim="time",
+        )
+        assert msg.dims[0] != msg.chunk_dim, "the fixture must distinguish the two"
+
+        proc = DownsampleTransformer(DownsampleSettings(factor=2))
+        out = proc(msg)
+        assert proc.state.axis == "time"
+        assert out.data.shape == (3, 4)

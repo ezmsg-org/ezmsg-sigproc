@@ -22,9 +22,6 @@ class DownsampleSettings(ez.Settings):
     Settings for :obj:`Downsample` node.
     """
 
-    axis: str = "time"
-    """The name of the axis along which to downsample."""
-
     target_rate: float | None = None
     """Desired rate after downsampling. The actual rate will be the nearest integer factor of the
             input rate that is the same or higher than the target rate."""
@@ -41,6 +38,9 @@ class DownsampleState:
     s_idx: int = 0
     """Index of the next msg's first sample into the virtual rotating ds_factor counter."""
 
+    axis: str = ""
+    """The dimension being downsampled: the message's declared ``chunk_dim``."""
+
 
 class DownsampleTransformer(BaseStatefulTransformer[DownsampleSettings, AxisArray, AxisArray, DownsampleState]):
     """
@@ -48,13 +48,50 @@ class DownsampleTransformer(BaseStatefulTransformer[DownsampleSettings, AxisArra
     This should only be used following appropriate lowpass filtering.
     If your pipeline does not already have lowpass filtering then consider
     using the :obj:`Decimate` collection instead.
+
+    **The dimension is not configurable: it is always the one messages
+    accumulate along.** The phase counter ``s_idx`` carries across messages so
+    the kept samples form one arithmetic sequence over the whole stream rather
+    than restarting per chunk. That is the entire point along the accumulating
+    dimension, and it is meaningless along any other: a static axis has the same
+    length every message, so the carried phase makes the *selection itself*
+    rotate. Downsampling ``(time, freq)`` along ``freq`` by 2 alternates between
+    bins ``[0, 2, 4]`` and ``[1, 3]`` -- different frequencies, and a different
+    output length, on alternating messages.
+
+    For a static axis use :obj:`Slicer` with ``"::2"``, which selects the same
+    elements every time and holds no state to do it.
+
+    The dimension comes from the message's
+    :attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`, so a
+    ``Downsample`` placed after a windowing stage decimates *windows* without
+    reconfiguration. When a producer does not declare one, :attr:`STREAMING_DIMS`
+    supplies the fallback.
     """
 
+    def _resolve_axis(self, message: AxisArray) -> str:
+        """The dimension messages accumulate along, which is the only one to
+        downsample. Falls back to :attr:`STREAMING_DIMS` when undeclared."""
+        if message.chunk_dim is not None:
+            return message.chunk_dim
+        for name in self.STREAMING_DIMS:
+            if name in message.dims:
+                return name
+        return message.dims[0]
+
     def _hash_message(self, message: AxisArray) -> int:
-        return hash((message.axes[self.settings.axis].gain, message.key))
+        # The whole state is a decimation factor and the phase counter that walks
+        # it -- both derived from the target axis' gain, neither from the other
+        # dimensions. The base-class default would fold in the channel
+        # fingerprint and reset the phase whenever the channels were relabelled,
+        # which costs a hash it does not need and puts a sample-alignment step in
+        # the output for a change that cannot affect which samples are kept.
+        axis = self._resolve_axis(message)
+        return hash((message.key, axis, getattr(message.axes.get(axis), "gain", None)))
 
     def _reset_state(self, message: AxisArray) -> None:
-        axis_info = message.get_axis(self.settings.axis)
+        self._state.axis = self._resolve_axis(message)
+        axis_info = message.get_axis(self._state.axis)
 
         if self.settings.factor is not None:
             q = self.settings.factor
@@ -72,7 +109,7 @@ class DownsampleTransformer(BaseStatefulTransformer[DownsampleSettings, AxisArra
         self._state.s_idx = 0
 
     def _process(self, message: AxisArray) -> AxisArray:
-        axis = self.settings.axis
+        axis = self._state.axis
         axis_info = message.get_axis(axis)
         axis_idx = message.get_axis_idx(axis)
 
@@ -128,13 +165,13 @@ class Downsample(BaseTransformerUnit[DownsampleSettings, AxisArray, AxisArray, D
         upstream) still flows so downstream consumers keep its cadence.
         """
         result = await self.processor.__acall__(message)
-        if result is not None and not is_empty_along(result, (self.SETTINGS.axis,)):
+        # The processor is the one that worked out which dimension that is.
+        if result is not None and not is_empty_along(result, (self.processor.state.axis,)):
             yield self.OUTPUT_SIGNAL, result
 
 
 def downsample(
-    axis: str = "time",
     target_rate: float | None = None,
     factor: int | None = None,
 ) -> DownsampleTransformer:
-    return DownsampleTransformer(DownsampleSettings(axis=axis, target_rate=target_rate, factor=factor))
+    return DownsampleTransformer(DownsampleSettings(target_rate=target_rate, factor=factor))

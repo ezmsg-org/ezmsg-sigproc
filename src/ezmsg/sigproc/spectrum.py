@@ -134,11 +134,23 @@ class SpectrumState:
 
 class SpectrumTransformer(BaseStatefulTransformer[SpectrumSettings, AxisArray, AxisArray, SpectrumState]):
     def _hash_message(self, message: AxisArray) -> int:
+        """Extend the default with the two things it cannot know about.
+
+        The FFT is sized by the length of the axis being transformed, which is
+        normally the chunk dimension -- the one length the default deliberately
+        ignores because it changes with every message. Spectrum is the exception:
+        a different transform length is a different plan, so it has to be folded
+        back in. The dtype matters because a complex input takes a different
+        branch and produces a different frequency axis.
+        """
         axis = self.settings.axis or message.dims[0]
-        ax_idx = message.get_axis_idx(axis)
-        ax_info = message.axes[axis]
-        targ_len = message.data.shape[ax_idx]
-        return hash((targ_len, message.data.ndim, is_complex_dtype(message.data.dtype), ax_idx, ax_info.gain))
+        return self._message_hash(
+            message,
+            extra=(
+                message.data.shape[message.get_axis_idx(axis)],
+                is_complex_dtype(message.data.dtype),
+            ),
+        )
 
     def _reset_state(self, message: AxisArray) -> None:
         axis = self.settings.axis or message.dims[0]
@@ -261,7 +273,13 @@ class SpectrumTransformer(BaseStatefulTransformer[SpectrumSettings, AxisArray, A
         spec = self.state.f_transform(spec)
         spec = slice_along_axis(spec, self.state.f_sl, message.get_axis_idx(axis))
 
-        msg_out = replace(message, data=spec, dims=self.state.new_dims, axes=new_axes)
+        # The transformed axis is consumed: `time` becomes `freq`. If that was
+        # the dimension successive messages appended along, the output has none
+        # -- each message is one spectrum, and they stack rather than
+        # concatenate. Windowed input keeps its `win` dimension and so keeps
+        # appending along it.
+        out_chunk_dim = None if message.chunk_dim == axis else message.chunk_dim
+        msg_out = replace(message, data=spec, dims=self.state.new_dims, axes=new_axes, chunk_dim=out_chunk_dim)
         return msg_out
 
 

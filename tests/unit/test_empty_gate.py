@@ -58,7 +58,7 @@ def test_has_samples_along():
 
 
 def test_downsample_gate():
-    unit = Downsample(DownsampleSettings(axis="time", target_rate=50.0))
+    unit = Downsample(DownsampleSettings(target_rate=50.0))
     unit.create_processor()
     # Zero channels but nonzero time: the (5, 0) result must be published.
     published = _drive(unit, make_msg(n_time=10, n_ch=0, fs=100.0))

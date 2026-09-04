@@ -257,13 +257,6 @@ class FIRHilbertEnvelopeTransformer(
 
     """
 
-    def _hash_message(self, message: AxisArray) -> int:
-        axis = self.settings.axis or message.dims[0]
-        gain = getattr(self._state.filter, "gain", 0.0)
-        axis_idx = message.get_axis_idx(axis)
-        samp_shape = message.data.shape[:axis_idx] + message.data.shape[axis_idx + 1 :]
-        return hash((message.key, samp_shape, gain))
-
     def _reset_state(self, message: AxisArray) -> None:
         self._state.filter = FIRHilbertFilterTransformer(settings=self.settings)
         self._state.delay_buf = None

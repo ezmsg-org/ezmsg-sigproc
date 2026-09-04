@@ -33,6 +33,7 @@ extensions = [
     # "sphinx_autodoc_typehints",  # Disabled due to compatibility issue
     "sphinx_copybutton",
     "myst_parser",  # For markdown files
+    "sphinxcontrib.mermaid",  # For .. mermaid:: diagrams
 ]
 
 templates_path = ["_templates"]

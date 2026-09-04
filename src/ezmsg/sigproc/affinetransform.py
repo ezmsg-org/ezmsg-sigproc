@@ -35,7 +35,8 @@ from ezmsg.util.messages.util import replace
 
 from ezmsg.sigproc.util.array import array_device, is_float_dtype, xp_asarray, xp_copy, xp_create, xp_empty
 from ezmsg.sigproc.util.blockdiag import plan_block_matmul
-from ezmsg.sigproc.util.channels import ChannelGroupSpec, group_spec_fingerprint, resolve_channel_groups
+from ezmsg.sigproc.util.channels import ChannelGroupSpec, resolve_channel_groups
+from ezmsg.sigproc.util.message import with_fingerprint
 from ezmsg.sigproc.util.rereference import RereferenceKind, rereference_matrix
 
 KERNELS = ("auto", "dense", "blocks")
@@ -237,14 +238,6 @@ class AffineTransformTransformer(
             return message
         return super().__call__(message)
 
-    def _hash_message(self, message: AxisArray) -> int:
-        axis = self.settings.axis or message.dims[-1]
-        axis_idx = message.get_axis_idx(axis)
-        return hash(
-            (message.key, message.data.shape[axis_idx])
-            + group_spec_fingerprint(message, axis, self.settings.channel_groups)
-        )
-
     def _reset_state(self, message: AxisArray) -> None:
         if self.settings.kernel not in KERNELS:
             raise ValueError(f"kernel must be one of {KERNELS}, got {self.settings.kernel!r}")
@@ -310,7 +303,7 @@ class AffineTransformTransformer(
                 elif np.all(b_filled_outputs):
                     new_labels = np.array(in_labels)[b_used_inputs]
 
-            self._state.new_axis = replace(message.axes[axis], data=np.array(new_labels))
+            self._state.new_axis = with_fingerprint(replace(message.axes[axis], data=np.array(new_labels)))
 
         # Convert to match message.data namespace and device for _process.
         # Weights are numpy float64 up to here; some devices (e.g. MPS) don't
@@ -591,14 +584,6 @@ class CommonRereferenceTransformer(
     earlier version promoted float32 to float64, doubling the bandwidth of every
     downstream stage.)
     """
-
-    def _hash_message(self, message: AxisArray) -> int:
-        axis = self.settings.axis or message.dims[-1]
-        axis_idx = message.get_axis_idx(axis)
-        return hash(
-            (message.key, message.data.shape[axis_idx])
-            + group_spec_fingerprint(message, axis, self.settings.channel_groups)
-        )
 
     def _reset_state(self, message: AxisArray) -> None:
         xp = get_namespace(message.data)

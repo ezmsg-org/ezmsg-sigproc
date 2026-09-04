@@ -330,3 +330,73 @@ class TestMLXBackend:
         )
         # Same cached output_axis_obj is reused across messages.
         assert out1.axes["ch"] is out2.axes["ch"]
+
+
+class TestRelabelledInput:
+    """The merged output axis is built from the input labels, so it has to
+    follow them — a relabel at a fixed channel count is invisible to shape."""
+
+    @staticmethod
+    def _msg(ch_labels):
+        return AxisArray(
+            np.zeros((4, len(ch_labels), 2), np.float32),
+            dims=["time", "ch", "feature"],
+            axes={
+                "time": AxisArray.TimeAxis(fs=100.0),
+                "ch": CoordinateAxis(data=np.array(ch_labels), dims=["ch"]),
+                "feature": CoordinateAxis(data=np.array(["spk", "sbp"]), dims=["feature"]),
+            },
+            key="dev",
+        )
+
+    def _labels(self, out):
+        return [str(row["label"]) for row in out.axes["ch"].data]
+
+    def test_relabelled_channels_are_followed(self):
+        proc = FlattenTransformer(
+            FlattenSettings(preserve_axis="time", flatten_axes=("ch", "feature"), output_axis="ch")
+        )
+        assert self._labels(proc(self._msg(["A", "B"]))) == ["A/spk", "A/sbp", "B/spk", "B/sbp"]
+        assert self._labels(proc(self._msg(["X", "Y"]))) == ["X/spk", "X/sbp", "Y/spk", "Y/sbp"]
+
+    def test_unchanged_labels_reuse_the_cached_axis(self):
+        """The converse: an equal axis rebuilt per message must not reset, or
+        the merged axis would be rebuilt at the sample rate."""
+        proc = FlattenTransformer(
+            FlattenSettings(preserve_axis="time", flatten_axes=("ch", "feature"), output_axis="ch")
+        )
+        first = proc(self._msg(["A", "B"]))
+        again = proc(self._msg(["A", "B"]))
+        assert first.axes["ch"] is again.axes["ch"]
+
+    def test_labels_outside_flatten_axes_also_reset(self):
+        """A coordinate axis the output labels do not depend on still resets.
+
+        Flatten used to narrow its hash to the flattened axes, so a change to an
+        unrelated `ch` axis left the cached merged axis in place. It now takes
+        the base-class hash, which fingerprints every coordinate axis, so this
+        rebuilds. That is conservative rather than wrong -- the rebuilt axis is
+        identical -- and it buys a single rule for every processor instead of a
+        per-processor exception.
+        """
+        proc = FlattenTransformer(FlattenSettings(preserve_axis="time", flatten_axes=("feature",), output_axis="feat"))
+
+        def msg(ch_labels):
+            return AxisArray(
+                np.zeros((4, 2, 2), np.float32),
+                dims=["time", "ch", "feature"],
+                axes={
+                    "time": AxisArray.TimeAxis(fs=100.0),
+                    "ch": CoordinateAxis(data=np.array(ch_labels), dims=["ch"]),
+                    "feature": CoordinateAxis(data=np.array(["spk", "sbp"]), dims=["feature"]),
+                },
+                key="dev",
+            )
+
+        first = proc(msg(["A", "B"]))
+        rebuilt = proc(msg(["X", "Y"]))
+        assert rebuilt.axes["feat"] is not first.axes["feat"]
+        # ...and the rebuilt labels are unchanged, since ch does not feed them.
+        assert [str(r["label"]) for r in rebuilt.axes["feat"].data] == [
+            str(r["label"]) for r in first.axes["feat"].data
+        ]

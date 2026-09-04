@@ -87,13 +87,6 @@ class SamplerTransformer(BaseStatefulTransformer[SamplerSettings, AxisArray, Axi
         else:
             return self.push_trigger(message)
 
-    def _hash_message(self, message: AxisArray) -> int:
-        # Compute hash based on message properties that require state reset
-        axis = self.settings.axis or message.dims[0]
-        axis_idx = message.get_axis_idx(axis)
-        sample_shape = message.data.shape[:axis_idx] + message.data.shape[axis_idx + 1 :]
-        return hash((sample_shape, message.key))
-
     def _reset_state(self, message: AxisArray) -> None:
         self._state.buffer = HybridAxisArrayBuffer(
             duration=self.settings.buffer_dur,

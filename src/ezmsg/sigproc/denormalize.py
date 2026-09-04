@@ -22,6 +22,11 @@ class DenormalizeSettings(ez.Settings):
     distribution: str = "uniform"
     """Distribution to sample rates from. Options are 'uniform', 'normal', or 'constant'."""
 
+    seed: int | None = None
+    """Seed for the per-channel draw. ``None`` draws fresh values on every state
+    reset, so a run is not reproducible and a mid-stream channel change silently
+    re-rolls every channel's rate. Set it for a repeatable simulation."""
+
 
 @processor_state
 class DenormalizeState:
@@ -42,10 +47,15 @@ class DenormalizeTransformer(BaseStatefulTransformer[DenormalizeSettings, AxisAr
         ax_ix = message.get_axis_idx("ch")
         nch = message.data.shape[ax_ix]
         arr_size = (nch, 1) if ax_ix == 0 else (1, nch)
+        # Seeded per reset rather than per instance, so the same channel layout
+        # always denormalizes the same way -- a reset is triggered by a genuine
+        # change in the stream, and re-rolling every channel's rate on one would
+        # put a step discontinuity in the simulated signal.
+        rng = np.random.default_rng(self.settings.seed)
         if self.settings.distribution == "uniform":
-            self.state.offsets = np.random.uniform(2.0, 40.0, size=arr_size)
+            self.state.offsets = rng.uniform(2.0, 40.0, size=arr_size)
         elif self.settings.distribution == "normal":
-            self.state.offsets = np.random.normal(
+            self.state.offsets = rng.normal(
                 loc=(self.settings.low_rate + self.settings.high_rate) / 2.0,
                 scale=(self.settings.high_rate - self.settings.low_rate) / 6.0,
                 size=arr_size,

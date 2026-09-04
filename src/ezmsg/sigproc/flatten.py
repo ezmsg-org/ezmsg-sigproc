@@ -42,6 +42,8 @@ from ezmsg.baseproc import (
 )
 from ezmsg.util.messages.axisarray import AxisArray, CoordinateAxis, replace
 
+from .util.message import with_fingerprint
+
 
 def normalize_axis_label(label):
     """Return a hashable string-or-tuple representation of a coord label.
@@ -240,11 +242,6 @@ def _build_merged_axis(
 
 
 class FlattenTransformer(BaseStatefulTransformer[FlattenSettings, AxisArray, AxisArray, FlattenState]):
-    def _hash_message(self, message: AxisArray) -> int:
-        preserve_axis = self.settings.preserve_axis or message.dims[0]
-        non_preserve_shape = tuple(size for dim, size in zip(message.dims, message.data.shape) if dim != preserve_axis)
-        return hash((tuple(message.dims), non_preserve_shape))
-
     def _reset_state(self, message: AxisArray) -> None:
         preserve_axis = self.settings.preserve_axis or message.dims[0]
         if preserve_axis not in message.dims:
@@ -279,12 +276,14 @@ class FlattenTransformer(BaseStatefulTransformer[FlattenSettings, AxisArray, Axi
         rest_shape = permuted_shape[1 + len(flatten_axes) :]
         target_inner_shape = (n_flat, *rest_shape)
 
-        output_axis_obj = _build_merged_axis(
-            message,
-            flatten_axes,
-            flatten_sizes,
-            output_axis,
-            self.settings.label_separator,
+        output_axis_obj = with_fingerprint(
+            _build_merged_axis(
+                message,
+                flatten_axes,
+                flatten_sizes,
+                output_axis,
+                self.settings.label_separator,
+            )
         )
 
         st = self._state
@@ -322,7 +321,14 @@ class FlattenTransformer(BaseStatefulTransformer[FlattenSettings, AxisArray, Axi
             if entry is not None:
                 axes[ax] = entry
 
-        return replace(message, data=data, dims=list(st.output_dims), axes=axes)
+        # The preserved dimension may be renamed on the way out, and any
+        # dimension folded into the merged axis no longer exists to append along.
+        chunk_dim = message.chunk_dim
+        if chunk_dim == st.preserve_axis:
+            chunk_dim = st.sample_axis
+        elif chunk_dim not in st.output_dims:
+            chunk_dim = None
+        return replace(message, data=data, dims=list(st.output_dims), axes=axes, chunk_dim=chunk_dim)
 
 
 class Flatten(BaseTransformerUnit[FlattenSettings, AxisArray, AxisArray, FlattenTransformer]):
