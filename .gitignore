@@ -149,3 +149,5 @@ uv.lock
 *.local.json
 tmp/
 .codegraph/
+
+scratch/
