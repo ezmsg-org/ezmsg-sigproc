@@ -17,7 +17,7 @@ from ezmsg.util.messages.axisarray import (
     slice_along_axis,
 )
 
-from .util.message import with_fingerprint
+from .util.message import resolve_feature_dim, with_fingerprint
 
 """
 Slicer:Select a subset of data along a particular axis.
@@ -240,7 +240,7 @@ class SlicerTransformer(BaseStatefulTransformer[SlicerSettings, AxisArray, AxisA
             raise ValueError(f"on_empty must be 'raise' or 'warn', got {self.settings.on_empty!r}")
         if self.settings.order not in ("axis", "selection"):
             raise ValueError(f"order must be 'axis' or 'selection', got {self.settings.order!r}")
-        axis = self.settings.axis or message.dims[-1]
+        axis = self.settings.axis or resolve_feature_dim(message)
         axis_idx = message.get_axis_idx(axis)
         axinfo = message.axes.get(axis, None)
         self._state.new_axis = None
@@ -296,7 +296,7 @@ class SlicerTransformer(BaseStatefulTransformer[SlicerSettings, AxisArray, AxisA
             self._state.new_axis = with_fingerprint(replace(message.axes[axis], data=out_data))
 
     def _process(self, message: AxisArray) -> AxisArray:
-        axis = self.settings.axis or message.dims[-1]
+        axis = self.settings.axis or resolve_feature_dim(message)
         axis_idx = message.get_axis_idx(axis)
 
         replace_kwargs = {}

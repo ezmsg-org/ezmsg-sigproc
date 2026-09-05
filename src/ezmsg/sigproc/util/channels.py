@@ -40,6 +40,8 @@ from typing import Union
 import numpy as np
 from ezmsg.util.messages.axisarray import AxisArray
 
+from .message import resolve_feature_dim
+
 # Whether AxisFingerprintMemo counts its hits and misses. Off unless the env var
 # is set, because the answer it gives -- do axis objects survive, or is every
 # message a fresh deserialization? -- is a property of a *deployed* graph's
@@ -139,7 +141,7 @@ def channel_groups_from_field(
         than a single all-channel group lets callers distinguish "no metadata,
         fall back to my default" from "one bank".
     """
-    axis = axis or message.dims[-1]
+    axis = axis or resolve_feature_dim(message)
     ax = message.axes.get(axis)
     data = getattr(ax, "data", None)
     names = getattr(getattr(data, "dtype", None), "names", None)
@@ -177,13 +179,13 @@ def resolve_channel_groups(
             raise ValueError(f"channel group spec mixes field names with index groups: {spec!r}")
         groups = channel_groups_from_field(message, axis, fields)
     elif callable(spec):
-        groups = spec(message, axis or message.dims[-1])
+        groups = spec(message, axis or resolve_feature_dim(message))
     else:
         groups = spec
 
     if groups is None:
         return None
-    axis = axis or message.dims[-1]
+    axis = axis or resolve_feature_dim(message)
     out = [np.asarray(group, dtype=np.intp).reshape(-1) for group in groups]
     validate_channel_groups(out, message.data.shape[message.get_axis_idx(axis)])
     return out
@@ -240,7 +242,7 @@ def group_spec_fingerprint(
     fields = (spec,) if isinstance(spec, str) else group_spec_fields(spec)
     if fields is None:
         return ()
-    ax = message.axes.get(axis or message.dims[-1])
+    ax = message.axes.get(axis or resolve_feature_dim(message))
     names = getattr(getattr(getattr(ax, "data", None), "dtype", None), "names", None)
     return (bool(names) and all(field in names for field in fields),)
 
@@ -331,7 +333,7 @@ def coord_value_fingerprint(
     itemsize, so its ``tobytes()`` is the entire 27.6 kB -- asking for two of
     eight fields would otherwise cost more than asking for all of them.
     """
-    ax = message.axes.get(axis or message.dims[-1])
+    ax = message.axes.get(axis or resolve_feature_dim(message))
     data = getattr(ax, "data", None)
     if data is None:
         return ()

@@ -56,14 +56,21 @@ from ezmsg.util.messages.axisarray import (
 from .aggregate import AggregationFunction, aggregate_slices, needs_coordinates
 from .util.array import xp_copy
 from .util.binning import BinSchedule, BinStep
-from .util.message import is_empty_along, with_fingerprint
+from .util.deprecation import warn_axis_deprecated
+from .util.message import is_empty_along, resolve_configured_chunk_dim, with_fingerprint
 
 
 class BinnedAggregateSettings(ez.Settings):
     """Settings for :obj:`BinnedAggregate`."""
 
-    axis: str = "time"
-    """The name of the axis to bin and aggregate along."""
+    axis: str | None = None
+    """.. deprecated:: 3.8
+        Scheduled for removal in 4.0. The dimension messages accumulate along
+        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`;
+        see :mod:`ezmsg.sigproc.util.deprecation`."""
+
+    def __post_init__(self) -> None:
+        warn_axis_deprecated(self)
 
     bin_duration: float = 0.02
     """Output bin duration in seconds."""
@@ -113,6 +120,9 @@ class BinnedAggregateSettings(ez.Settings):
 
 @processor_state
 class BinnedAggregateState:
+    axis: str = ""
+    """The resolved chunk dimension, fixed at reset so every later use agrees."""
+
     schedule: BinSchedule | None = None
     """Shared bin-boundary schedule (see :obj:`ezmsg.sigproc.util.binning`). Owns
     the sample rate, samples-per-bin, output gain, global bin index, and carried
@@ -167,7 +177,8 @@ class BinnedAggregateTransformer(
         return await super().__acall__(message)
 
     def _reset_state(self, message: AxisArray) -> None:
-        axis_info = message.get_axis(self.settings.axis)
+        self._state.axis = resolve_configured_chunk_dim(self, message, self.settings.axis, legacy_default="time")
+        axis_info = message.get_axis(self._state.axis)
         schedule = BinSchedule(
             bin_duration=self.settings.bin_duration,
             fractional=self.settings.fractional,
@@ -227,10 +238,10 @@ class BinnedAggregateTransformer(
         return dims + [self.settings.newaxis] if self._multi else dims
 
     def _out_axes(self, message: AxisArray, step: BinStep) -> dict:
-        axis_info = message.get_axis(self.settings.axis)
+        axis_info = message.get_axis(self._state.axis)
         axes = {
             **message.axes,
-            self.settings.axis: replace(axis_info, gain=step.output_gain, offset=step.output_offset),
+            self._state.axis: replace(axis_info, gain=step.output_gain, offset=step.output_offset),
         }
         if self._multi:
             axes[self.settings.newaxis] = self._state.metric_axis
@@ -252,7 +263,7 @@ class BinnedAggregateTransformer(
         )
 
     def _process(self, message: AxisArray) -> AxisArray:
-        axis = self.settings.axis
+        axis = self._state.axis
         axis_info = message.get_axis(axis)
         axis_idx = message.get_axis_idx(axis)
         xp = get_namespace(message.data)
@@ -321,5 +332,5 @@ class BinnedAggregate(BaseTransformerUnit[BinnedAggregateSettings, AxisArray, Ax
         cadence.
         """
         result = await self.processor.__acall__(message)
-        if result is not None and not is_empty_along(result, (self.SETTINGS.axis,)):
+        if result is not None and not is_empty_along(result, (self.processor.state.axis,)):
             yield self.OUTPUT_SIGNAL, result

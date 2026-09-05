@@ -23,7 +23,8 @@ from ezmsg.util.messages.util import replace
 
 from .util.axisarray_buffer import HybridAxisArrayBuffer
 from .util.buffer import UpdateStrategy
-from .util.message import SampleTriggerMessage
+from .util.deprecation import warn_axis_deprecated
+from .util.message import SampleTriggerMessage, resolve_configured_chunk_dim
 from .util.profile import profile_subpub
 
 
@@ -41,11 +42,13 @@ class SamplerSettings(ez.Settings):
     """
 
     axis: str | None = None
-    """
-    The axis along which to sample the data.
-        None (default) will choose the first axis in the first input.
-        Note: (for now) the axis must exist in the msg .axes and be of type AxisArray.LinearAxis
-    """
+    """.. deprecated:: 3.8
+        Scheduled for removal in 4.0. The dimension messages accumulate along
+        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`;
+        see :mod:`ezmsg.sigproc.util.deprecation`."""
+
+    def __post_init__(self) -> None:
+        warn_axis_deprecated(self)
 
     period: tuple[float, float] | None = None
     """Optional default period (in seconds) if unspecified in SampleTriggerMessage."""
@@ -90,7 +93,7 @@ class SamplerTransformer(BaseStatefulTransformer[SamplerSettings, AxisArray, Axi
     def _reset_state(self, message: AxisArray) -> None:
         self._state.buffer = HybridAxisArrayBuffer(
             duration=self.settings.buffer_dur,
-            axis=self.settings.axis or message.dims[0],
+            axis=resolve_configured_chunk_dim(self, message, self.settings.axis),
             update_strategy=self.settings.buffer_update_strategy,
             overflow_strategy="warn-overwrite",  # True circular buffer
         )

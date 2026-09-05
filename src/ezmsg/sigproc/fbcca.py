@@ -22,6 +22,7 @@ from .filterbankdesign import (
 )
 from .kaiser import KaiserFilterSettings
 from .sampler import SampleTriggerMessage
+from .util.deprecation import suppress_axis_deprecation
 from .util.message import with_fingerprint
 from .window import WindowSettings, WindowTransformer
 
@@ -239,32 +240,36 @@ class StreamingFBCCATransformer(CompositeProcessor[StreamingFBCCASettings, AxisA
     ) -> dict[str, BaseProcessor | BaseStatefulProcessor]:
         pipeline = {}
 
-        if settings.filterbank_dim is not None:
-            cut_freqs = (np.arange(settings.subbands + 1) * settings.filter_bw) + settings.filter_low
-            filters = [
-                KaiserFilterSettings(
-                    axis=settings.time_dim,
-                    cutoff=(c - settings.trans_bw, cut_freqs[-1]),
-                    ripple=settings.ripple_db,
-                    width=settings.trans_bw,
-                    pass_zero=False,
+        # Every child below is configured from FBCCA's own `time_dim`, which is
+        # not deprecated; warning about the children's `axis` would name settings
+        # the user never touched and cannot drop.
+        with suppress_axis_deprecation():
+            if settings.filterbank_dim is not None:
+                cut_freqs = (np.arange(settings.subbands + 1) * settings.filter_bw) + settings.filter_low
+                filters = [
+                    KaiserFilterSettings(
+                        axis=settings.time_dim,
+                        cutoff=(c - settings.trans_bw, cut_freqs[-1]),
+                        ripple=settings.ripple_db,
+                        width=settings.trans_bw,
+                        pass_zero=False,
+                    )
+                    for c in cut_freqs[:-1]
+                ]
+
+                pipeline["filterbank"] = FilterbankDesignTransformer(
+                    FilterbankDesignSettings(filters=filters, new_axis=settings.filterbank_dim)
                 )
-                for c in cut_freqs[:-1]
-            ]
 
-            pipeline["filterbank"] = FilterbankDesignTransformer(
-                FilterbankDesignSettings(filters=filters, new_axis=settings.filterbank_dim)
+            pipeline["window"] = WindowTransformer(
+                WindowSettings(
+                    axis=settings.time_dim,
+                    newaxis=settings.window_dim,
+                    window_dur=settings.window_dur,
+                    window_shift=settings.window_shift,
+                    zero_pad_until="shift",
+                )
             )
-
-        pipeline["window"] = WindowTransformer(
-            WindowSettings(
-                axis=settings.time_dim,
-                newaxis=settings.window_dim,
-                window_dur=settings.window_dur,
-                window_shift=settings.window_shift,
-                zero_pad_until="shift",
-            )
-        )
 
         pipeline["fbcca"] = FBCCATransformer(settings)
 

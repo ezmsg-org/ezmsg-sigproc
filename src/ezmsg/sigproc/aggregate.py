@@ -29,7 +29,7 @@ from ezmsg.util.messages.axisarray import (
 )
 
 from .spectral import OptionsEnum
-from .util.message import with_fingerprint
+from .util.message import resolve_feature_dim, with_fingerprint
 
 
 class AggregationFunction(OptionsEnum):
@@ -260,7 +260,7 @@ class RangedAggregateTransformer(
         return await super().__acall__(message)
 
     def _reset_state(self, message: AxisArray) -> None:
-        axis = self.settings.axis or message.dims[0]
+        axis = self.settings.axis or resolve_feature_dim(message, 0)
         target_axis = message.get_axis(axis)
         ax_idx = message.get_axis_idx(axis)
 
@@ -293,7 +293,7 @@ class RangedAggregateTransformer(
         )
 
     def _process(self, message: AxisArray) -> AxisArray:
-        axis = self.settings.axis or message.dims[0]
+        axis = self.settings.axis or resolve_feature_dim(message, 0)
         ax_idx = message.get_axis_idx(axis)
 
         # The bands are already resolved to slices in _reset_state, and ax_vec

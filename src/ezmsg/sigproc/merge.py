@@ -12,6 +12,7 @@ from ezmsg.util.messages.axisarray import AxisArray
 
 from .align import AlignAlongAxis, AlignAlongAxisProcessor, AlignAlongAxisSettings
 from .concat import Concat, ConcatProcessor, ConcatSettings
+from .util.deprecation import suppress_axis_deprecation
 
 
 class MergeSettings(ez.Settings):
@@ -56,12 +57,16 @@ class MergeProcessor:
 
     def __init__(self, settings: MergeSettings):
         self.settings = settings
-        self._align = AlignAlongAxisProcessor(
-            settings=AlignAlongAxisSettings(
-                axis=settings.align_axis or "time",
-                buffer_dur=settings.buffer_dur,
+        # `align_axis` is Merge's own setting; forwarding it must not warn about
+        # AlignAlongAxisSettings. Passed through rather than defaulted to "time",
+        # so that leaving it unset follows the stream's chunk dimension.
+        with suppress_axis_deprecation():
+            self._align = AlignAlongAxisProcessor(
+                settings=AlignAlongAxisSettings(
+                    axis=settings.align_axis,
+                    buffer_dur=settings.buffer_dur,
+                )
             )
-        )
         self._concat = ConcatProcessor(
             settings=ConcatSettings(
                 axis=settings.axis,
@@ -119,12 +124,13 @@ class Merge(ez.Collection):
     CONCAT = Concat()
 
     def configure(self) -> None:
-        self.ALIGN.apply_settings(
-            AlignAlongAxisSettings(
-                axis=self.SETTINGS.align_axis or "time",
-                buffer_dur=self.SETTINGS.buffer_dur,
+        with suppress_axis_deprecation():
+            self.ALIGN.apply_settings(
+                AlignAlongAxisSettings(
+                    axis=self.SETTINGS.align_axis,
+                    buffer_dur=self.SETTINGS.buffer_dur,
+                )
             )
-        )
         self.CONCAT.apply_settings(
             ConcatSettings(
                 axis=self.SETTINGS.axis,

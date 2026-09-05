@@ -15,6 +15,9 @@ from ezmsg.util.messages.util import replace
 
 from ezmsg.sigproc.util.array import np_finfo
 
+from .util.deprecation import warn_axis_deprecated
+from .util.message import resolve_configured_chunk_dim
+
 
 def _ewma_mlx_metal_xp(data, axis_idx: int, zi, alpha: float, chunk_sizes: tuple[int, ...]):
     """Run EWMA through the MLX Metal helper while preserving scipy zi layout."""
@@ -165,6 +168,13 @@ class EWMASettings(ez.Settings):
     """The amount of time for the smoothed response of a unit step function to reach 1 - 1/e approx-eq 63.2%."""
 
     axis: str | None = None
+    """.. deprecated:: 3.8
+        Scheduled for removal in 4.0. The dimension messages accumulate along
+        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`;
+        see :mod:`ezmsg.sigproc.util.deprecation`."""
+
+    def __post_init__(self) -> None:
+        warn_axis_deprecated(self)
 
     accumulate: bool = True
     """If True, update the EWMA state with each sample. If False, only apply
@@ -274,7 +284,7 @@ class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray
         return await super().__acall__(message)
 
     def _reset_state(self, message: AxisArray) -> None:
-        axis = self.settings.axis or message.dims[0]
+        axis = resolve_configured_chunk_dim(self, message, self.settings.axis)
         axis_idx = message.get_axis_idx(axis)
         self._state.alpha = _alpha_from_tau(self.settings.time_constant, message.axes[axis].gain)
         # Start from zero; _process divides out the missing-history bias.
@@ -330,7 +340,7 @@ class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray
         )
 
     def _process(self, message: AxisArray) -> AxisArray:
-        axis = self.settings.axis or message.dims[0]
+        axis = resolve_configured_chunk_dim(self, message, self.settings.axis)
         axis_idx = message.get_axis_idx(axis)
 
         xp = np if is_numpy_array(message.data) else get_namespace(message.data)

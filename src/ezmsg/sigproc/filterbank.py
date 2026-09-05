@@ -20,6 +20,8 @@ from ezmsg.util.messages.util import replace
 from scipy.special import lambertw
 
 from .spectrum import OptionsEnum
+from .util.deprecation import warn_axis_deprecated
+from .util.message import resolve_configured_chunk_dim
 from .window import WindowTransformer
 
 
@@ -65,8 +67,14 @@ class FilterbankSettings(ez.Settings):
       See `scipy.signal.minimum_phase` for details.
     """
 
-    axis: str = "time"
-    """The name of the axis to operate on. This should usually be "time"."""
+    axis: str | None = None
+    """.. deprecated:: 3.8
+        Scheduled for removal in 4.0. The dimension messages accumulate along
+        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`;
+        see :mod:`ezmsg.sigproc.util.deprecation`."""
+
+    def __post_init__(self) -> None:
+        warn_axis_deprecated(self)
 
     new_axis: str = "kernel"
     """The name of the new axis corresponding to the kernel index."""
@@ -98,7 +106,7 @@ class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArra
         return self._message_hash(message, extra=(message.data.dtype.kind,))
 
     def _reset_state(self, message: AxisArray) -> None:
-        axis = self.settings.axis or message.dims[0]
+        axis = resolve_configured_chunk_dim(self, message, self.settings.axis)
         gain = message.axes[axis].gain if axis in message.axes else 1.0
         targ_ax_ix = message.get_axis_idx(axis)
         in_shape = message.data.shape[:targ_ax_ix] + message.data.shape[targ_ax_ix + 1 :]
@@ -203,7 +211,7 @@ class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArra
             # TODO: If fft_kernels have significant stretches of zeros, convert to sparse array.
 
     def _process(self, message: AxisArray) -> AxisArray:
-        axis = self.settings.axis or message.dims[0]
+        axis = resolve_configured_chunk_dim(self, message, self.settings.axis)
         targ_ax_ix = message.get_axis_idx(axis)
 
         # Make sure target axis is in -1th position.
@@ -275,7 +283,7 @@ def filterbank(
     kernels: list[npt.NDArray] | tuple[npt.NDArray, ...],
     mode: FilterbankMode = FilterbankMode.CONV,
     min_phase: MinPhaseMode = MinPhaseMode.NONE,
-    axis: str = "time",
+    axis: str | None = None,
     new_axis: str = "kernel",
 ) -> FilterbankTransformer:
     """

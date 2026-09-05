@@ -14,9 +14,20 @@ from ezmsg.baseproc import (
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
+from .util.deprecation import warn_axis_deprecated
+from .util.message import resolve_configured_chunk_dim
+
 
 class RollingScalerSettings(ez.Settings):
-    axis: str = "time"
+    axis: str | None = None
+    """.. deprecated:: 3.8
+        Scheduled for removal in 4.0. The dimension messages accumulate along
+        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`;
+        see :mod:`ezmsg.sigproc.util.deprecation`."""
+
+    def __post_init__(self) -> None:
+        warn_axis_deprecated(self)
+
     """
     Axis along which samples are arranged.
     """
@@ -65,6 +76,9 @@ class RollingScalerSettings(ez.Settings):
 
 @processor_state
 class RollingScalerState:
+    axis: str = ""
+    """The resolved chunk dimension, fixed at reset so every later use agrees."""
+
     mean: npt.NDArray | None = None
     N: int = 0
     M2: npt.NDArray | None = None
@@ -109,13 +123,14 @@ class RollingScalerProcessor(BaseAdaptiveTransformer[RollingScalerSettings, Axis
     NONRESET_SETTINGS_FIELDS = frozenset({"update_with_signal", "artifact_z_thresh", "clip"})
 
     def _reset_state(self, message: AxisArray) -> None:
+        self._state.axis = resolve_configured_chunk_dim(self, message, self.settings.axis, legacy_default="time")
         xp = get_namespace(message.data)
         ch = message.data.shape[-1]
         self._state.mean = xp.zeros(ch, dtype=xp.float64)
         self._state.N = 0
         self._state.M2 = xp.zeros(ch, dtype=xp.float64)
         self._state.k_samples = (
-            math.ceil(self.settings.window_size / message.axes[self.settings.axis].gain)
+            math.ceil(self.settings.window_size / message.axes[self._state.axis].gain)
             if self.settings.window_size is not None
             else self.settings.k_samples
         )
@@ -126,7 +141,7 @@ class RollingScalerProcessor(BaseAdaptiveTransformer[RollingScalerSettings, Axis
             ez.logger.warning("k_samples is None; z-score accumulation will be unbounded.")
         self._state.samples = deque(maxlen=self._state.k_samples)
         self._state.min_samples = (
-            math.ceil(self.settings.min_seconds / message.axes[self.settings.axis].gain)
+            math.ceil(self.settings.min_seconds / message.axes[self._state.axis].gain)
             if self.settings.window_size is not None
             else self.settings.min_samples
         )

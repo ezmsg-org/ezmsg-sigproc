@@ -8,6 +8,8 @@ import numpy as np
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
+from .util.deprecation import suppress_axis_deprecation
+from .util.message import resolve_chunk_dim
 from .window import Window, WindowSettings
 
 
@@ -62,7 +64,7 @@ class EWM(ez.Unit):
 
             axis_name = self.SETTINGS.axis
             if axis_name is None:
-                axis_name = signal.dims[0]
+                axis_name = resolve_chunk_dim(signal)
 
             axis_idx = signal.get_axis_idx(axis_name)
 
@@ -131,20 +133,23 @@ class EWMFilter(ez.Collection):
     EWM = EWM()
 
     def configure(self) -> None:
-        self.EWM.apply_settings(
-            EWMSettings(
-                axis=self.SETTINGS.axis,
-                zero_offset=self.SETTINGS.zero_offset,
+        # Already warned about on EWMFilterSettings; fanning it out to the two
+        # children is one setting, not three.
+        with suppress_axis_deprecation():
+            self.EWM.apply_settings(
+                EWMSettings(
+                    axis=self.SETTINGS.axis,
+                    zero_offset=self.SETTINGS.zero_offset,
+                )
             )
-        )
 
-        self.WINDOW.apply_settings(
-            WindowSettings(
-                axis=self.SETTINGS.axis,
-                window_dur=self.SETTINGS.history_dur,
-                window_shift=None,  # 1:1 mode
+            self.WINDOW.apply_settings(
+                WindowSettings(
+                    axis=self.SETTINGS.axis,
+                    window_dur=self.SETTINGS.history_dur,
+                    window_shift=None,  # 1:1 mode
+                )
             )
-        )
 
     def network(self) -> ez.NetworkDefinition:
         return (

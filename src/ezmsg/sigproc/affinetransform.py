@@ -36,7 +36,7 @@ from ezmsg.util.messages.util import replace
 from ezmsg.sigproc.util.array import array_device, is_float_dtype, xp_asarray, xp_copy, xp_create, xp_empty
 from ezmsg.sigproc.util.blockdiag import plan_block_matmul
 from ezmsg.sigproc.util.channels import ChannelGroupSpec, resolve_channel_groups
-from ezmsg.sigproc.util.message import with_fingerprint
+from ezmsg.sigproc.util.message import resolve_feature_dim, with_fingerprint
 from ezmsg.sigproc.util.rereference import RereferenceKind, rereference_matrix
 
 KERNELS = ("auto", "dense", "blocks")
@@ -242,7 +242,7 @@ class AffineTransformTransformer(
         if self.settings.kernel not in KERNELS:
             raise ValueError(f"kernel must be one of {KERNELS}, got {self.settings.kernel!r}")
 
-        axis = self.settings.axis or message.dims[-1]
+        axis = self.settings.axis or resolve_feature_dim(message)
         axis_idx = message.get_axis_idx(axis)
         n_in = message.data.shape[axis_idx]
         xp = get_namespace(message.data)
@@ -447,7 +447,7 @@ class AffineTransformTransformer(
 
     def _process(self, message: AxisArray) -> AxisArray:
         xp = get_namespace(message.data)
-        axis = self.settings.axis or message.dims[-1]
+        axis = self.settings.axis or resolve_feature_dim(message)
         axis_idx = message.get_axis_idx(axis)
         data = message.data
 
@@ -588,7 +588,7 @@ class CommonRereferenceTransformer(
     def _reset_state(self, message: AxisArray) -> None:
         xp = get_namespace(message.data)
         dev = array_device(message.data)
-        axis = self.settings.axis or message.dims[-1]
+        axis = self.settings.axis or resolve_feature_dim(message)
         axis_idx = message.get_axis_idx(axis)
         n_ch = message.data.shape[axis_idx]
         include_current = self.settings.include_current
@@ -638,7 +638,7 @@ class CommonRereferenceTransformer(
             return message
 
         xp = get_namespace(message.data)
-        axis = self.settings.axis or message.dims[-1]
+        axis = self.settings.axis or resolve_feature_dim(message)
         axis_idx = message.get_axis_idx(axis)
         state = self._state
         data = message.data
