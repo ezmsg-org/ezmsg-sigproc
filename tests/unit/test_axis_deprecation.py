@@ -132,13 +132,25 @@ class TestTheInventoryIsPinned:
             if not name.startswith("ezmsg.sigproc"):
                 continue
             for obj in vars(mod).values():
-                if inspect.isclass(obj) and issubclass(obj, ez.Settings) and "__post_init__" in dir(obj):
-                    try:
-                        src = inspect.getsource(obj.__post_init__)
-                    except (OSError, TypeError):
+                if not inspect.isclass(obj):
+                    continue
+                try:
+                    if not issubclass(obj, ez.Settings):
                         continue
-                    if "warn_axis_deprecated" in src:
-                        found.add(obj.__name__)
+                except TypeError:
+                    # On 3.10 `isinstance(tuple[int, str], type)` is True, so a
+                    # module-level generic alias (align.py's `_AlignPair`) gets
+                    # past isclass and then blows up in issubclass. 3.11 made
+                    # that False, which is why this only bit on one matrix job.
+                    continue
+                if "__post_init__" not in dir(obj):
+                    continue
+                try:
+                    src = inspect.getsource(obj.__post_init__)
+                except (OSError, TypeError):
+                    continue
+                if "warn_axis_deprecated" in src:
+                    found.add(obj.__name__)
         assert found == DEPRECATED_SETTINGS
 
     def test_flatten_is_deliberately_excluded(self):
