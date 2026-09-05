@@ -22,7 +22,7 @@ from ezmsg.baseproc import (
 )
 from ezmsg.util.messages.axisarray import AxisArray, replace
 
-from .util.message import with_fingerprint
+from .util.message import resolve_feature_dim, with_fingerprint
 
 # -- Utility functions for coordinate transformations --
 
@@ -109,7 +109,7 @@ class CoordinateSpacesTransformer(BaseTransformer[CoordinateSpacesSettings, Axis
 
     def _process(self, message: AxisArray) -> AxisArray:
         xp = get_namespace(message.data)
-        axis = self.settings.axis or message.dims[-1]
+        axis = self.settings.axis or resolve_feature_dim(message)
         axis_idx = message.get_axis_idx(axis)
 
         if message.data.shape[axis_idx] != 2:

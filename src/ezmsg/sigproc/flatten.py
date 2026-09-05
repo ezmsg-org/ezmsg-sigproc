@@ -42,7 +42,7 @@ from ezmsg.baseproc import (
 )
 from ezmsg.util.messages.axisarray import AxisArray, CoordinateAxis, replace
 
-from .util.message import with_fingerprint
+from .util.message import resolve_chunk_dim, with_fingerprint
 
 
 def normalize_axis_label(label):
@@ -80,8 +80,13 @@ class FlattenSettings(ez.Settings):
     """
 
     preserve_axis: str | None = None
-    """Axis kept as the leading dim of the output (typically
-        ``"time"``).  Defaults to ``message.dims[0]``."""
+    """Axis kept as the leading dim of the output (typically ``"time"``).
+
+    Defaults to the dimension messages accumulate along
+    (:attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`). Unlike the
+    state-carrying stages, this one stays configurable: Flatten holds no data
+    between messages, and folding the chunk dimension into the merged axis is a
+    coherent request -- the output simply declares no chunk dimension."""
 
     sample_axis: str | None = None
     """Optional rename for ``preserve_axis`` on the output
@@ -243,7 +248,7 @@ def _build_merged_axis(
 
 class FlattenTransformer(BaseStatefulTransformer[FlattenSettings, AxisArray, AxisArray, FlattenState]):
     def _reset_state(self, message: AxisArray) -> None:
-        preserve_axis = self.settings.preserve_axis or message.dims[0]
+        preserve_axis = self.settings.preserve_axis or resolve_chunk_dim(message, self.STREAMING_DIMS)
         if preserve_axis not in message.dims:
             raise ValueError(f"preserve_axis {preserve_axis!r} not found in dims {message.dims}")
 

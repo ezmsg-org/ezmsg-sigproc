@@ -8,6 +8,9 @@ from ezmsg.baseproc import BaseStatefulTransformer, processor_state
 from ezmsg.util.messages.axisarray import AxisArray, CoordinateAxis
 from ezmsg.util.messages.util import replace
 
+from .util.deprecation import warn_axis_deprecated
+from .util.message import resolve_configured_chunk_dim
+
 
 class AdaptiveLatticeNotchFilterSettings(ez.Settings):
     """Settings for the Adaptive Lattice Notch Filter."""
@@ -18,7 +21,15 @@ class AdaptiveLatticeNotchFilterSettings(ez.Settings):
     """Smoothing factor"""
     eta: float = 0.99
     """Forgetting factor"""
-    axis: str = "time"
+    axis: str | None = None
+    """.. deprecated:: 3.8
+        Scheduled for removal in 4.0. The dimension messages accumulate along
+        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`;
+        see :mod:`ezmsg.sigproc.util.deprecation`."""
+
+    def __post_init__(self) -> None:
+        warn_axis_deprecated(self)
+
     """Axis to apply filter to"""
     init_notch_freq: float | None = None
     """Initial notch frequency. Should be < nyquist."""
@@ -28,6 +39,9 @@ class AdaptiveLatticeNotchFilterSettings(ez.Settings):
 
 @processor_state
 class AdaptiveLatticeNotchFilterState:
+    axis: str = ""
+    """The resolved chunk dimension, fixed at reset so every later use agrees."""
+
     """State for the Adaptive Lattice Notch Filter."""
 
     s_history: npt.NDArray | None = None
@@ -71,10 +85,11 @@ class AdaptiveLatticeNotchFilterTransformer(
     NONRESET_SETTINGS_FIELDS = frozenset({"gamma", "mu", "eta", "chunkwise"})
 
     def _reset_state(self, message: AxisArray) -> None:
-        ax_idx = message.get_axis_idx(self.settings.axis)
+        axis = resolve_configured_chunk_dim(self, message, self.settings.axis, legacy_default="time")
+        ax_idx = message.get_axis_idx(axis)
         sample_shape = message.data.shape[:ax_idx] + message.data.shape[ax_idx + 1 :]
 
-        fs = 1 / message.axes[self.settings.axis].gain
+        fs = 1 / message.axes[axis].gain
         init_f = (
             self.settings.init_notch_freq if self.settings.init_notch_freq is not None else 0.07178314656435313 * fs
         )
@@ -83,13 +98,15 @@ class AdaptiveLatticeNotchFilterTransformer(
 
         """Reset filter state to initial values."""
         self._state = AdaptiveLatticeNotchFilterState()
+        # Set after the wholesale replacement above, which would otherwise drop it.
+        self._state.axis = axis
         self._state.s_history = np.zeros((2,) + sample_shape, dtype=float)
         self._state.p = np.zeros(sample_shape, dtype=float)
         self._state.q = np.zeros(sample_shape, dtype=float)
         self._state.k1 = init_k1 + np.zeros(sample_shape, dtype=float)
         self._state.freq_template = CoordinateAxis(
             data=np.zeros((0,) + sample_shape, dtype=float),
-            dims=[self.settings.axis] + message.dims[:ax_idx] + message.dims[ax_idx + 1 :],
+            dims=[axis] + message.dims[:ax_idx] + message.dims[ax_idx + 1 :],
             unit="Hz",
         )
 
@@ -105,17 +122,18 @@ class AdaptiveLatticeNotchFilterTransformer(
 
     def _process(self, message: AxisArray) -> AxisArray:
         x_data = message.data
-        ax_idx = message.get_axis_idx(self.settings.axis)
+        axis = self._state.axis
+        ax_idx = message.get_axis_idx(axis)
 
         # TODO: Time should be moved to -1th axis, not the 0th axis
-        if message.dims[0] != self.settings.axis:
+        if message.dims[0] != axis:
             x_data = np.moveaxis(x_data, ax_idx, 0)
 
         # Access settings once
         gamma = self.settings.gamma
         eta = self.settings.eta
         mu = self.settings.mu
-        fs = 1 / message.axes[self.settings.axis].gain
+        fs = 1 / message.axes[axis].gain
 
         # Pre-compute constants
         one_minus_eta = 1 - eta

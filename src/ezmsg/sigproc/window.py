@@ -22,7 +22,8 @@ from ezmsg.util.messages.axisarray import (
 
 from .util.array import xp_empty
 from .util.buffer import HybridBuffer, UpdateStrategy
-from .util.message import is_empty_along
+from .util.deprecation import warn_axis_deprecated
+from .util.message import is_empty_along, resolve_configured_chunk_dim
 from .util.profile import profile_subpub
 from .util.sparse import sliding_win_oneaxis as sparse_sliding_win_oneaxis
 
@@ -35,6 +36,13 @@ class Anchor(enum.Enum):
 
 class WindowSettings(ez.Settings):
     axis: str | None = None
+    """.. deprecated:: 3.8
+        Scheduled for removal in 4.0. The dimension messages accumulate along
+        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`;
+        see :mod:`ezmsg.sigproc.util.deprecation`."""
+
+    def __post_init__(self) -> None:
+        warn_axis_deprecated(self)
 
     newaxis: str | None = None
     """Name of the axis windows are delimited on, inserted before ``axis``.
@@ -262,7 +270,7 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
             # disagree with the axes key _process writes.
             _newaxis = self.settings.newaxis
 
-        axis = self.settings.axis or message.dims[0]
+        axis = resolve_configured_chunk_dim(self, message, self.settings.axis)
         axis_idx = message.get_axis_idx(axis)
         axis_info = message.get_axis(axis)
         fs = 1.0 / axis_info.gain
@@ -367,7 +375,7 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
         self._state.buffer_len -= min(n, self._state.buffer_len)
 
     def _process(self, message: AxisArray) -> AxisArray:
-        axis = self.settings.axis or message.dims[0]
+        axis = resolve_configured_chunk_dim(self, message, self.settings.axis)
         axis_idx = message.get_axis_idx(axis)
         axis_info = message.get_axis(axis)
 
@@ -500,9 +508,10 @@ class Window(BaseTransformerUnit[WindowSettings, AxisArray, AxisArray, WindowTra
         # TODO: The transfomer overwrites settings.newaxis from None to "win",
         #  then we no longer know if the user wants to trim out the newaxis from the unit.
         xp = get_namespace(message.data)
-        # `axis` defaults to the input's first dim, matching WindowTransformer.
-        # Resolve it from the *input*, since the output has `win` prepended.
-        axis = self.SETTINGS.axis or message.dims[0]
+        # Must resolve exactly as WindowTransformer does, or the emptiness gate
+        # below checks a different dim than the one that was windowed. Resolved
+        # from the *input*, since the output has `win` prepended.
+        axis = resolve_configured_chunk_dim(self.processor, message, self.SETTINGS.axis)
         try:
             ret = self.processor(message)
             # Swallow only when no complete windows (or, in pass-through mode, no

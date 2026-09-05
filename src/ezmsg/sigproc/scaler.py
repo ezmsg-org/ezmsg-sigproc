@@ -13,11 +13,14 @@ from ezmsg.baseproc import (
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
-# Imports for backwards compatibility with previous module location
 from .ewma import EWMA_Deprecated as EWMA_Deprecated
 from .ewma import EWMASettings, EWMATransformer, _alpha_from_tau
 from .ewma import _tau_from_alpha as _tau_from_alpha
 from .ewma import ewma_step as ewma_step
+
+# Imports for backwards compatibility with previous module location
+from .util.deprecation import suppress_axis_deprecation, warn_axis_deprecated
+from .util.message import resolve_configured_chunk_dim
 
 
 class RiverAdaptiveStandardScalerSettings(ez.Settings):
@@ -25,7 +28,13 @@ class RiverAdaptiveStandardScalerSettings(ez.Settings):
     """Decay constant ``tau`` in seconds."""
 
     axis: str | None = None
-    """The name of the axis to accumulate statistics over."""
+    """.. deprecated:: 3.8
+        Scheduled for removal in 4.0. The dimension messages accumulate along
+        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`;
+        see :mod:`ezmsg.sigproc.util.deprecation`."""
+
+    def __post_init__(self) -> None:
+        warn_axis_deprecated(self)
 
 
 @processor_state
@@ -55,12 +64,11 @@ class RiverAdaptiveStandardScalerTransformer(
     def _reset_state(self, message: AxisArray) -> None:
         from river import preprocessing
 
-        axis = self.settings.axis
-        if axis is None:
-            axis = message.dims[0]
-            self._state.axis_idx = 0
-        else:
-            self._state.axis_idx = message.get_axis_idx(axis)
+        # The index is looked up unconditionally. The resolved axis is the one
+        # messages accumulate along, which is not necessarily the leading one:
+        # assuming index 0 for it transposed the data silently.
+        axis = resolve_configured_chunk_dim(self, message, self.settings.axis)
+        self._state.axis_idx = message.get_axis_idx(axis)
         self._state.axis = axis
 
         alpha = _alpha_from_tau(self.settings.time_constant, message.axes[axis].gain)
@@ -147,16 +155,21 @@ class AdaptiveStandardScalerTransformer(
         return 0
 
     def _reset_state(self, message: AxisArray) -> None:
-        self._state.samps_ewma = EWMATransformer(
-            time_constant=self.settings.time_constant,
-            axis=self.settings.axis,
-            accumulate=self.settings.accumulate,
-        )
-        self._state.vars_sq_ewma = EWMATransformer(
-            time_constant=self.settings.time_constant,
-            axis=self.settings.axis,
-            accumulate=self.settings.accumulate,
-        )
+        # One user-visible setting, already warned about when this transformer's
+        # own settings were built. Forwarding it must not warn again -- and this
+        # runs mid-stream, so the warning would name the pipeline driver rather
+        # than any call site.
+        with suppress_axis_deprecation():
+            self._state.samps_ewma = EWMATransformer(
+                time_constant=self.settings.time_constant,
+                axis=self.settings.axis,
+                accumulate=self.settings.accumulate,
+            )
+            self._state.vars_sq_ewma = EWMATransformer(
+                time_constant=self.settings.time_constant,
+                axis=self.settings.axis,
+                accumulate=self.settings.accumulate,
+            )
 
     @property
     def accumulate(self) -> bool:

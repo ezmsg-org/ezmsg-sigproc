@@ -16,7 +16,8 @@ from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
 from .filterbank import FilterbankMode, MinPhaseMode, filterbank
-from .util.message import with_fingerprint
+from .util.deprecation import suppress_axis_deprecation, warn_axis_deprecated
+from .util.message import resolve_configured_chunk_dim, with_fingerprint
 
 
 class CWTSettings(ez.Settings):
@@ -28,12 +29,23 @@ class CWTSettings(ez.Settings):
     frequencies: list | tuple | npt.NDArray | None
     wavelet: str | pywt.ContinuousWavelet | pywt.Wavelet
     min_phase: MinPhaseMode = MinPhaseMode.NONE
-    axis: str = "time"
+    axis: str | None = None
+    """.. deprecated:: 3.8
+        Scheduled for removal in 4.0. The dimension messages accumulate along
+        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`;
+        see :mod:`ezmsg.sigproc.util.deprecation`."""
+
+    def __post_init__(self) -> None:
+        warn_axis_deprecated(self)
+
     scales: list | tuple | npt.NDArray | None = None
 
 
 @processor_state
 class CWTState:
+    axis: str = ""
+    """The resolved chunk dimension, fixed at reset so every later use agrees."""
+
     neg_rt_scales: npt.NDArray | None = None
     int_psi_scales: list[npt.NDArray] | None = None
     template: AxisArray | None = None
@@ -47,6 +59,7 @@ class CWTTransformer(BaseStatefulTransformer[CWTSettings, AxisArray, AxisArray, 
         return self._message_hash(message, extra=(message.data.dtype.kind,))
 
     def _reset_state(self, message: AxisArray) -> None:
+        self._state.axis = resolve_configured_chunk_dim(self, message, self.settings.axis, legacy_default="time")
         if "freq" in message.dims:
             raise ValueError(
                 "CWT appends a 'freq' axis to its output, but the input already has one "
@@ -70,7 +83,7 @@ class CWTTransformer(BaseStatefulTransformer[CWTSettings, AxisArray, AxisArray, 
             frequencies = np.sort(np.array(self.settings.frequencies))
             scales = pywt.frequency2scale(
                 wavelet,
-                frequencies * message.axes[self.settings.axis].gain,
+                frequencies * message.axes[self._state.axis].gain,
                 precision=precision,
             )
         else:
@@ -97,21 +110,25 @@ class CWTTransformer(BaseStatefulTransformer[CWTSettings, AxisArray, AxisArray, 
             self._state.int_psi_scales.append(int_psi[reix][::-1])
 
         # Setup filterbank generator
-        self._state.fbgen = filterbank(
-            self._state.int_psi_scales,
-            mode=FilterbankMode.CONV,
-            min_phase=self.settings.min_phase,
-            axis=self.settings.axis,
-        )
+        # The child filterbank is handed the axis this stage already resolved,
+        # so it convolves the same dimension; that forwarding is ours, not a
+        # setting the user can drop.
+        with suppress_axis_deprecation():
+            self._state.fbgen = filterbank(
+                self._state.int_psi_scales,
+                mode=FilterbankMode.CONV,
+                min_phase=self.settings.min_phase,
+                axis=self._state.axis,
+            )
 
         # Create output template.
-        ax_idx = message.get_axis_idx(self.settings.axis)
+        ax_idx = message.get_axis_idx(self._state.axis)
         in_shape = message.data.shape[:ax_idx] + message.data.shape[ax_idx + 1 :]
-        freqs = pywt.scale2frequency(wavelet, scales, precision) / message.axes[self.settings.axis].gain
+        freqs = pywt.scale2frequency(wavelet, scales, precision) / message.axes[self._state.axis].gain
         dummy_shape = in_shape + (len(scales), 0)
         self._state.template = AxisArray(
             np.zeros(dummy_shape, dtype=dt_cplx if wavelet.complex_cwt else dt_data),
-            dims=message.dims[:ax_idx] + message.dims[ax_idx + 1 :] + ["freq", self.settings.axis],
+            dims=message.dims[:ax_idx] + message.dims[ax_idx + 1 :] + ["freq", self._state.axis],
             axes={
                 **{k: deepcopy(v) for k, v in message.axes.items()},
                 "freq": with_fingerprint(AxisArray.CoordinateAxis(unit="Hz", data=freqs, dims=["freq"])),
@@ -141,7 +158,7 @@ class CWTTransformer(BaseStatefulTransformer[CWTSettings, AxisArray, AxisArray, 
             data=coef,
             axes={
                 **self._state.template.axes,
-                self.settings.axis: message.axes[self.settings.axis],
+                self._state.axis: message.axes[self._state.axis],
             },
         )
 

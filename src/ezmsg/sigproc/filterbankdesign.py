@@ -19,6 +19,8 @@ from .filterbank import (
     MinPhaseMode,
 )
 from .kaiser import KaiserFilterSettings, kaiser_design_fun
+from .util.deprecation import suppress_axis_deprecation, warn_axis_deprecated
+from .util.message import resolve_configured_chunk_dim
 
 
 class FilterbankDesignSettings(ez.Settings):
@@ -40,8 +42,14 @@ class FilterbankDesignSettings(ez.Settings):
       See `scipy.signal.minimum_phase` for details.
     """
 
-    axis: str = "time"
-    """The name of the axis to operate on. This should usually be "time"."""
+    axis: str | None = None
+    """.. deprecated:: 3.8
+        Scheduled for removal in 4.0. The dimension messages accumulate along
+        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`;
+        see :mod:`ezmsg.sigproc.util.deprecation`."""
+
+    def __post_init__(self) -> None:
+        warn_axis_deprecated(self)
 
     new_axis: str = "kernel"
     """The name of the new axis corresponding to the kernel index."""
@@ -49,6 +57,9 @@ class FilterbankDesignSettings(ez.Settings):
 
 @processor_state
 class FilterbankDesignState:
+    axis: str = ""
+    """The resolved chunk dimension, fixed at reset so every later use agrees."""
+
     filterbank: FilterbankTransformer | None = None
     needs_redesign: bool = False
 
@@ -111,21 +122,29 @@ class FilterbankDesignTransformer(
         # of the sample rate. That inner transformer keeps its own hash and
         # rebuilds itself when the channels change, so folding the channel
         # fingerprint in here would only redesign kernels that came out the same.
-        return hash((message.key, getattr(message.axes.get(self.settings.axis), "gain", None)))
+        # Runs before `_reset_state`, so the axis is resolved from the message
+        # rather than read back off state that does not exist yet.
+        axis = resolve_configured_chunk_dim(self, message, self.settings.axis, legacy_default="time")
+        return hash((message.key, getattr(message.axes.get(axis), "gain", None)))
 
     def _reset_state(self, message: AxisArray) -> None:
-        axis_obj = message.axes[self.settings.axis]
+        self.state.axis = resolve_configured_chunk_dim(self, message, self.settings.axis, legacy_default="time")
+        axis_obj = message.axes[self.state.axis]
         assert isinstance(axis_obj, AxisArray.LinearAxis)
         fs = 1 / axis_obj.gain
         kernels = self._calculate_kernels(fs)
-        new_settings = FilterbankSettings(
-            kernels=kernels,
-            mode=self.settings.mode,
-            min_phase=self.settings.min_phase,
-            axis=self.settings.axis,
-            new_axis=self.settings.new_axis,
-        )
-        self.state.filterbank = FilterbankTransformer(settings=new_settings)
+        # Forwards this stage's own `axis`, which is not the deprecated setting;
+        # warning here would name FilterbankSettings for something the user set on
+        # FilterbankDesignSettings, and would do it on every reset.
+        with suppress_axis_deprecation():
+            new_settings = FilterbankSettings(
+                kernels=kernels,
+                mode=self.settings.mode,
+                min_phase=self.settings.min_phase,
+                axis=self.state.axis,
+                new_axis=self.settings.new_axis,
+            )
+            self.state.filterbank = FilterbankTransformer(settings=new_settings)
 
     def _process(self, message: AxisArray) -> AxisArray:
         return self.state.filterbank(message)

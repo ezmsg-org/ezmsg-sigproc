@@ -9,6 +9,7 @@ from ezmsg.util.messages.axisarray import AxisArray
 from .cheby import ChebyshevFilterSettings, ChebyshevFilterTransformer
 from .downsample import Downsample, DownsampleSettings
 from .filter import BACoeffs, SOSCoeffs
+from .util.deprecation import suppress_axis_deprecation, warn_axis_deprecated
 
 
 class ChebyForDecimateTransformer(ChebyshevFilterTransformer[BACoeffs | SOSCoeffs]):
@@ -47,8 +48,14 @@ class DecimateSettings(DownsampleSettings):
     decimating another is not decimation.
     """
 
-    axis: str = "time"
-    """Axis for the anti-aliasing lowpass filter."""
+    axis: str | None = None
+    """.. deprecated:: 3.8
+        Scheduled for removal in 4.0. The dimension messages accumulate along
+        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`;
+        see :mod:`ezmsg.sigproc.util.deprecation`."""
+
+    def __post_init__(self) -> None:
+        warn_axis_deprecated(self)
 
 
 class Decimate(ez.Collection):
@@ -66,14 +73,17 @@ class Decimate(ez.Collection):
     DOWNSAMPLE = Downsample()
 
     def configure(self) -> None:
-        cheby_settings = ChebyshevFilterSettings(
-            order=8,
-            ripple_tol=0.05,
-            Wn=0.4 * self.SETTINGS.target_rate,
-            btype="lowpass",
-            axis=self.SETTINGS.axis,
-            wn_hz=True,
-        )
+        # Already warned about on DecimateSettings, whose `axis` exists only to
+        # reach this filter.
+        with suppress_axis_deprecation():
+            cheby_settings = ChebyshevFilterSettings(
+                order=8,
+                ripple_tol=0.05,
+                Wn=0.4 * self.SETTINGS.target_rate,
+                btype="lowpass",
+                axis=self.SETTINGS.axis,
+                wn_hz=True,
+            )
         self.FILTER.apply_settings(cheby_settings)
         # `axis` is the filter's, not the downsampler's -- pass only what
         # DownsampleSettings still declares.
