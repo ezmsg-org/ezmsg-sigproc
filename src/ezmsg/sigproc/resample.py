@@ -19,7 +19,8 @@ from ezmsg.util.messages.util import replace
 
 from .util.axisarray_buffer import HybridAxisArrayBuffer, HybridAxisBuffer
 from .util.buffer import UpdateStrategy
-from .util.message import has_samples_along
+from .util.deprecation import warn_axis_deprecated
+from .util.message import has_samples_along, resolve_configured_chunk_dim
 
 
 def _as_limit(value: float | None) -> float | None:
@@ -35,7 +36,14 @@ def _as_limit(value: float | None) -> float | None:
 
 
 class ResampleSettings(ez.Settings):
-    axis: str = "time"
+    axis: str | None = None
+    """.. deprecated:: 3.8
+        Scheduled for removal in 4.0. The dimension messages accumulate along
+        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`;
+        see :mod:`ezmsg.sigproc.util.deprecation`."""
+
+    def __post_init__(self) -> None:
+        warn_axis_deprecated(self)
 
     resample_rate: float | None = None
     """target resample rate in Hz. If None, the resample rate will be determined by the reference signal."""
@@ -103,6 +111,9 @@ class ResampleSettings(ez.Settings):
 
 @processor_state
 class ResampleState:
+    axis: str = ""
+    """The resolved chunk dimension, fixed at reset so every later use agrees."""
+
     src_buffer: HybridAxisArrayBuffer | None = None
     """
     Buffer for the incoming signal data. This is the source for training the interpolation function.
@@ -164,13 +175,29 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
     # `resample_rate` / `buffer_duration` / `axis` all size cached buffers.
     NONRESET_SETTINGS_FIELDS = frozenset({"max_chunk_delay", "fill_value", "reference_reset_after_chunks"})
 
+    def _seed_axis(self, message: AxisArray) -> str:
+        """Resolve the chunk dimension, seeding it if the reference stream got here first.
+
+        :meth:`push_reference` is an independent entry point and can be called
+        before any signal message has arrived, while :meth:`__next__` has no
+        message at all. Both read the resolved value off state, so it is fixed
+        once and shared rather than re-derived from whichever message happens to
+        be in hand.
+        """
+        if not self.state.axis:
+            self.state.axis = resolve_configured_chunk_dim(self, message, self.settings.axis, legacy_default="time")
+        return self.state.axis
+
     def _reset_state(self, message: AxisArray) -> None:
         """
         Reset the internal state based on the incoming message.
         """
+        # The signal stream is authoritative, so this overwrites any value the
+        # reference stream seeded above.
+        self.state.axis = resolve_configured_chunk_dim(self, message, self.settings.axis, legacy_default="time")
         self.state.src_buffer = HybridAxisArrayBuffer(
             duration=self.settings.buffer_duration,
-            axis=self.settings.axis,
+            axis=self.state.axis,
             update_strategy=self.settings.buffer_update_strategy,
             overflow_strategy="grow",
         )
@@ -179,7 +206,7 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
             self.state.ref_axis_buffer = HybridAxisBuffer(
                 duration=self.settings.buffer_duration,
             )
-            in_ax = message.axes[self.settings.axis]
+            in_ax = message.axes[self.state.axis]
             out_gain = 1 / self.settings.resample_rate
             t0 = in_ax.data[0] if hasattr(in_ax, "data") else in_ax.value(0)
             self.state.last_ref_ax_val = t0 - out_gain
@@ -204,8 +231,9 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
         return first, step
 
     def push_reference(self, message: AxisArray) -> None:
-        ax = message.axes[self.settings.axis]
-        ax_idx = message.get_axis_idx(self.settings.axis)
+        axis = self._seed_axis(message)
+        ax = message.axes[axis]
+        ax_idx = message.get_axis_idx(axis)
         n = message.data.shape[ax_idx]
         if self.state.ref_axis_buffer is None:
             self.state.ref_axis_buffer = HybridAxisBuffer(
@@ -220,7 +248,7 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
                 # buffer above so a shared index addresses the same sample in both.
                 self.state.ref_data_buffer = HybridAxisArrayBuffer(
                     duration=self.settings.buffer_duration,
-                    axis=self.settings.axis,
+                    axis=axis,
                     update_strategy=self.settings.buffer_update_strategy,
                     overflow_strategy="grow",
                 )
@@ -262,9 +290,9 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
 
         # If we are resampling at a prescribed rate (i.e., not by reference msgs),
         #  then we use this opportunity to extend our synthetic reference axis.
-        ax_idx = message.get_axis_idx(self.settings.axis)
+        ax_idx = message.get_axis_idx(self.state.axis)
         if self.settings.resample_rate is not None and message.data.shape[ax_idx] > 0:
-            in_ax = message.axes[self.settings.axis]
+            in_ax = message.axes[self.state.axis]
             in_t_end = in_ax.data[-1] if hasattr(in_ax, "data") else in_ax.value(message.data.shape[ax_idx] - 1)
             out_gain = 1 / self.settings.resample_rate
             prev_t_end = self.state.last_ref_ax_val
@@ -293,7 +321,7 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
                 src_axarr,
                 axes={
                     **src_axarr.axes,
-                    self.settings.axis: ref.peek(0),
+                    self.state.axis: ref.peek(0),
                 },
             )
 
@@ -322,8 +350,8 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
         # Get source to train interpolation. The buffer preserves the input layout,
         # so the resample axis is wherever the incoming messages put it.
         src_axarr = src.peek()
-        src_ax_idx = src_axarr.get_axis_idx(self.settings.axis)
-        src_axis = src_axarr.axes[self.settings.axis]
+        src_ax_idx = src_axarr.get_axis_idx(self.state.axis)
+        src_axis = src_axarr.axes[self.state.axis]
         x = src_axis.data if hasattr(src_axis, "data") else src_axis.value(np.arange(src_axarr.data.shape[src_ax_idx]))
 
         # Only resample at reference values that have not been interpolated over previously.
@@ -339,7 +367,7 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
             return replace(
                 src_axarr,
                 data=slice_along_axis(src_axarr.data, slice(0, 0), src_ax_idx),
-                axes={**src_axarr.axes, self.settings.axis: null_ref},
+                axes={**src_axarr.axes, self.state.axis: null_ref},
             )
 
         xnew = ref_xvec[ref_idx]
@@ -389,7 +417,7 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
             data=resampled_data,
             axes={
                 **src_axarr.axes,
-                self.settings.axis: out_ax,
+                self.state.axis: out_ax,
             },
         )
 
@@ -399,13 +427,13 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
         if self.state.ref_data_buffer is not None:
             ref_axarr = self.state.ref_data_buffer.peek()
             if ref_axarr is not None:
-                ref_ax_idx = ref_axarr.get_axis_idx(self.settings.axis)
+                ref_ax_idx = ref_axarr.get_axis_idx(self.state.axis)
                 if ref_axarr.data.shape[ref_ax_idx] == ref.available():
                     ref_xp = get_namespace(ref_axarr.data)
                     self.state.reference_output = replace(
                         ref_axarr,
                         data=ref_xp.take(ref_axarr.data, ref_idx, axis=ref_ax_idx),
-                        axes={**ref_axarr.axes, self.settings.axis: out_ax},
+                        axes={**ref_axarr.axes, self.state.axis: out_ax},
                     )
 
         # Update the state. For state buffers, seek beyond samples that are no longer needed.
@@ -480,7 +508,7 @@ class ResampleUnit(BaseConsumerUnit[ResampleSettings, AxisArray, ResampleProcess
                 # pre-init null template (which lacks the axis entirely) means
                 # "nothing ready". A chunk that is empty only along other axes
                 # (e.g. zero channels) is still real output and must be published.
-                if not has_samples_along(result, self.SETTINGS.axis):
+                if not has_samples_along(result, self.processor.state.axis):
                     break
                 yield self.OUTPUT_SIGNAL, result
                 ref_out = self.processor.state.reference_output

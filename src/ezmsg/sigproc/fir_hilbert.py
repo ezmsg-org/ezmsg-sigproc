@@ -18,6 +18,8 @@ from ezmsg.sigproc.filter import (
     FilterByDesignTransformer,
 )
 
+from .util.message import resolve_configured_chunk_dim
+
 
 class FIRHilbertFilterSettings(FilterBaseSettings):
     """Settings for :obj:`FIRHilbertFilter`."""
@@ -266,7 +268,7 @@ class FIRHilbertEnvelopeTransformer(
         y_imag_msg = self._state.filter(message)
         y_imag = y_imag_msg.data
 
-        axis_name = self.settings.axis or message.dims[0]
+        axis_name = resolve_configured_chunk_dim(self, message, self.settings.axis)
         axis_idx = message.get_axis_idx(axis_name)
         if self._state.dly is None:
             taps = self._state.filter.get_taps()

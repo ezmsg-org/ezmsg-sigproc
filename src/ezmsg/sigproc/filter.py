@@ -24,6 +24,8 @@ from scipy.fft import next_fast_len as _next_fast_len
 
 from .util import sosfilt_direct
 from .util.array import array_device, xp_asarray, xp_create
+from .util.deprecation import suppress_axis_deprecation, warn_axis_deprecated
+from .util.message import resolve_configured_chunk_dim
 from .util.threaded_filt import DEFAULT_MIN_BYTES as _DEFAULT_THREAD_MIN_BYTES
 from .util.threaded_filt import filt_threaded, should_thread
 
@@ -303,7 +305,13 @@ def _fir_filt_conv(b_1d, data, zi, axis_idx, xp):
 
 class FilterBaseSettings(ez.Settings):
     axis: str | None = None
-    """The name of the axis to operate on."""
+    """.. deprecated:: 3.8
+        Scheduled for removal in 4.0. The dimension messages accumulate along
+        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`;
+        see :mod:`ezmsg.sigproc.util.deprecation`."""
+
+    def __post_init__(self) -> None:
+        warn_axis_deprecated(self)
 
     coef_type: str = "ba"
     """The type of filter coefficients. One of "ba" or "sos"."""
@@ -438,7 +446,7 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
         # edge-scaled by the first sample x0 -- the scipy ``lfilter_zi * x[0]``
         # idiom -- treating the pre-stream signal as constant x0 so that a DC
         # offset does not ring through as a start-up transient.
-        axis = message.dims[0] if self.settings.axis is None else self.settings.axis
+        axis = resolve_configured_chunk_dim(self, message, self.settings.axis)
         axis_idx = message.get_axis_idx(axis)
         n_tail = message.data.ndim - axis_idx - 1
         _, coefs = _normalize_coefs(self.settings.coefs)
@@ -650,7 +658,7 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
 
     def _process(self, message: AxisArray) -> AxisArray:
         if message.data.size > 0:
-            axis = message.dims[0] if self.settings.axis is None else self.settings.axis
+            axis = resolve_configured_chunk_dim(self, message, self.settings.axis)
             axis_idx = message.get_axis_idx(axis)
             if self.state.fir_method is not None and self.state.fir_b_1d is None:
                 self._refresh_fir_taps(message, axis_idx)
@@ -838,7 +846,7 @@ class FilterByDesignTransformer(
 
     def _reset_state(self, message: AxisArray) -> None:
         design_fun = self.get_design_function()
-        axis = message.dims[0] if self.settings.axis is None else self.settings.axis
+        axis = resolve_configured_chunk_dim(self, message, self.settings.axis)
         fs = 1 / message.axes[axis].gain
         coefs = design_fun(fs)
 
@@ -849,14 +857,20 @@ class FilterByDesignTransformer(
                 b, a = coefs
                 coefs = scipy.signal.tf2sos(b, a)
 
-        new_settings = FilterSettings(
-            axis=axis,
-            coef_type=self.settings.coef_type,
-            coefs=coefs,
-            use_mlx_metal=self.settings.use_mlx_metal,
-            mlx_metal_chunk_sizes=self.settings.mlx_metal_chunk_sizes,
-        )
-        self.state.filter = FilterTransformer(settings=new_settings)
+        # The child is handed the axis this transformer already resolved, so it
+        # filters the same dimension. Suppressed because this runs on every reset
+        # -- mid-stream, where the warning would name the pipeline driver -- and
+        # because the value forwarded is ours, not necessarily anything the user
+        # set.
+        with suppress_axis_deprecation():
+            new_settings = FilterSettings(
+                axis=axis,
+                coef_type=self.settings.coef_type,
+                coefs=coefs,
+                use_mlx_metal=self.settings.use_mlx_metal,
+                mlx_metal_chunk_sizes=self.settings.mlx_metal_chunk_sizes,
+            )
+            self.state.filter = FilterTransformer(settings=new_settings)
         self.state.needs_redesign = False
 
     def _process(self, message: AxisArray) -> AxisArray:

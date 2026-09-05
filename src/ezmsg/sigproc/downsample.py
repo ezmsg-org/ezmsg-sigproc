@@ -14,7 +14,7 @@ from ezmsg.util.messages.axisarray import (
     slice_along_axis,
 )
 
-from .util.message import is_empty_along
+from .util.message import is_empty_along, resolve_chunk_dim
 
 
 class DownsampleSettings(ez.Settings):
@@ -72,12 +72,7 @@ class DownsampleTransformer(BaseStatefulTransformer[DownsampleSettings, AxisArra
     def _resolve_axis(self, message: AxisArray) -> str:
         """The dimension messages accumulate along, which is the only one to
         downsample. Falls back to :attr:`STREAMING_DIMS` when undeclared."""
-        if message.chunk_dim is not None:
-            return message.chunk_dim
-        for name in self.STREAMING_DIMS:
-            if name in message.dims:
-                return name
-        return message.dims[0]
+        return resolve_chunk_dim(message, self.STREAMING_DIMS)
 
     def _hash_message(self, message: AxisArray) -> int:
         # The whole state is a decimation factor and the phase counter that walks

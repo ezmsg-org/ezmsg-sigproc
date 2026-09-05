@@ -20,6 +20,7 @@ from ezmsg.util.messages.axisarray import (
 )
 
 from .util.array import is_complex_dtype
+from .util.message import resolve_transform_dim
 
 
 class OptionsEnum(enum.Enum):
@@ -84,6 +85,11 @@ class SpectrumSettings(ez.Settings):
     """
     The name of the axis on which to calculate the spectrum.
       Note: The axis must have an .axes entry of type LinearAxis, not CoordinateAxis.
+
+      Defaults to the innermost non-chunk dimension carrying a LinearAxis, else
+      the chunk dimension itself -- ``"time"`` for both a raw ``(time, ch)``
+      stream and a windowed ``(win, time, ch)`` one, where each window's
+      spectrum is taken over ``time`` while ``win`` is what accumulates.
     """
 
     # n: int | None = None # n parameter for fft
@@ -143,7 +149,7 @@ class SpectrumTransformer(BaseStatefulTransformer[SpectrumSettings, AxisArray, A
         back in. The dtype matters because a complex input takes a different
         branch and produces a different frequency axis.
         """
-        axis = self.settings.axis or message.dims[0]
+        axis = self.settings.axis or resolve_transform_dim(message, self.STREAMING_DIMS)
         return self._message_hash(
             message,
             extra=(
@@ -153,7 +159,7 @@ class SpectrumTransformer(BaseStatefulTransformer[SpectrumSettings, AxisArray, A
         )
 
     def _reset_state(self, message: AxisArray) -> None:
-        axis = self.settings.axis or message.dims[0]
+        axis = self.settings.axis or resolve_transform_dim(message, self.STREAMING_DIMS)
         ax_idx = message.get_axis_idx(axis)
         ax_info = message.axes[axis]
         targ_len = message.data.shape[ax_idx]
@@ -258,7 +264,7 @@ class SpectrumTransformer(BaseStatefulTransformer[SpectrumSettings, AxisArray, A
         self.state.f_transform = f_transform
 
     def _process(self, message: AxisArray) -> AxisArray:
-        axis = self.settings.axis or message.dims[0]
+        axis = self.settings.axis or resolve_transform_dim(message, self.STREAMING_DIMS)
 
         new_axes = {k: v for k, v in message.axes.items() if k not in [self.settings.out_axis, axis]}
         new_axes[self.settings.out_axis or axis] = self.state.freq_axis

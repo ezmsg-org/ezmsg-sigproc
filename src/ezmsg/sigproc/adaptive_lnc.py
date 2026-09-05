@@ -73,6 +73,9 @@ from ezmsg.baseproc import (
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
+from .util.deprecation import warn_axis_deprecated
+from .util.message import resolve_configured_chunk_dim
+
 # Optional Apple-Silicon GPU backend. The canceller is an LTI SOS notch
 # cascade (see `design_lnc_sos`), so on MLX arrays we dispatch to the Metal
 # `sosfilt` kernel; everything else runs through scipy on the array's own
@@ -165,13 +168,22 @@ class AdaptiveLNCSettings(ez.Settings):
     unchanged. (Per-channel sampling-delay alignment is handled separately,
     upstream, by ``SamplingDelayAlignmentTransformer``.)"""
 
-    axis: str = "time"
-    """Name of the axis to filter along."""
+    axis: str | None = None
+    """.. deprecated:: 3.8
+        Scheduled for removal in 4.0. The dimension messages accumulate along
+        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`;
+        see :mod:`ezmsg.sigproc.util.deprecation`."""
+
+    def __post_init__(self) -> None:
+        warn_axis_deprecated(self)
 
 
 @processor_state
 class AdaptiveLNCState:
     """State for :class:`AdaptiveLNCTransformer`."""
+
+    axis: str = ""
+    """The resolved chunk dimension, fixed at reset so every later use agrees."""
 
     omega: float = 0.0
     """Current NCO angular frequency in rad/sample (tracked by the FLL)."""
@@ -288,11 +300,12 @@ class AdaptiveLNCTransformer(
     NONRESET_SETTINGS_FIELDS = frozenset({"adapt_time_constant", "freq_time_constant"})
 
     def _reset_state(self, message: AxisArray) -> None:
-        ax_idx = message.get_axis_idx(self.settings.axis)
+        self._state.axis = resolve_configured_chunk_dim(self, message, self.settings.axis, legacy_default="time")
+        ax_idx = message.get_axis_idx(self._state.axis)
         sample_shape = message.data.shape[:ax_idx] + message.data.shape[ax_idx + 1 :]
         xp, is_mlx = _namespace(message.data)
 
-        fs = 1.0 / message.axes[self.settings.axis].gain
+        fs = 1.0 / message.axes[self._state.axis].gain
         # Seed the NCO at the nominal normalised frequency; the FLL refines it.
         self._state.omega = 2.0 * np.pi * self.settings.line_freq / fs
         max_deviation = self.settings.max_freq_deviation
@@ -472,7 +485,7 @@ class AdaptiveLNCTransformer(
             # No cancellation and no frequency tracking; emit the input as-is.
             return message
 
-        ax_idx = message.get_axis_idx(self.settings.axis)
+        ax_idx = message.get_axis_idx(self._state.axis)
         x_data = message.data
         xp, is_mlx = _namespace(x_data)
         moved = ax_idx != 0
@@ -482,7 +495,7 @@ class AdaptiveLNCTransformer(
         n = x_data.shape[0]
         st = self._state
         dtype = x_data.dtype
-        fs = 1.0 / message.axes[self.settings.axis].gain
+        fs = 1.0 / message.axes[self._state.axis].gain
 
         # Time constants -> gains (independent of chunk size and fs).
         # mu = 2 / (tau_adapt * fs); beta = 1 - exp(-window_dt / tau_freq).

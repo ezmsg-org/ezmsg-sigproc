@@ -19,10 +19,20 @@ from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
 from ezmsg.util.messages.util import replace
 
 from .util.array import xp_copy
+from .util.deprecation import warn_axis_deprecated
+from .util.message import resolve_configured_chunk_dim
 
 
 class DiffSettings(ez.Settings):
     axis: str | None = None
+    """.. deprecated:: 3.8
+        Scheduled for removal in 4.0. The dimension messages accumulate along
+        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`;
+        see :mod:`ezmsg.sigproc.util.deprecation`."""
+
+    def __post_init__(self) -> None:
+        warn_axis_deprecated(self)
+
     scale_by_fs: bool = False
 
 
@@ -33,26 +43,30 @@ class DiffState:
 
 
 class DiffTransformer(BaseStatefulTransformer[DiffSettings, AxisArray, AxisArray, DiffState]):
+    def _axis(self, message: AxisArray) -> str:
+        return resolve_configured_chunk_dim(self, message, self.settings.axis)
+
     def __call__(self, message: AxisArray) -> AxisArray:
-        ax_idx = message.get_axis_idx(self.settings.axis)
+        ax_idx = message.get_axis_idx(self._axis(message))
         if message.data.shape[ax_idx] == 0:
             return message
         return super().__call__(message)
 
     async def __acall__(self, message: AxisArray) -> AxisArray:
-        ax_idx = message.get_axis_idx(self.settings.axis)
+        ax_idx = message.get_axis_idx(self._axis(message))
         if message.data.shape[ax_idx] == 0:
             return message
         return await super().__acall__(message)
 
     def _reset_state(self, message) -> None:
-        ax_idx = message.get_axis_idx(self.settings.axis)
+        axis = self._axis(message)
+        ax_idx = message.get_axis_idx(axis)
         # Copied for the same reason as in `_process`: state must never alias the
         # message's (possibly shared-memory-backed) buffer, even though this one
         # happens to be overwritten before the call returns.
         self.state.last_dat = xp_copy(slice_along_axis(message.data, slice(0, 1), axis=ax_idx))
         if self.settings.scale_by_fs:
-            ax_info = message.get_axis(self.settings.axis)
+            ax_info = message.get_axis(axis)
             if hasattr(ax_info, "data"):
                 if len(ax_info.data) > 1:
                     self.state.last_time = 2 * ax_info.data[0] - ax_info.data[1]
@@ -61,7 +75,7 @@ class DiffTransformer(BaseStatefulTransformer[DiffSettings, AxisArray, AxisArray
 
     def _process(self, message: AxisArray) -> AxisArray:
         xp = get_namespace(message.data)
-        axis = self.settings.axis or message.dims[0]
+        axis = self._axis(message)
         ax_idx = message.get_axis_idx(axis)
 
         diffs = xp.diff(
@@ -90,5 +104,5 @@ class DiffUnit(BaseTransformerUnit[DiffSettings, AxisArray, AxisArray, DiffTrans
     SETTINGS = DiffSettings
 
 
-def diff(axis: str = "time", scale_by_fs: bool = False) -> DiffTransformer:
+def diff(axis: str | None = None, scale_by_fs: bool = False) -> DiffTransformer:
     return DiffTransformer(DiffSettings(axis=axis, scale_by_fs=scale_by_fs))

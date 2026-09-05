@@ -32,6 +32,7 @@ from .filter import (
     _sosfilt_mlx_metal_xp,
 )
 from .util.array import xp_asarray, xp_copy, xp_empty, xp_flip
+from .util.message import resolve_configured_chunk_dim
 
 if _HAS_MLX_METAL:
     import mlx.core as _mx
@@ -188,7 +189,7 @@ class ButterworthBackwardFilterTransformer(FilterByDesignTransformer[Butterworth
         self._tail = None
         self._tail_offset = 0.0
         # Compute pad_length based on the message's sampling rate
-        axis = message.dims[0] if self.settings.axis is None else self.settings.axis
+        axis = resolve_configured_chunk_dim(self, message, self.settings.axis)
         fs = 1 / message.axes[axis].gain
         self._pad_length = self._compute_pad_length(fs)
         self.state.needs_redesign = True
@@ -230,7 +231,7 @@ class ButterworthBackwardFilterTransformer(FilterByDesignTransformer[Butterworth
         return self._zi_tiled * first_sample
 
     def _process(self, message: AxisArray) -> AxisArray:
-        axis = message.dims[0] if self.settings.axis is None else self.settings.axis
+        axis = resolve_configured_chunk_dim(self, message, self.settings.axis)
         ax_idx = message.get_axis_idx(axis)
         fs = 1 / message.axes[axis].gain
 
