@@ -31,12 +31,10 @@ To find every remaining call site in a pipeline, run its tests with
 
 import typing
 
-from ezmsg.baseproc import suppress_axis_deprecation as suppress_axis_deprecation
 from ezmsg.baseproc import warn_axis_deprecated as _warn_axis_deprecated
 
 __all__ = [
     "AXIS_REMOVAL_VERSION",
-    "suppress_axis_deprecation",
     "warn_axis_deprecated",
 ]
 
@@ -49,8 +47,10 @@ _PACKAGE = "ezmsg-sigproc"
 def warn_axis_deprecated(settings: typing.Any, field: str = "axis") -> None:
     """Warn that *settings*' ``field`` is deprecated, if it was actually set.
 
-    Thin wrapper over :func:`ezmsg.baseproc.warn_axis_deprecated` that names this
-    distribution and its removal release, so the call sites stay a single line
-    and every message agrees about when the setting goes away.
+    Binds :func:`ezmsg.baseproc.warn_axis_deprecated` to this distribution and
+    its removal release, so the call sites stay a single line and every message
+    agrees about when the setting goes away. Not a re-export: suppression and
+    the resolution rules come from :mod:`ezmsg.baseproc` directly, so there is
+    exactly one of each in play.
     """
     _warn_axis_deprecated(settings, field, package=_PACKAGE, removal=AXIS_REMOVAL_VERSION)

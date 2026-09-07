@@ -14,7 +14,7 @@ import typing
 import numpy as np
 import scipy.signal
 from array_api_compat import get_namespace, is_numpy_array
-from ezmsg.baseproc import BaseTransformerUnit
+from ezmsg.baseproc import BaseTransformerUnit, resolve_configured_chunk_dim
 from ezmsg.baseproc.composite import CompositeProcessor
 from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
 from ezmsg.util.messages.util import replace
@@ -32,7 +32,6 @@ from .filter import (
     _sosfilt_mlx_metal_xp,
 )
 from .util.array import xp_asarray, xp_copy, xp_empty, xp_flip
-from .util.message import resolve_configured_chunk_dim
 
 if _HAS_MLX_METAL:
     import mlx.core as _mx

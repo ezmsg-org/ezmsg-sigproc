@@ -12,6 +12,7 @@ from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
     processor_state,
+    resolve_configured_chunk_dim,
 )
 from ezmsg.util.messages.axisarray import (
     AxisArray,
@@ -23,7 +24,7 @@ from ezmsg.util.messages.axisarray import (
 from .util.array import xp_empty
 from .util.buffer import HybridBuffer, UpdateStrategy
 from .util.deprecation import warn_axis_deprecated
-from .util.message import is_empty_along, resolve_configured_chunk_dim
+from .util.message import is_empty_along
 from .util.profile import profile_subpub
 from .util.sparse import sliding_win_oneaxis as sparse_sliding_win_oneaxis
 

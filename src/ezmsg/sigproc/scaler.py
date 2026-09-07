@@ -5,10 +5,14 @@ import typing
 import ezmsg.core as ez
 import numpy as np
 from array_api_compat import get_namespace
+
+# Imports for backwards compatibility with previous module location
 from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
     processor_state,
+    resolve_configured_chunk_dim,
+    suppress_axis_deprecation,
 )
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
@@ -17,10 +21,7 @@ from .ewma import EWMA_Deprecated as EWMA_Deprecated
 from .ewma import EWMASettings, EWMATransformer, _alpha_from_tau
 from .ewma import _tau_from_alpha as _tau_from_alpha
 from .ewma import ewma_step as ewma_step
-
-# Imports for backwards compatibility with previous module location
-from .util.deprecation import suppress_axis_deprecation, warn_axis_deprecated
-from .util.message import resolve_configured_chunk_dim
+from .util.deprecation import warn_axis_deprecated
 
 
 class RiverAdaptiveStandardScalerSettings(ez.Settings):

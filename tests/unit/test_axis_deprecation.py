@@ -21,6 +21,7 @@ import warnings
 import ezmsg.core as ez
 import numpy as np
 import pytest
+from ezmsg.baseproc import suppress_axis_deprecation
 from ezmsg.util.messages.axisarray import AxisArray
 
 from ezmsg.sigproc.butterworthfilter import (
@@ -39,10 +40,7 @@ from ezmsg.sigproc.scaler import (
     AdaptiveStandardScalerSettings,
     AdaptiveStandardScalerTransformer,
 )
-from ezmsg.sigproc.util.deprecation import (
-    AXIS_REMOVAL_VERSION,
-    suppress_axis_deprecation,
-)
+from ezmsg.sigproc.util.deprecation import AXIS_REMOVAL_VERSION
 from ezmsg.sigproc.window import WindowSettings, WindowTransformer
 
 FS = 100.0
@@ -351,7 +349,7 @@ class TestTheLegacyTimeDefault:
         )
 
     def test_it_warns_when_the_resolved_dim_is_not_the_old_default(self, caplog):
-        from ezmsg.sigproc.util.message import resolve_configured_chunk_dim
+        from ezmsg.baseproc import resolve_configured_chunk_dim
 
         class Proc:
             STREAMING_DIMS = ("time",)
@@ -363,7 +361,7 @@ class TestTheLegacyTimeDefault:
         assert any("used to operate on axis='time'" in r.message for r in caplog.records)
 
     def test_it_warns_only_once(self, caplog):
-        from ezmsg.sigproc.util.message import resolve_configured_chunk_dim
+        from ezmsg.baseproc import resolve_configured_chunk_dim
 
         class Proc:
             STREAMING_DIMS = ("time",)
@@ -377,7 +375,7 @@ class TestTheLegacyTimeDefault:
     def test_a_raw_stream_is_silent(self, caplog):
         """The overwhelmingly common case: chunk_dim is already "time", so
         nothing changed and there is nothing to say."""
-        from ezmsg.sigproc.util.message import resolve_configured_chunk_dim
+        from ezmsg.baseproc import resolve_configured_chunk_dim
 
         class Proc:
             STREAMING_DIMS = ("time",)
@@ -390,7 +388,7 @@ class TestTheLegacyTimeDefault:
     def test_a_stream_without_the_old_default_dim_is_silent(self, caplog):
         """If ``time`` is not even present, the old default could not have been
         operating on it, so there is no behaviour change to report."""
-        from ezmsg.sigproc.util.message import resolve_configured_chunk_dim
+        from ezmsg.baseproc import resolve_configured_chunk_dim
 
         class Proc:
             STREAMING_DIMS = ("time",)

@@ -8,11 +8,11 @@
 from __future__ import annotations
 
 import ezmsg.core as ez
+from ezmsg.baseproc import suppress_axis_deprecation
 from ezmsg.util.messages.axisarray import AxisArray
 
 from .align import AlignAlongAxis, AlignAlongAxisProcessor, AlignAlongAxisSettings
 from .concat import Concat, ConcatProcessor, ConcatSettings
-from .util.deprecation import suppress_axis_deprecation
 
 
 class MergeSettings(ez.Settings):

@@ -19,10 +19,11 @@ from array_api_compat import get_namespace, is_array_api_obj
 from ezmsg.baseproc import (
     BaseTransformer,
     BaseTransformerUnit,
+    resolve_feature_dim,
 )
 from ezmsg.util.messages.axisarray import AxisArray, replace
 
-from .util.message import resolve_feature_dim, with_fingerprint
+from .util.message import with_fingerprint
 
 # -- Utility functions for coordinate transformations --
 

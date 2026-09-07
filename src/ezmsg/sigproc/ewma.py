@@ -9,14 +9,13 @@ import numpy as np
 import numpy.typing as npt
 import scipy.signal as sps
 from array_api_compat import get_namespace, is_numpy_array
-from ezmsg.baseproc import BaseStatefulTransformer, BaseTransformerUnit, processor_state
+from ezmsg.baseproc import BaseStatefulTransformer, BaseTransformerUnit, processor_state, resolve_configured_chunk_dim
 from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
 from ezmsg.util.messages.util import replace
 
 from ezmsg.sigproc.util.array import np_finfo
 
 from .util.deprecation import warn_axis_deprecated
-from .util.message import resolve_configured_chunk_dim
 
 
 def _ewma_mlx_metal_xp(data, axis_idx: int, zi, alpha: float, chunk_sizes: tuple[int, ...]):

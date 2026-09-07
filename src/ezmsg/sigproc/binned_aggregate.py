@@ -46,6 +46,7 @@ from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
     processor_state,
+    resolve_configured_chunk_dim,
 )
 from ezmsg.util.messages.axisarray import (
     AxisArray,
@@ -57,7 +58,7 @@ from .aggregate import AggregationFunction, aggregate_slices, needs_coordinates
 from .util.array import xp_copy
 from .util.binning import BinSchedule, BinStep
 from .util.deprecation import warn_axis_deprecated
-from .util.message import is_empty_along, resolve_configured_chunk_dim, with_fingerprint
+from .util.message import is_empty_along, with_fingerprint
 
 
 class BinnedAggregateSettings(ez.Settings):

@@ -39,10 +39,11 @@ from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
     processor_state,
+    resolve_chunk_dim,
 )
 from ezmsg.util.messages.axisarray import AxisArray, CoordinateAxis, replace
 
-from .util.message import resolve_chunk_dim, with_fingerprint
+from .util.message import with_fingerprint
 
 
 def normalize_axis_label(label):

@@ -7,13 +7,6 @@ ezmsg.baseproc instead.
 
 import typing
 
-from ezmsg.baseproc import (
-    STREAMING_DIMS,
-    resolve_chunk_dim,
-    resolve_configured_chunk_dim,
-    resolve_feature_dim,
-    resolve_transform_dim,
-)
 from ezmsg.baseproc.util.message import (
     SampleMessage,
     SampleTriggerMessage,
@@ -22,25 +15,13 @@ from ezmsg.baseproc.util.message import (
 from ezmsg.util.messages.axisarray import AxisArray
 
 __all__ = [
-    "STREAMING_DIMS",
     "SampleMessage",
     "SampleTriggerMessage",
     "has_samples_along",
     "is_empty_along",
     "is_sample_message",
-    "resolve_chunk_dim",
-    "resolve_configured_chunk_dim",
-    "resolve_feature_dim",
-    "resolve_transform_dim",
     "with_fingerprint",
 ]
-
-# The rules themselves live in ezmsg-baseproc, which every ezmsg package depends
-# on and whose `_message_hash` resolves the same thing: a processor whose
-# arithmetic disagreed with its state-reset logic about which dimension is which
-# would reset on the wrong changes and cache state along the wrong axis. Re-
-# exported here so existing `from ezmsg.sigproc.util.message import ...` keeps
-# working; new code should import from ezmsg.baseproc directly.
 
 
 def with_fingerprint(axis: AxisArray.CoordinateAxis) -> AxisArray.CoordinateAxis:

@@ -3,13 +3,13 @@
 import typing
 
 import ezmsg.core as ez
-from ezmsg.baseproc import BaseTransformerUnit
+from ezmsg.baseproc import BaseTransformerUnit, suppress_axis_deprecation
 from ezmsg.util.messages.axisarray import AxisArray
 
 from .cheby import ChebyshevFilterSettings, ChebyshevFilterTransformer
 from .downsample import Downsample, DownsampleSettings
 from .filter import BACoeffs, SOSCoeffs
-from .util.deprecation import suppress_axis_deprecation, warn_axis_deprecated
+from .util.deprecation import warn_axis_deprecated
 
 
 class ChebyForDecimateTransformer(ChebyshevFilterTransformer[BACoeffs | SOSCoeffs]):

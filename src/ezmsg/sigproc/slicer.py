@@ -9,6 +9,7 @@ from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
     processor_state,
+    resolve_feature_dim,
 )
 from ezmsg.util.messages.axisarray import (
     AxisArray,
@@ -17,7 +18,7 @@ from ezmsg.util.messages.axisarray import (
     slice_along_axis,
 )
 
-from .util.message import resolve_feature_dim, with_fingerprint
+from .util.message import with_fingerprint
 
 """
 Slicer:Select a subset of data along a particular axis.

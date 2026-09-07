@@ -7,6 +7,7 @@ from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
     processor_state,
+    resolve_chunk_dim,
 )
 from ezmsg.util.messages.axisarray import (
     AxisArray,
@@ -14,7 +15,7 @@ from ezmsg.util.messages.axisarray import (
     slice_along_axis,
 )
 
-from .util.message import is_empty_along, resolve_chunk_dim
+from .util.message import is_empty_along
 
 
 class DownsampleSettings(ez.Settings):

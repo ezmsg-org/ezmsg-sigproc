@@ -29,6 +29,7 @@ from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
     processor_state,
+    resolve_feature_dim,
 )
 from ezmsg.util.messages.axisarray import AxisArray, AxisBase
 from ezmsg.util.messages.util import replace
@@ -36,8 +37,9 @@ from ezmsg.util.messages.util import replace
 from ezmsg.sigproc.util.array import array_device, is_float_dtype, xp_asarray, xp_copy, xp_create, xp_empty
 from ezmsg.sigproc.util.blockdiag import plan_block_matmul
 from ezmsg.sigproc.util.channels import ChannelGroupSpec, resolve_channel_groups
-from ezmsg.sigproc.util.message import resolve_feature_dim, with_fingerprint
 from ezmsg.sigproc.util.rereference import RereferenceKind, rereference_matrix
+
+from .util.message import with_fingerprint
 
 KERNELS = ("auto", "dense", "blocks")
 """Valid values for :attr:`AffineTransformSettings.kernel`."""

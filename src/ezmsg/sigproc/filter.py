@@ -17,6 +17,8 @@ from ezmsg.baseproc import (
     SettingsType,
     TransformerType,
     processor_state,
+    resolve_configured_chunk_dim,
+    suppress_axis_deprecation,
 )
 from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
 from ezmsg.util.messages.util import replace
@@ -24,8 +26,7 @@ from scipy.fft import next_fast_len as _next_fast_len
 
 from .util import sosfilt_direct
 from .util.array import array_device, xp_asarray, xp_create
-from .util.deprecation import suppress_axis_deprecation, warn_axis_deprecated
-from .util.message import resolve_configured_chunk_dim
+from .util.deprecation import warn_axis_deprecated
 from .util.threaded_filt import DEFAULT_MIN_BYTES as _DEFAULT_THREAD_MIN_BYTES
 from .util.threaded_filt import filt_threaded, should_thread
 

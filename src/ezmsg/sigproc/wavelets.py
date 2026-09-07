@@ -11,13 +11,15 @@ from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
     processor_state,
+    resolve_configured_chunk_dim,
+    suppress_axis_deprecation,
 )
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
 from .filterbank import FilterbankMode, MinPhaseMode, filterbank
-from .util.deprecation import suppress_axis_deprecation, warn_axis_deprecated
-from .util.message import resolve_configured_chunk_dim, with_fingerprint
+from .util.deprecation import warn_axis_deprecated
+from .util.message import with_fingerprint
 
 
 class CWTSettings(ez.Settings):

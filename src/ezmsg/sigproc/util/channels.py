@@ -38,9 +38,8 @@ from collections.abc import Callable, Sequence
 from typing import Union
 
 import numpy as np
+from ezmsg.baseproc import resolve_feature_dim
 from ezmsg.util.messages.axisarray import AxisArray
-
-from .message import resolve_feature_dim
 
 # Whether AxisFingerprintMemo counts its hits and misses. Off unless the env var
 # is set, because the answer it gives -- do axis objects survive, or is every

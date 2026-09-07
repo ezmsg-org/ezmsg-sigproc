@@ -69,12 +69,12 @@ from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
     processor_state,
+    resolve_configured_chunk_dim,
 )
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
 from .util.deprecation import warn_axis_deprecated
-from .util.message import resolve_configured_chunk_dim
 
 # Optional Apple-Silicon GPU backend. The canceller is an LTI SOS notch
 # cascade (see `design_lnc_sos`), so on MLX arrays we dispatch to the Metal
