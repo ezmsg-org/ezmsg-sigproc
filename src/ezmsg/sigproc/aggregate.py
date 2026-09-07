@@ -20,6 +20,7 @@ from ezmsg.baseproc import (
     BaseTransformer,
     BaseTransformerUnit,
     processor_state,
+    resolve_feature_dim,
 )
 from ezmsg.util.messages.axisarray import (
     AxisArray,
@@ -29,7 +30,7 @@ from ezmsg.util.messages.axisarray import (
 )
 
 from .spectral import OptionsEnum
-from .util.message import resolve_feature_dim, with_fingerprint
+from .util.message import with_fingerprint
 
 
 class AggregationFunction(OptionsEnum):

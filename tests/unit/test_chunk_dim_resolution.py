@@ -13,14 +13,13 @@ place the old guess and the new rule disagree.
 
 import numpy as np
 import pytest
-from ezmsg.util.messages.axisarray import AxisArray, CoordinateAxis
-
-from ezmsg.sigproc.util.message import (
+from ezmsg.baseproc import (
     resolve_chunk_dim,
     resolve_configured_chunk_dim,
     resolve_feature_dim,
     resolve_transform_dim,
 )
+from ezmsg.util.messages.axisarray import AxisArray, CoordinateAxis
 
 FS = 100.0
 

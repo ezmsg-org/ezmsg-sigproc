@@ -12,6 +12,7 @@ from ezmsg.baseproc import (
     BaseTransformer,
     BaseTransformerUnit,
     CompositeProcessor,
+    suppress_axis_deprecation,
 )
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
@@ -22,7 +23,6 @@ from .filterbankdesign import (
 )
 from .kaiser import KaiserFilterSettings
 from .sampler import SampleTriggerMessage
-from .util.deprecation import suppress_axis_deprecation
 from .util.message import with_fingerprint
 from .window import WindowSettings, WindowTransformer
 

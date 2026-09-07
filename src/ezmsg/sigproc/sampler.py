@@ -15,6 +15,7 @@ from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
     processor_state,
+    resolve_configured_chunk_dim,
 )
 from ezmsg.util.messages.axisarray import (
     AxisArray,
@@ -24,7 +25,7 @@ from ezmsg.util.messages.util import replace
 from .util.axisarray_buffer import HybridAxisArrayBuffer
 from .util.buffer import UpdateStrategy
 from .util.deprecation import warn_axis_deprecated
-from .util.message import SampleTriggerMessage, resolve_configured_chunk_dim
+from .util.message import SampleTriggerMessage
 from .util.profile import profile_subpub
 
 

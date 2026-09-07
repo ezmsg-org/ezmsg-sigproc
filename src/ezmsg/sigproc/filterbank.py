@@ -14,6 +14,7 @@ from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
     processor_state,
+    resolve_configured_chunk_dim,
 )
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
@@ -21,7 +22,6 @@ from scipy.special import lambertw
 
 from .spectrum import OptionsEnum
 from .util.deprecation import warn_axis_deprecated
-from .util.message import resolve_configured_chunk_dim
 from .window import WindowTransformer
 
 

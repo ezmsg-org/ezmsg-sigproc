@@ -13,6 +13,7 @@ from ezmsg.baseproc import (
     BaseConsumerUnit,
     BaseStatefulProcessor,
     processor_state,
+    resolve_configured_chunk_dim,
 )
 from ezmsg.util.messages.axisarray import AxisArray, LinearAxis, slice_along_axis
 from ezmsg.util.messages.util import replace
@@ -20,7 +21,7 @@ from ezmsg.util.messages.util import replace
 from .util.axisarray_buffer import HybridAxisArrayBuffer, HybridAxisBuffer
 from .util.buffer import UpdateStrategy
 from .util.deprecation import warn_axis_deprecated
-from .util.message import has_samples_along, resolve_configured_chunk_dim
+from .util.message import has_samples_along
 
 
 def _as_limit(value: float | None) -> float | None:

@@ -5,11 +5,10 @@ import typing
 
 import ezmsg.core as ez
 import numpy as np
+from ezmsg.baseproc import resolve_chunk_dim, suppress_axis_deprecation
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
-from .util.deprecation import suppress_axis_deprecation
-from .util.message import resolve_chunk_dim
 from .window import Window, WindowSettings
 
 

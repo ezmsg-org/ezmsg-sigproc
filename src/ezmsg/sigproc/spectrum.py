@@ -12,6 +12,7 @@ from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
     processor_state,
+    resolve_transform_dim,
 )
 from ezmsg.util.messages.axisarray import (
     AxisArray,
@@ -20,7 +21,6 @@ from ezmsg.util.messages.axisarray import (
 )
 
 from .util.array import is_complex_dtype
-from .util.message import resolve_transform_dim
 
 
 class OptionsEnum(enum.Enum):

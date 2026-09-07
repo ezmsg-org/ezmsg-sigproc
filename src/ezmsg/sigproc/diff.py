@@ -14,13 +14,13 @@ from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
     processor_state,
+    resolve_configured_chunk_dim,
 )
 from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
 from ezmsg.util.messages.util import replace
 
 from .util.array import xp_copy
 from .util.deprecation import warn_axis_deprecated
-from .util.message import resolve_configured_chunk_dim
 
 
 class DiffSettings(ez.Settings):

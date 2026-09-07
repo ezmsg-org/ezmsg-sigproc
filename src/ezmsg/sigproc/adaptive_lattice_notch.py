@@ -4,12 +4,11 @@ import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
 import scipy.signal
-from ezmsg.baseproc import BaseStatefulTransformer, processor_state
+from ezmsg.baseproc import BaseStatefulTransformer, processor_state, resolve_configured_chunk_dim
 from ezmsg.util.messages.axisarray import AxisArray, CoordinateAxis
 from ezmsg.util.messages.util import replace
 
 from .util.deprecation import warn_axis_deprecated
-from .util.message import resolve_configured_chunk_dim
 
 
 class AdaptiveLatticeNotchFilterSettings(ez.Settings):

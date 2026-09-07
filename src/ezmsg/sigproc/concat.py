@@ -15,7 +15,8 @@ from ezmsg.util.messages.axisarray import AxisArray, AxisBase, CoordinateAxis
 from ezmsg.util.messages.util import replace
 
 from ezmsg.sigproc.util.channels import AxisFingerprintMemo
-from ezmsg.sigproc.util.message import with_fingerprint
+
+from .util.message import with_fingerprint
 
 logger = logging.getLogger(__name__)
 

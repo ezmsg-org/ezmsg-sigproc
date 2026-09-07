@@ -7,13 +7,13 @@ import typing
 
 import ezmsg.core as ez
 import numpy as np
+from ezmsg.baseproc import resolve_configured_chunk_dim
 from ezmsg.baseproc.protocols import processor_state
 from ezmsg.baseproc.stateful import BaseStatefulTransformer
 from ezmsg.util.messages.axisarray import AxisArray
 
 from .util.axisarray_buffer import HybridAxisArrayBuffer
 from .util.deprecation import warn_axis_deprecated
-from .util.message import resolve_configured_chunk_dim
 
 
 class AlignAlongAxisSettings(ez.Settings):

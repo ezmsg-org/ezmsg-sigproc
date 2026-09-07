@@ -6,7 +6,7 @@ import typing
 import ezmsg.core as ez
 import numpy as np
 import scipy.signal as sps
-from ezmsg.baseproc import BaseStatefulTransformer, processor_state
+from ezmsg.baseproc import BaseStatefulTransformer, processor_state, resolve_configured_chunk_dim
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
@@ -17,8 +17,6 @@ from ezmsg.sigproc.filter import (
     FilterBaseSettings,
     FilterByDesignTransformer,
 )
-
-from .util.message import resolve_configured_chunk_dim
 
 
 class FIRHilbertFilterSettings(FilterBaseSettings):
