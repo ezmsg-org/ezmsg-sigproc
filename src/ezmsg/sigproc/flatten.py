@@ -39,7 +39,7 @@ from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
     processor_state,
-    resolve_chunk_dim,
+    resolve_stream_dim,
 )
 from ezmsg.util.messages.axisarray import AxisArray, CoordinateAxis, replace
 
@@ -84,10 +84,10 @@ class FlattenSettings(ez.Settings):
     """Axis kept as the leading dim of the output (typically ``"time"``).
 
     Defaults to the dimension messages accumulate along
-    (:attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`). Unlike the
+    (:attr:`~ezmsg.util.messages.axisarray.AxisArray.stream_dim`). Unlike the
     state-carrying stages, this one stays configurable: Flatten holds no data
-    between messages, and folding the chunk dimension into the merged axis is a
-    coherent request -- the output simply declares no chunk dimension."""
+    between messages, and folding the stream dimension into the merged axis is a
+    coherent request -- the output simply declares no stream dimension."""
 
     sample_axis: str | None = None
     """Optional rename for ``preserve_axis`` on the output
@@ -249,7 +249,7 @@ def _build_merged_axis(
 
 class FlattenTransformer(BaseStatefulTransformer[FlattenSettings, AxisArray, AxisArray, FlattenState]):
     def _reset_state(self, message: AxisArray) -> None:
-        preserve_axis = self.settings.preserve_axis or resolve_chunk_dim(message, self.STREAMING_DIMS)
+        preserve_axis = self.settings.preserve_axis or resolve_stream_dim(message, self.STREAMING_DIMS)
         if preserve_axis not in message.dims:
             raise ValueError(f"preserve_axis {preserve_axis!r} not found in dims {message.dims}")
 
@@ -329,12 +329,12 @@ class FlattenTransformer(BaseStatefulTransformer[FlattenSettings, AxisArray, Axi
 
         # The preserved dimension may be renamed on the way out, and any
         # dimension folded into the merged axis no longer exists to append along.
-        chunk_dim = message.chunk_dim
-        if chunk_dim == st.preserve_axis:
-            chunk_dim = st.sample_axis
-        elif chunk_dim not in st.output_dims:
-            chunk_dim = None
-        return replace(message, data=data, dims=list(st.output_dims), axes=axes, chunk_dim=chunk_dim)
+        stream_dim = message.stream_dim
+        if stream_dim == st.preserve_axis:
+            stream_dim = st.sample_axis
+        elif stream_dim not in st.output_dims:
+            stream_dim = None
+        return replace(message, data=data, dims=list(st.output_dims), axes=axes, stream_dim=stream_dim)
 
 
 class Flatten(BaseTransformerUnit[FlattenSettings, AxisArray, AxisArray, FlattenTransformer]):

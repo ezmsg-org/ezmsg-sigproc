@@ -5,7 +5,7 @@ import typing
 
 import ezmsg.core as ez
 import numpy as np
-from ezmsg.baseproc import resolve_chunk_dim, suppress_axis_deprecation
+from ezmsg.baseproc import resolve_stream_dim, suppress_axis_deprecation
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
@@ -63,7 +63,7 @@ class EWM(ez.Unit):
 
             axis_name = self.SETTINGS.axis
             if axis_name is None:
-                axis_name = resolve_chunk_dim(signal)
+                axis_name = resolve_stream_dim(signal)
 
             axis_idx = signal.get_axis_idx(axis_name)
 

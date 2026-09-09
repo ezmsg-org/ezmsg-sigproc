@@ -7,7 +7,7 @@ from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
     processor_state,
-    resolve_chunk_dim,
+    resolve_stream_dim,
 )
 from ezmsg.util.messages.axisarray import (
     AxisArray,
@@ -40,7 +40,7 @@ class DownsampleState:
     """Index of the next msg's first sample into the virtual rotating ds_factor counter."""
 
     axis: str = ""
-    """The dimension being downsampled: the message's declared ``chunk_dim``."""
+    """The dimension being downsampled: the message's declared ``stream_dim``."""
 
 
 class DownsampleTransformer(BaseStatefulTransformer[DownsampleSettings, AxisArray, AxisArray, DownsampleState]):
@@ -64,7 +64,7 @@ class DownsampleTransformer(BaseStatefulTransformer[DownsampleSettings, AxisArra
     elements every time and holds no state to do it.
 
     The dimension comes from the message's
-    :attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`, so a
+    :attr:`~ezmsg.util.messages.axisarray.AxisArray.stream_dim`, so a
     ``Downsample`` placed after a windowing stage decimates *windows* without
     reconfiguration. When a producer does not declare one, :attr:`STREAMING_DIMS`
     supplies the fallback.
@@ -73,7 +73,7 @@ class DownsampleTransformer(BaseStatefulTransformer[DownsampleSettings, AxisArra
     def _resolve_axis(self, message: AxisArray) -> str:
         """The dimension messages accumulate along, which is the only one to
         downsample. Falls back to :attr:`STREAMING_DIMS` when undeclared."""
-        return resolve_chunk_dim(message, self.STREAMING_DIMS)
+        return resolve_stream_dim(message, self.STREAMING_DIMS)
 
     def _hash_message(self, message: AxisArray) -> int:
         # The whole state is a decimation factor and the phase counter that walks

@@ -69,7 +69,7 @@ from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
     processor_state,
-    resolve_configured_chunk_dim,
+    resolve_configured_stream_dim,
 )
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
@@ -171,7 +171,7 @@ class AdaptiveLNCSettings(ez.Settings):
     axis: str | None = None
     """.. deprecated:: 3.8
         Scheduled for removal in 4.0. The dimension messages accumulate along
-        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`;
+        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.stream_dim`;
         see :mod:`ezmsg.sigproc.util.deprecation`."""
 
     def __post_init__(self) -> None:
@@ -183,7 +183,7 @@ class AdaptiveLNCState:
     """State for :class:`AdaptiveLNCTransformer`."""
 
     axis: str = ""
-    """The resolved chunk dimension, fixed at reset so every later use agrees."""
+    """The resolved stream dimension, fixed at reset so every later use agrees."""
 
     omega: float = 0.0
     """Current NCO angular frequency in rad/sample (tracked by the FLL)."""
@@ -300,7 +300,7 @@ class AdaptiveLNCTransformer(
     NONRESET_SETTINGS_FIELDS = frozenset({"adapt_time_constant", "freq_time_constant"})
 
     def _reset_state(self, message: AxisArray) -> None:
-        self._state.axis = resolve_configured_chunk_dim(self, message, self.settings.axis, legacy_default="time")
+        self._state.axis = resolve_configured_stream_dim(self, message, self.settings.axis, legacy_default="time")
         ax_idx = message.get_axis_idx(self._state.axis)
         sample_shape = message.data.shape[:ax_idx] + message.data.shape[ax_idx + 1 :]
         xp, is_mlx = _namespace(message.data)

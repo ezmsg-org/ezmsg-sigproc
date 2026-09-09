@@ -15,7 +15,7 @@ from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
     processor_state,
-    resolve_configured_chunk_dim,
+    resolve_configured_stream_dim,
 )
 from ezmsg.util.messages.axisarray import (
     AxisArray,
@@ -45,7 +45,7 @@ class SamplerSettings(ez.Settings):
     axis: str | None = None
     """.. deprecated:: 3.8
         Scheduled for removal in 4.0. The dimension messages accumulate along
-        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`;
+        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.stream_dim`;
         see :mod:`ezmsg.sigproc.util.deprecation`."""
 
     def __post_init__(self) -> None:
@@ -94,7 +94,7 @@ class SamplerTransformer(BaseStatefulTransformer[SamplerSettings, AxisArray, Axi
     def _reset_state(self, message: AxisArray) -> None:
         self._state.buffer = HybridAxisArrayBuffer(
             duration=self.settings.buffer_dur,
-            axis=resolve_configured_chunk_dim(self, message, self.settings.axis),
+            axis=resolve_configured_stream_dim(self, message, self.settings.axis),
             update_strategy=self.settings.buffer_update_strategy,
             overflow_strategy="warn-overwrite",  # True circular buffer
         )

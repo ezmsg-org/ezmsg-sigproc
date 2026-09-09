@@ -12,17 +12,17 @@ message, so the carried state applies message N's tail to message N+1's head at
 the same coordinate, forever.
 
 Which dimension that is belongs to the producer, and
-:attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim` is where it says so.
+:attr:`~ezmsg.util.messages.axisarray.AxisArray.stream_dim` is where it says so.
 A setting that lets a consumer disagree can only be used to be wrong, so it is
-going away; see :func:`~ezmsg.baseproc.resolve_chunk_dim`.
+going away; see :func:`~ezmsg.baseproc.resolve_stream_dim`.
 
 During the deprecation window the setting is still honoured, so nothing changes
 behaviour until it is removed. Two warnings partition the call sites:
 
 * This module's construction-time :class:`FutureWarning` fires for *every* use,
   including a harmless ``axis="time"`` on a raw stream. It means "delete this".
-* :func:`~ezmsg.baseproc.resolve_configured_chunk_dim`'s runtime warning fires
-  only when the configured axis disagrees with a *declared* ``chunk_dim``. It
+* :func:`~ezmsg.baseproc.resolve_configured_stream_dim`'s runtime warning fires
+  only when the configured axis disagrees with a *declared* ``stream_dim``. It
   means "deleting this will change what this stage computes".
 
 To find every remaining call site in a pipeline, run its tests with

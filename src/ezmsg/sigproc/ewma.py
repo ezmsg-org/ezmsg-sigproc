@@ -9,7 +9,7 @@ import numpy as np
 import numpy.typing as npt
 import scipy.signal as sps
 from array_api_compat import get_namespace, is_numpy_array
-from ezmsg.baseproc import BaseStatefulTransformer, BaseTransformerUnit, processor_state, resolve_configured_chunk_dim
+from ezmsg.baseproc import BaseStatefulTransformer, BaseTransformerUnit, processor_state, resolve_configured_stream_dim
 from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
 from ezmsg.util.messages.util import replace
 
@@ -169,7 +169,7 @@ class EWMASettings(ez.Settings):
     axis: str | None = None
     """.. deprecated:: 3.8
         Scheduled for removal in 4.0. The dimension messages accumulate along
-        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`;
+        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.stream_dim`;
         see :mod:`ezmsg.sigproc.util.deprecation`."""
 
     def __post_init__(self) -> None:
@@ -283,7 +283,7 @@ class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray
         return await super().__acall__(message)
 
     def _reset_state(self, message: AxisArray) -> None:
-        axis = resolve_configured_chunk_dim(self, message, self.settings.axis)
+        axis = resolve_configured_stream_dim(self, message, self.settings.axis)
         axis_idx = message.get_axis_idx(axis)
         self._state.alpha = _alpha_from_tau(self.settings.time_constant, message.axes[axis].gain)
         # Start from zero; _process divides out the missing-history bias.
@@ -339,7 +339,7 @@ class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray
         )
 
     def _process(self, message: AxisArray) -> AxisArray:
-        axis = resolve_configured_chunk_dim(self, message, self.settings.axis)
+        axis = resolve_configured_stream_dim(self, message, self.settings.axis)
         axis_idx = message.get_axis_idx(axis)
 
         xp = np if is_numpy_array(message.data) else get_namespace(message.data)

@@ -14,7 +14,7 @@ import typing
 import numpy as np
 import scipy.signal
 from array_api_compat import get_namespace, is_numpy_array
-from ezmsg.baseproc import BaseTransformerUnit, resolve_configured_chunk_dim
+from ezmsg.baseproc import BaseTransformerUnit, resolve_configured_stream_dim
 from ezmsg.baseproc.composite import CompositeProcessor
 from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
 from ezmsg.util.messages.util import replace
@@ -188,7 +188,7 @@ class ButterworthBackwardFilterTransformer(FilterByDesignTransformer[Butterworth
         self._tail = None
         self._tail_offset = 0.0
         # Compute pad_length based on the message's sampling rate
-        axis = resolve_configured_chunk_dim(self, message, self.settings.axis)
+        axis = resolve_configured_stream_dim(self, message, self.settings.axis)
         fs = 1 / message.axes[axis].gain
         self._pad_length = self._compute_pad_length(fs)
         self.state.needs_redesign = True
@@ -230,7 +230,7 @@ class ButterworthBackwardFilterTransformer(FilterByDesignTransformer[Butterworth
         return self._zi_tiled * first_sample
 
     def _process(self, message: AxisArray) -> AxisArray:
-        axis = resolve_configured_chunk_dim(self, message, self.settings.axis)
+        axis = resolve_configured_stream_dim(self, message, self.settings.axis)
         ax_idx = message.get_axis_idx(axis)
         fs = 1 / message.axes[axis].gain
 

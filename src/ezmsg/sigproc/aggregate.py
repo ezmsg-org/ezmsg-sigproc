@@ -400,7 +400,7 @@ class AggregateTransformer(BaseTransformer[AggregateSettings, AxisArray, AxisArr
             axes=new_axes,
             # Reducing over the dimension messages appended along leaves nothing
             # to append along: each output is one aggregate.
-            chunk_dim=message.chunk_dim if message.chunk_dim in new_dims else None,
+            stream_dim=message.stream_dim if message.stream_dim in new_dims else None,
         )
 
 

@@ -12,7 +12,7 @@ from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
     processor_state,
-    resolve_configured_chunk_dim,
+    resolve_configured_stream_dim,
 )
 from ezmsg.util.messages.axisarray import (
     AxisArray,
@@ -39,7 +39,7 @@ class WindowSettings(ez.Settings):
     axis: str | None = None
     """.. deprecated:: 3.8
         Scheduled for removal in 4.0. The dimension messages accumulate along
-        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`;
+        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.stream_dim`;
         see :mod:`ezmsg.sigproc.util.deprecation`."""
 
     def __post_init__(self) -> None:
@@ -136,7 +136,7 @@ class WindowState:
     """Target axis re-anchored per ``anchor``; constant for the life of the state."""
 
     out_dims: list[str] | None = None
-    out_chunk_dim: str | None = None
+    out_stream_dim: str | None = None
 
     empty_out: npt.NDArray | sparse.SparseArray | None = None
     """Cached zero-window output, returned unchanged whenever no window is due."""
@@ -271,7 +271,7 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
             # disagree with the axes key _process writes.
             _newaxis = self.settings.newaxis
 
-        axis = resolve_configured_chunk_dim(self, message, self.settings.axis)
+        axis = resolve_configured_stream_dim(self, message, self.settings.axis)
         axis_idx = message.get_axis_idx(axis)
         axis_info = message.get_axis(axis)
         fs = 1.0 / axis_info.gain
@@ -321,7 +321,7 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
             # and the stream still grows along whichever dim it did before.
             self._state.out_dims = list(message.dims)
             self._state.out_newaxis = None
-            self._state.out_chunk_dim = message.chunk_dim
+            self._state.out_stream_dim = message.stream_dim
         else:
             self._state.out_dims = list(message.dims[:axis_idx]) + [_newaxis] + list(message.dims[axis_idx:])
             self._state.out_newaxis = replace(
@@ -334,7 +334,7 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
             # axis has become a fixed-length within-window axis. Declaring it
             # spares every downstream consumer from having to guess, and gets
             # the guess right where a "time" convention would not.
-            self._state.out_chunk_dim = _newaxis
+            self._state.out_stream_dim = _newaxis
 
     def __call__(self, message: AxisArray) -> AxisArray:
         if self.settings.window_dur is None:
@@ -376,7 +376,7 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
         self._state.buffer_len -= min(n, self._state.buffer_len)
 
     def _process(self, message: AxisArray) -> AxisArray:
-        axis = resolve_configured_chunk_dim(self, message, self.settings.axis)
+        axis = resolve_configured_stream_dim(self, message, self.settings.axis)
         axis_idx = message.get_axis_idx(axis)
         axis_info = message.get_axis(axis)
 
@@ -423,7 +423,7 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
                 data=out_dat,
                 dims=self._state.out_dims,
                 axes=out_axes,
-                chunk_dim=self._state.out_chunk_dim,
+                stream_dim=self._state.out_stream_dim,
             )
 
         # Update targeted (windowed) axis so that its offset is relative to the new axis.
@@ -489,7 +489,7 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
             data=out_dat,
             dims=self._state.out_dims,
             axes={**out_axes, _newaxis: self._state.out_newaxis},
-            chunk_dim=self._state.out_chunk_dim,
+            stream_dim=self._state.out_stream_dim,
         )
         return msg_out
 
@@ -512,7 +512,7 @@ class Window(BaseTransformerUnit[WindowSettings, AxisArray, AxisArray, WindowTra
         # Must resolve exactly as WindowTransformer does, or the emptiness gate
         # below checks a different dim than the one that was windowed. Resolved
         # from the *input*, since the output has `win` prepended.
-        axis = resolve_configured_chunk_dim(self.processor, message, self.SETTINGS.axis)
+        axis = resolve_configured_stream_dim(self.processor, message, self.SETTINGS.axis)
         try:
             ret = self.processor(message)
             # Swallow only when no complete windows (or, in pass-through mode, no
@@ -543,7 +543,7 @@ class Window(BaseTransformerUnit[WindowSettings, AxisArray, AxisArray, WindowTra
                             # Unbundling drops `win`, so the published stream is
                             # back to appending along the target axis: one
                             # message per window, each carrying its own offset.
-                            chunk_dim=axis,
+                            stream_dim=axis,
                         )
                         yield self.OUTPUT_SIGNAL, _ret
 

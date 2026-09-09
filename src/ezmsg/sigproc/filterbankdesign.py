@@ -8,7 +8,7 @@ import numpy.typing as npt
 from ezmsg.baseproc import (
     BaseStatefulTransformer,
     processor_state,
-    resolve_configured_chunk_dim,
+    resolve_configured_stream_dim,
     suppress_axis_deprecation,
 )
 from ezmsg.util.messages.axisarray import AxisArray
@@ -46,7 +46,7 @@ class FilterbankDesignSettings(ez.Settings):
     axis: str | None = None
     """.. deprecated:: 3.8
         Scheduled for removal in 4.0. The dimension messages accumulate along
-        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`;
+        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.stream_dim`;
         see :mod:`ezmsg.sigproc.util.deprecation`."""
 
     def __post_init__(self) -> None:
@@ -59,7 +59,7 @@ class FilterbankDesignSettings(ez.Settings):
 @processor_state
 class FilterbankDesignState:
     axis: str = ""
-    """The resolved chunk dimension, fixed at reset so every later use agrees."""
+    """The resolved stream dimension, fixed at reset so every later use agrees."""
 
     filterbank: FilterbankTransformer | None = None
     needs_redesign: bool = False
@@ -125,11 +125,11 @@ class FilterbankDesignTransformer(
         # fingerprint in here would only redesign kernels that came out the same.
         # Runs before `_reset_state`, so the axis is resolved from the message
         # rather than read back off state that does not exist yet.
-        axis = resolve_configured_chunk_dim(self, message, self.settings.axis, legacy_default="time")
+        axis = resolve_configured_stream_dim(self, message, self.settings.axis, legacy_default="time")
         return hash((message.key, getattr(message.axes.get(axis), "gain", None)))
 
     def _reset_state(self, message: AxisArray) -> None:
-        self.state.axis = resolve_configured_chunk_dim(self, message, self.settings.axis, legacy_default="time")
+        self.state.axis = resolve_configured_stream_dim(self, message, self.settings.axis, legacy_default="time")
         axis_obj = message.axes[self.state.axis]
         assert isinstance(axis_obj, AxisArray.LinearAxis)
         fs = 1 / axis_obj.gain

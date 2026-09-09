@@ -13,7 +13,7 @@ from ezmsg.baseproc import (
     BaseConsumerUnit,
     BaseStatefulProcessor,
     processor_state,
-    resolve_configured_chunk_dim,
+    resolve_configured_stream_dim,
 )
 from ezmsg.util.messages.axisarray import AxisArray, LinearAxis, slice_along_axis
 from ezmsg.util.messages.util import replace
@@ -40,7 +40,7 @@ class ResampleSettings(ez.Settings):
     axis: str | None = None
     """.. deprecated:: 3.8
         Scheduled for removal in 4.0. The dimension messages accumulate along
-        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`;
+        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.stream_dim`;
         see :mod:`ezmsg.sigproc.util.deprecation`."""
 
     def __post_init__(self) -> None:
@@ -113,7 +113,7 @@ class ResampleSettings(ez.Settings):
 @processor_state
 class ResampleState:
     axis: str = ""
-    """The resolved chunk dimension, fixed at reset so every later use agrees."""
+    """The resolved stream dimension, fixed at reset so every later use agrees."""
 
     src_buffer: HybridAxisArrayBuffer | None = None
     """
@@ -177,7 +177,7 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
     NONRESET_SETTINGS_FIELDS = frozenset({"max_chunk_delay", "fill_value", "reference_reset_after_chunks"})
 
     def _seed_axis(self, message: AxisArray) -> str:
-        """Resolve the chunk dimension, seeding it if the reference stream got here first.
+        """Resolve the stream dimension, seeding it if the reference stream got here first.
 
         :meth:`push_reference` is an independent entry point and can be called
         before any signal message has arrived, while :meth:`__next__` has no
@@ -186,7 +186,7 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
         be in hand.
         """
         if not self.state.axis:
-            self.state.axis = resolve_configured_chunk_dim(self, message, self.settings.axis, legacy_default="time")
+            self.state.axis = resolve_configured_stream_dim(self, message, self.settings.axis, legacy_default="time")
         return self.state.axis
 
     def _reset_state(self, message: AxisArray) -> None:
@@ -195,7 +195,7 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
         """
         # The signal stream is authoritative, so this overwrites any value the
         # reference stream seeded above.
-        self.state.axis = resolve_configured_chunk_dim(self, message, self.settings.axis, legacy_default="time")
+        self.state.axis = resolve_configured_stream_dim(self, message, self.settings.axis, legacy_default="time")
         self.state.src_buffer = HybridAxisArrayBuffer(
             duration=self.settings.buffer_duration,
             axis=self.state.axis,

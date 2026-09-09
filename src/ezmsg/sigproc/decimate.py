@@ -44,14 +44,14 @@ class DecimateSettings(DownsampleSettings):
     settings. The filter has one because a filter legitimately runs along any
     dimension; the downsampler does not, because its phase counter only means
     something along the dimension messages accumulate along. Leave ``axis``
-    matching the stream's chunk dimension -- filtering one dimension and
+    matching the stream's stream dimension -- filtering one dimension and
     decimating another is not decimation.
     """
 
     axis: str | None = None
     """.. deprecated:: 3.8
         Scheduled for removal in 4.0. The dimension messages accumulate along
-        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`;
+        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.stream_dim`;
         see :mod:`ezmsg.sigproc.util.deprecation`."""
 
     def __post_init__(self) -> None:

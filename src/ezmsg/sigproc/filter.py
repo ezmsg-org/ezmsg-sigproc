@@ -17,7 +17,7 @@ from ezmsg.baseproc import (
     SettingsType,
     TransformerType,
     processor_state,
-    resolve_configured_chunk_dim,
+    resolve_configured_stream_dim,
     suppress_axis_deprecation,
 )
 from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
@@ -308,7 +308,7 @@ class FilterBaseSettings(ez.Settings):
     axis: str | None = None
     """.. deprecated:: 3.8
         Scheduled for removal in 4.0. The dimension messages accumulate along
-        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`;
+        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.stream_dim`;
         see :mod:`ezmsg.sigproc.util.deprecation`."""
 
     def __post_init__(self) -> None:
@@ -447,7 +447,7 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
         # edge-scaled by the first sample x0 -- the scipy ``lfilter_zi * x[0]``
         # idiom -- treating the pre-stream signal as constant x0 so that a DC
         # offset does not ring through as a start-up transient.
-        axis = resolve_configured_chunk_dim(self, message, self.settings.axis)
+        axis = resolve_configured_stream_dim(self, message, self.settings.axis)
         axis_idx = message.get_axis_idx(axis)
         n_tail = message.data.ndim - axis_idx - 1
         _, coefs = _normalize_coefs(self.settings.coefs)
@@ -659,7 +659,7 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
 
     def _process(self, message: AxisArray) -> AxisArray:
         if message.data.size > 0:
-            axis = resolve_configured_chunk_dim(self, message, self.settings.axis)
+            axis = resolve_configured_stream_dim(self, message, self.settings.axis)
             axis_idx = message.get_axis_idx(axis)
             if self.state.fir_method is not None and self.state.fir_b_1d is None:
                 self._refresh_fir_taps(message, axis_idx)
@@ -847,7 +847,7 @@ class FilterByDesignTransformer(
 
     def _reset_state(self, message: AxisArray) -> None:
         design_fun = self.get_design_function()
-        axis = resolve_configured_chunk_dim(self, message, self.settings.axis)
+        axis = resolve_configured_stream_dim(self, message, self.settings.axis)
         fs = 1 / message.axes[axis].gain
         coefs = design_fun(fs)
 

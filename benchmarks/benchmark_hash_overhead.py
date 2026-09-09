@@ -7,7 +7,7 @@ never reset, and a source that renamed its channels under a fixed key and
 channel count kept being filtered through the previous channels' history.
 
 The default now folds in the message key, the dims, the length of every
-dimension except the chunk dimension, the *values* on the coordinate axes and
+dimension except the stream dimension, the *values* on the coordinate axes and
 the gain and offset of any linear axis among them. That is strictly more work
 per message. This script measures how much more, and how much of it
 ``CoordinateAxis.fingerprint`` hands back by computing the expensive part -- a
@@ -70,9 +70,9 @@ from ezmsg.util.messages.axisarray import AxisArray, CoordinateAxis
 
 warnings.filterwarnings("ignore")
 
-HAS_CHUNK_DIM = "chunk_dim" in AxisArray.__dataclass_fields__
-DECLARE_CHUNK_DIM = HAS_CHUNK_DIM
-"""Whether the simulated source declares its chunk dimension.
+HAS_STREAM_DIM = "stream_dim" in AxisArray.__dataclass_fields__
+DECLARE_STREAM_DIM = HAS_STREAM_DIM
+"""Whether the simulated source declares its stream dimension.
 
 The ``before`` arm must not: nothing set the field then, and the pre-sweep
 ``Spectrum`` does not clear it when it consumes ``time``, so a declared source
@@ -116,7 +116,7 @@ def label_data(n_ch: int) -> np.ndarray:
 def make_message(data: np.ndarray, ch_data: np.ndarray, fs: float, key: str = "dev") -> AxisArray:
     """A fresh message, with a *fresh* coordinate axis: a live source builds new
     axis objects per message, so the fingerprint cache starts cold."""
-    kwargs = {"chunk_dim": "time"} if DECLARE_CHUNK_DIM else {}
+    kwargs = {"stream_dim": "time"} if DECLARE_STREAM_DIM else {}
     return AxisArray(
         data,
         dims=["time", "ch"],
@@ -366,7 +366,7 @@ def chain_throughput(messages: list[AxisArray], fs: float, n_rounds: int) -> dic
 def per_stage_hash_cost(messages: list[AxisArray], fs: float, repeats: int) -> list[dict[str, typing.Any]]:
     """Time each stage's ``_hash_message`` on the message that stage really sees.
 
-    The intermediate messages matter: after ``Window`` the chunk dimension is
+    The intermediate messages matter: after ``Window`` the stream dimension is
     ``win``, after ``Spectrum`` the coordinate axes are different ones, and a
     stage that hashes cheaply on the source message may not downstream.
     """
@@ -451,9 +451,9 @@ def main() -> None:
     p.add_argument("--json", action="store_true")
     args = p.parse_args()
 
-    global DECLARE_CHUNK_DIM
+    global DECLARE_STREAM_DIM
     if args.arm == "before":
-        DECLARE_CHUNK_DIM = False
+        DECLARE_STREAM_DIM = False
     if args.arm == "naive" and not uncache_fingerprint():
         raise SystemExit("--arm naive needs a build of ezmsg that has CoordinateAxis.fingerprint")
 
@@ -470,7 +470,7 @@ def main() -> None:
         "chunk_ms": args.chunk_ms,
         "n_time": n_time,
         "n_messages": args.n_messages,
-        "declares_chunk_dim": DECLARE_CHUNK_DIM,
+        "declares_stream_dim": DECLARE_STREAM_DIM,
         "hash_us_full_metadata": hash_cost_per_processor(make_message(signal, ch_full, args.fs), args.repeats),
         "hash_us_plain_labels": hash_cost_per_processor(make_message(signal, ch_plain, args.fs), args.repeats),
         "per_stage": per_stage_hash_cost(messages, args.fs, args.repeats),

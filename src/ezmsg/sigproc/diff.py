@@ -14,7 +14,7 @@ from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
     processor_state,
-    resolve_configured_chunk_dim,
+    resolve_configured_stream_dim,
 )
 from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
 from ezmsg.util.messages.util import replace
@@ -27,7 +27,7 @@ class DiffSettings(ez.Settings):
     axis: str | None = None
     """.. deprecated:: 3.8
         Scheduled for removal in 4.0. The dimension messages accumulate along
-        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`;
+        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.stream_dim`;
         see :mod:`ezmsg.sigproc.util.deprecation`."""
 
     def __post_init__(self) -> None:
@@ -44,7 +44,7 @@ class DiffState:
 
 class DiffTransformer(BaseStatefulTransformer[DiffSettings, AxisArray, AxisArray, DiffState]):
     def _axis(self, message: AxisArray) -> str:
-        return resolve_configured_chunk_dim(self, message, self.settings.axis)
+        return resolve_configured_stream_dim(self, message, self.settings.axis)
 
     def __call__(self, message: AxisArray) -> AxisArray:
         ax_idx = message.get_axis_idx(self._axis(message))

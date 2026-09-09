@@ -13,9 +13,9 @@ message, forever. :func:`~ezmsg.sigproc.util.message.with_fingerprint` closes
 that by priming at the point of construction, and these tests pin it, since
 nothing else would notice it stopping.
 
-Deliberately not primed: coordinate axes along the chunk dimension. Their data is
+Deliberately not primed: coordinate axes along the stream dimension. Their data is
 new every message and no consumer reads their fingerprint -- the default hash
-takes only ``gain`` from the chunk axis.
+takes only ``gain`` from the stream axis.
 """
 
 import numpy as np
@@ -50,7 +50,7 @@ def signal(n_time: int = 64, labels: list[str] | None = None, fs: float = 100.0,
             "ch": CoordinateAxis(data=np.array(labels), dims=["ch"]),
         },
         key=key,
-        chunk_dim="time",
+        stream_dim="time",
     )
 
 
@@ -64,7 +64,7 @@ def spectrum(n_win: int = 8, n_freq: int = 16, n_ch: int = 4) -> AxisArray:
             "ch": CoordinateAxis(data=np.array([f"c{i}" for i in range(n_ch)]), dims=["ch"]),
         },
         key="dev",
-        chunk_dim="win",
+        stream_dim="win",
     )
 
 
@@ -140,8 +140,8 @@ class TestCreatedAxesArePrimed:
         assert_primed(a, proc._concat(a, b), {"ch"})
 
 
-class TestTheChunkAxisIsLeftAlone:
-    """Priming a per-message chunk coordinate would be pure cost: its data is
+class TestTheStreamAxisIsLeftAlone:
+    """Priming a per-message stream coordinate would be pure cost: its data is
     new every message and the default hash reads only ``gain`` from it."""
 
     def test_an_irregular_time_axis_is_not_primed(self):
@@ -154,7 +154,7 @@ class TestTheChunkAxisIsLeftAlone:
                 "ch": CoordinateAxis(data=np.array(["a", "b"]), dims=["ch"]),
             },
             key="dev",
-            chunk_dim="time",
+            stream_dim="time",
         )
         SlicerTransformer(SlicerSettings(selection="0:1", axis="ch"))(msg)
         assert "_fingerprint" not in msg.axes["time"].__dict__

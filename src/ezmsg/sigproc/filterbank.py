@@ -14,7 +14,7 @@ from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
     processor_state,
-    resolve_configured_chunk_dim,
+    resolve_configured_stream_dim,
 )
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
@@ -70,7 +70,7 @@ class FilterbankSettings(ez.Settings):
     axis: str | None = None
     """.. deprecated:: 3.8
         Scheduled for removal in 4.0. The dimension messages accumulate along
-        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`;
+        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.stream_dim`;
         see :mod:`ezmsg.sigproc.util.deprecation`."""
 
     def __post_init__(self) -> None:
@@ -106,7 +106,7 @@ class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArra
         return self._message_hash(message, extra=(message.data.dtype.kind,))
 
     def _reset_state(self, message: AxisArray) -> None:
-        axis = resolve_configured_chunk_dim(self, message, self.settings.axis)
+        axis = resolve_configured_stream_dim(self, message, self.settings.axis)
         gain = message.axes[axis].gain if axis in message.axes else 1.0
         targ_ax_ix = message.get_axis_idx(axis)
         in_shape = message.data.shape[:targ_ax_ix] + message.data.shape[targ_ax_ix + 1 :]
@@ -211,7 +211,7 @@ class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArra
             # TODO: If fft_kernels have significant stretches of zeros, convert to sparse array.
 
     def _process(self, message: AxisArray) -> AxisArray:
-        axis = resolve_configured_chunk_dim(self, message, self.settings.axis)
+        axis = resolve_configured_stream_dim(self, message, self.settings.axis)
         targ_ax_ix = message.get_axis_idx(axis)
 
         # Make sure target axis is in -1th position.
