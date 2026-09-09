@@ -40,7 +40,7 @@ def with_fingerprint(axis: AxisArray.CoordinateAxis) -> AxisArray.CoordinateAxis
       A primed one arrives with the answer already attached.
 
     Apply it to axes that describe the stream -- channel labels, frequency
-    labels, feature labels -- not to per-message coordinates along the chunk
+    labels, feature labels -- not to per-message coordinates along the stream
     dimension, whose fingerprint no consumer reads and whose data is new every
     message anyway.
     """

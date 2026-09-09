@@ -59,7 +59,7 @@ class MergeProcessor:
         self.settings = settings
         # `align_axis` is Merge's own setting; forwarding it must not warn about
         # AlignAlongAxisSettings. Passed through rather than defaulted to "time",
-        # so that leaving it unset follows the stream's chunk dimension.
+        # so that leaving it unset follows the stream's stream dimension.
         with suppress_axis_deprecation():
             self._align = AlignAlongAxisProcessor(
                 settings=AlignAlongAxisSettings(

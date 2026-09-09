@@ -10,7 +10,7 @@ from ezmsg.baseproc import (
     BaseAdaptiveTransformer,
     BaseAdaptiveTransformerUnit,
     processor_state,
-    resolve_configured_chunk_dim,
+    resolve_configured_stream_dim,
 )
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
@@ -22,7 +22,7 @@ class RollingScalerSettings(ez.Settings):
     axis: str | None = None
     """.. deprecated:: 3.8
         Scheduled for removal in 4.0. The dimension messages accumulate along
-        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`;
+        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.stream_dim`;
         see :mod:`ezmsg.sigproc.util.deprecation`."""
 
     def __post_init__(self) -> None:
@@ -77,7 +77,7 @@ class RollingScalerSettings(ez.Settings):
 @processor_state
 class RollingScalerState:
     axis: str = ""
-    """The resolved chunk dimension, fixed at reset so every later use agrees."""
+    """The resolved stream dimension, fixed at reset so every later use agrees."""
 
     mean: npt.NDArray | None = None
     N: int = 0
@@ -123,7 +123,7 @@ class RollingScalerProcessor(BaseAdaptiveTransformer[RollingScalerSettings, Axis
     NONRESET_SETTINGS_FIELDS = frozenset({"update_with_signal", "artifact_z_thresh", "clip"})
 
     def _reset_state(self, message: AxisArray) -> None:
-        self._state.axis = resolve_configured_chunk_dim(self, message, self.settings.axis, legacy_default="time")
+        self._state.axis = resolve_configured_stream_dim(self, message, self.settings.axis, legacy_default="time")
         xp = get_namespace(message.data)
         ch = message.data.shape[-1]
         self._state.mean = xp.zeros(ch, dtype=xp.float64)

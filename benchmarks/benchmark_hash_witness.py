@@ -7,7 +7,7 @@ witness records the objects the last answer was derived from and, when none of
 them has changed identity, returns the cached answer.
 
 The precondition is producer-side and every ezmsg source already satisfies it:
-build the per-stream axes once, and replace only the chunk axis per message
+build the per-stream axes once, and replace only the stream axis per message
 (``replace(template, data=..., axes={**template.axes, "time": new_time_ax})``).
 That hands every consumer the *same* coordinate axis object for the life of the
 stream, and identity settles the question in one pointer comparison.
@@ -64,7 +64,7 @@ def make_template(n_ch: int, fs: float, n_time: int, key: str = "dev") -> AxisAr
             "ch": CoordinateAxis(data=np.array([f"ch{i:03d}" for i in range(n_ch)]), dims=["ch"]),
         },
         key=key,
-        chunk_dim="time",
+        stream_dim="time",
     )
 
 

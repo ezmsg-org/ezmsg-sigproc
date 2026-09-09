@@ -2,7 +2,7 @@
 
 Most processors no longer implement ``_hash_message``: the base class decides,
 folding in the message key, the dims, the length of every dimension except the
-chunk dimension, the coordinate values on those dimensions, and the gain and
+stream dimension, the coordinate values on those dimensions, and the gain and
 offset of any linear axis. This runs a real ``ez.run`` graph over simulated
 256-channel data shaped like the intracranial feature pipeline and counts how
 often each node rebuilds its state.

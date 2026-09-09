@@ -4,7 +4,7 @@ import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
 import scipy.signal
-from ezmsg.baseproc import BaseStatefulTransformer, processor_state, resolve_configured_chunk_dim
+from ezmsg.baseproc import BaseStatefulTransformer, processor_state, resolve_configured_stream_dim
 from ezmsg.util.messages.axisarray import AxisArray, CoordinateAxis
 from ezmsg.util.messages.util import replace
 
@@ -23,7 +23,7 @@ class AdaptiveLatticeNotchFilterSettings(ez.Settings):
     axis: str | None = None
     """.. deprecated:: 3.8
         Scheduled for removal in 4.0. The dimension messages accumulate along
-        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`;
+        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.stream_dim`;
         see :mod:`ezmsg.sigproc.util.deprecation`."""
 
     def __post_init__(self) -> None:
@@ -39,7 +39,7 @@ class AdaptiveLatticeNotchFilterSettings(ez.Settings):
 @processor_state
 class AdaptiveLatticeNotchFilterState:
     axis: str = ""
-    """The resolved chunk dimension, fixed at reset so every later use agrees."""
+    """The resolved stream dimension, fixed at reset so every later use agrees."""
 
     """State for the Adaptive Lattice Notch Filter."""
 
@@ -84,7 +84,7 @@ class AdaptiveLatticeNotchFilterTransformer(
     NONRESET_SETTINGS_FIELDS = frozenset({"gamma", "mu", "eta", "chunkwise"})
 
     def _reset_state(self, message: AxisArray) -> None:
-        axis = resolve_configured_chunk_dim(self, message, self.settings.axis, legacy_default="time")
+        axis = resolve_configured_stream_dim(self, message, self.settings.axis, legacy_default="time")
         ax_idx = message.get_axis_idx(axis)
         sample_shape = message.data.shape[:ax_idx] + message.data.shape[ax_idx + 1 :]
 

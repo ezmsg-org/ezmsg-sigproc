@@ -150,7 +150,7 @@ def test_downsample_mlx_matches_numpy(factor: int, block_size: int):
     assert np.array_equal(np.concatenate([d for d, _ in mlx_kept]), src[::factor])
 
 
-class TestTheDimensionIsAlwaysTheChunkDimension:
+class TestTheDimensionIsAlwaysTheStreamDimension:
     """``s_idx`` carries across messages so the kept samples form one arithmetic
     sequence over the whole stream rather than restarting per chunk. That is the
     point along the accumulating dimension and meaningless along any other, so
@@ -158,9 +158,9 @@ class TestTheDimensionIsAlwaysTheChunkDimension:
     """
 
     @staticmethod
-    def _msg(i, chunk_dim="time", n_freq=5, n_time=4):
+    def _msg(i, stream_dim="time", n_freq=5, n_time=4):
         data = np.arange(n_freq, dtype=float)[None, :] + i * 100
-        kwargs = {"chunk_dim": chunk_dim} if chunk_dim else {}
+        kwargs = {"stream_dim": stream_dim} if stream_dim else {}
         return AxisArray(
             np.tile(data, (n_time, 1)),
             dims=["time", "freq"],
@@ -179,7 +179,7 @@ class TestTheDimensionIsAlwaysTheChunkDimension:
         with pytest.raises(TypeError):
             DownsampleSettings(axis="freq", factor=2)
 
-    def test_it_follows_the_declared_chunk_dim(self):
+    def test_it_follows_the_declared_stream_dim(self):
         proc = DownsampleTransformer(DownsampleSettings(factor=2))
         out = proc(self._msg(0))
         assert proc.state.axis == "time"
@@ -201,9 +201,9 @@ class TestTheDimensionIsAlwaysTheChunkDimension:
         kept = [(sliced(self._msg(i)).data[0] - i * 100).astype(int).tolist() for i in range(4)]
         assert kept == [[0, 2, 4]] * 4
 
-    def test_an_undeclared_chunk_dim_falls_back_to_streaming_dims(self):
+    def test_an_undeclared_stream_dim_falls_back_to_streaming_dims(self):
         proc = DownsampleTransformer(DownsampleSettings(factor=2))
-        proc(self._msg(0, chunk_dim=None))
+        proc(self._msg(0, stream_dim=None))
         assert proc.state.axis == DownsampleTransformer.STREAMING_DIMS[0] == "time"
 
 
@@ -220,10 +220,10 @@ class TestTheDimensionFollowsTheMessage:
                 dims=["time", "ch"],
                 axes={"time": AxisArray.TimeAxis(fs=100.0)},
                 key="dev",
-                chunk_dim="time",
+                stream_dim="time",
             )
         )
-        assert windowed.chunk_dim == "win"
+        assert windowed.stream_dim == "win"
 
         proc = DownsampleTransformer(DownsampleSettings(factor=2))
         out = proc(windowed)
@@ -242,9 +242,9 @@ class TestTheDimensionFollowsTheMessage:
                 "time": AxisArray.TimeAxis(fs=100.0),
             },
             key="dev",
-            chunk_dim="time",
+            stream_dim="time",
         )
-        assert msg.dims[0] != msg.chunk_dim, "the fixture must distinguish the two"
+        assert msg.dims[0] != msg.stream_dim, "the fixture must distinguish the two"
 
         proc = DownsampleTransformer(DownsampleSettings(factor=2))
         out = proc(msg)

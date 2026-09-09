@@ -892,10 +892,10 @@ class TestAttrsMerge:
 
 
 class TestLinearAxesAreCachedAndWatched:
-    """A ``LinearAxis`` that is not the chunk dimension describes the stream.
+    """A ``LinearAxis`` that is not the stream dimension describes the stream.
 
     ``_build_cached_axes`` used to skip every axis without ``.data``, on the
-    reasoning that ``offset`` advances per message -- true of the chunk axis and
+    reasoning that ``offset`` advances per message -- true of the stream axis and
     of nothing else. The cost was not just a missing cache entry: the fingerprint
     skipped them too, so a ``freq`` axis whose gain diverged between A and B
     mid-stream never invalidated the cache, and ``_validate_shared_axes`` -- which
@@ -904,8 +904,8 @@ class TestLinearAxesAreCachedAndWatched:
     """
 
     @staticmethod
-    def _msg(key, labels, gain=1.0, offset=0.0, n_time=4, chunk_dim="time"):
-        kwargs = {"chunk_dim": chunk_dim} if chunk_dim else {}
+    def _msg(key, labels, gain=1.0, offset=0.0, n_time=4, stream_dim="time"):
+        kwargs = {"stream_dim": stream_dim} if stream_dim else {}
         return AxisArray(
             np.zeros((n_time, 3, len(labels)), np.float32),
             dims=["time", "freq", "ch"],
@@ -955,7 +955,7 @@ class TestLinearAxesAreCachedAndWatched:
             dims=later.dims,
             axes={**later.axes, "time": AxisArray.TimeAxis(fs=100.0, offset=9.99)},
             key="A",
-            chunk_dim="time",
+            stream_dim="time",
         )
         out = proc._concat(later, self._msg("B", ["b0", "b1"]))
         assert out.axes["time"].offset == pytest.approx(9.99)
@@ -973,7 +973,7 @@ class TestLinearAxesAreCachedAndWatched:
                 dims=m.dims,
                 axes={**m.axes, "time": AxisArray.TimeAxis(fs=100.0, offset=offset)},
                 key=k,
-                chunk_dim="time",
+                stream_dim="time",
             )
             return fix(a, "A"), fix(b, "B")
 
@@ -983,19 +983,19 @@ class TestLinearAxesAreCachedAndWatched:
             proc._concat(*pair(i * 0.04))
         assert proc.state.cached_axes is first
 
-    def test_an_undeclared_chunk_dim_caches_no_linear_axis(self):
+    def test_an_undeclared_stream_dim_caches_no_linear_axis(self):
         """Without the declaration there is no way to tell which one advances,
         so none is cached and none is watched -- the old behaviour."""
         proc = ConcatProcessor(self._settings())
         proc._concat(
-            self._msg("A", ["a0", "a1"], chunk_dim=None),
-            self._msg("B", ["b0", "b1"], chunk_dim=None),
+            self._msg("A", ["a0", "a1"], stream_dim=None),
+            self._msg("B", ["b0", "b1"], stream_dim=None),
         )
         assert "freq" not in proc.state.cached_axes
         assert "time" not in proc.state.cached_axes
 
     def test_a_sample_rate_change_still_rebuilds(self):
-        """The chunk axis contributes its gain, so an fs change is not silent."""
+        """The stream axis contributes its gain, so an fs change is not silent."""
         proc = ConcatProcessor(ConcatSettings(axis="ch"))
         proc._concat(self._msg("A", ["a0", "a1"]), self._msg("B", ["b0", "b1"]))
         first = proc.state.cached_axes
@@ -1007,7 +1007,7 @@ class TestLinearAxesAreCachedAndWatched:
                 dims=m.dims,
                 axes={**m.axes, "time": AxisArray.TimeAxis(fs=fs)},
                 key=key,
-                chunk_dim="time",
+                stream_dim="time",
             )
 
         proc._concat(at_fs("A", ["a0", "a1"], 200.0), at_fs("B", ["b0", "b1"], 200.0))
@@ -1015,15 +1015,15 @@ class TestLinearAxesAreCachedAndWatched:
 
 
 class TestTheChunkLengthDoesNotRebuildTheCache:
-    """The chunk dimension's length is however much arrived, not a property of
+    """The stream dimension's length is however much arrived, not a property of
     the stream. It used to be part of the fingerprint, so any jittering source
     rebuilt the cache on every message -- a deepcopy of every coordinate axis
     per message, which is the exact cost ``cached_axes`` exists to avoid.
     """
 
     @staticmethod
-    def _msg(key, labels, n_time, chunk_dim="time"):
-        kwargs = {"chunk_dim": chunk_dim} if chunk_dim else {}
+    def _msg(key, labels, n_time, stream_dim="time"):
+        kwargs = {"stream_dim": stream_dim} if stream_dim else {}
         return AxisArray(
             np.zeros((n_time, len(labels)), np.float32),
             dims=["time", "ch"],
@@ -1035,12 +1035,12 @@ class TestTheChunkLengthDoesNotRebuildTheCache:
             **kwargs,
         )
 
-    def _rebuild_count(self, sizes, chunk_dim="time"):
+    def _rebuild_count(self, sizes, stream_dim="time"):
         proc = ConcatProcessor(ConcatSettings(axis="ch"))
-        proc._concat(self._msg("A", ["a0", "a1"], 40, chunk_dim), self._msg("B", ["b0", "b1"], 40, chunk_dim))
+        proc._concat(self._msg("A", ["a0", "a1"], 40, stream_dim), self._msg("B", ["b0", "b1"], 40, stream_dim))
         seen, count = proc.state.cached_axes, 0
         for size in sizes:
-            proc._concat(self._msg("A", ["a0", "a1"], size, chunk_dim), self._msg("B", ["b0", "b1"], size, chunk_dim))
+            proc._concat(self._msg("A", ["a0", "a1"], size, stream_dim), self._msg("B", ["b0", "b1"], size, stream_dim))
             if proc.state.cached_axes is not seen:
                 count += 1
                 seen = proc.state.cached_axes
@@ -1052,10 +1052,10 @@ class TestTheChunkLengthDoesNotRebuildTheCache:
     def test_a_constant_chunk_size_does_not_either(self):
         assert self._rebuild_count([40, 40, 40, 40]) == 0
 
-    def test_an_undeclared_chunk_dim_still_rebuilds(self):
+    def test_an_undeclared_stream_dim_still_rebuilds(self):
         """Nothing says which length is the per-message one, so the whole shape
         stays in the fingerprint. Conservative, and the old behaviour."""
-        assert self._rebuild_count([37, 41, 39, 40], chunk_dim=None) == 4
+        assert self._rebuild_count([37, 41, 39, 40], stream_dim=None) == 4
 
     def test_a_real_shape_change_still_rebuilds(self):
         proc = ConcatProcessor(ConcatSettings(axis="ch"))
@@ -1066,7 +1066,7 @@ class TestTheChunkLengthDoesNotRebuildTheCache:
 
     def test_a_new_axis_concat_still_reports_mismatched_shapes_clearly(self):
         """Every dimension must agree when stacking along a new one, including
-        the chunk dimension -- which the fingerprint no longer watches. The
+        the stream dimension -- which the fingerprint no longer watches. The
         check moved to run per message so the error still names both inputs
         rather than surfacing as a backend shape error."""
         proc = ConcatProcessor(ConcatSettings(axis="trial"))

@@ -86,8 +86,8 @@ class SpectrumSettings(ez.Settings):
     The name of the axis on which to calculate the spectrum.
       Note: The axis must have an .axes entry of type LinearAxis, not CoordinateAxis.
 
-      Defaults to the innermost non-chunk dimension carrying a LinearAxis, else
-      the chunk dimension itself -- ``"time"`` for both a raw ``(time, ch)``
+      Defaults to the innermost non-stream dimension carrying a LinearAxis, else
+      the stream dimension itself -- ``"time"`` for both a raw ``(time, ch)``
       stream and a windowed ``(win, time, ch)`` one, where each window's
       spectrum is taken over ``time`` while ``win`` is what accumulates.
     """
@@ -143,7 +143,7 @@ class SpectrumTransformer(BaseStatefulTransformer[SpectrumSettings, AxisArray, A
         """Extend the default with the two things it cannot know about.
 
         The FFT is sized by the length of the axis being transformed, which is
-        normally the chunk dimension -- the one length the default deliberately
+        normally the stream dimension -- the one length the default deliberately
         ignores because it changes with every message. Spectrum is the exception:
         a different transform length is a different plan, so it has to be folded
         back in. The dtype matters because a complex input takes a different
@@ -284,8 +284,8 @@ class SpectrumTransformer(BaseStatefulTransformer[SpectrumSettings, AxisArray, A
         # -- each message is one spectrum, and they stack rather than
         # concatenate. Windowed input keeps its `win` dimension and so keeps
         # appending along it.
-        out_chunk_dim = None if message.chunk_dim == axis else message.chunk_dim
-        msg_out = replace(message, data=spec, dims=self.state.new_dims, axes=new_axes, chunk_dim=out_chunk_dim)
+        out_stream_dim = None if message.stream_dim == axis else message.stream_dim
+        msg_out = replace(message, data=spec, dims=self.state.new_dims, axes=new_axes, stream_dim=out_stream_dim)
         return msg_out
 
 

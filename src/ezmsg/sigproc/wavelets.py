@@ -11,7 +11,7 @@ from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
     processor_state,
-    resolve_configured_chunk_dim,
+    resolve_configured_stream_dim,
     suppress_axis_deprecation,
 )
 from ezmsg.util.messages.axisarray import AxisArray
@@ -34,7 +34,7 @@ class CWTSettings(ez.Settings):
     axis: str | None = None
     """.. deprecated:: 3.8
         Scheduled for removal in 4.0. The dimension messages accumulate along
-        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`;
+        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.stream_dim`;
         see :mod:`ezmsg.sigproc.util.deprecation`."""
 
     def __post_init__(self) -> None:
@@ -46,7 +46,7 @@ class CWTSettings(ez.Settings):
 @processor_state
 class CWTState:
     axis: str = ""
-    """The resolved chunk dimension, fixed at reset so every later use agrees."""
+    """The resolved stream dimension, fixed at reset so every later use agrees."""
 
     neg_rt_scales: npt.NDArray | None = None
     int_psi_scales: list[npt.NDArray] | None = None
@@ -61,7 +61,7 @@ class CWTTransformer(BaseStatefulTransformer[CWTSettings, AxisArray, AxisArray, 
         return self._message_hash(message, extra=(message.data.dtype.kind,))
 
     def _reset_state(self, message: AxisArray) -> None:
-        self._state.axis = resolve_configured_chunk_dim(self, message, self.settings.axis, legacy_default="time")
+        self._state.axis = resolve_configured_stream_dim(self, message, self.settings.axis, legacy_default="time")
         if "freq" in message.dims:
             raise ValueError(
                 "CWT appends a 'freq' axis to its output, but the input already has one "

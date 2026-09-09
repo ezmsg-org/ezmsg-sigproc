@@ -6,7 +6,7 @@ import typing
 import ezmsg.core as ez
 import numpy as np
 import scipy.signal as sps
-from ezmsg.baseproc import BaseStatefulTransformer, processor_state, resolve_configured_chunk_dim
+from ezmsg.baseproc import BaseStatefulTransformer, processor_state, resolve_configured_stream_dim
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
@@ -266,7 +266,7 @@ class FIRHilbertEnvelopeTransformer(
         y_imag_msg = self._state.filter(message)
         y_imag = y_imag_msg.data
 
-        axis_name = resolve_configured_chunk_dim(self, message, self.settings.axis)
+        axis_name = resolve_configured_stream_dim(self, message, self.settings.axis)
         axis_idx = message.get_axis_idx(axis_name)
         if self._state.dly is None:
             taps = self._state.filter.get_taps()

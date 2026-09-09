@@ -7,7 +7,7 @@ import typing
 
 import ezmsg.core as ez
 import numpy as np
-from ezmsg.baseproc import resolve_configured_chunk_dim
+from ezmsg.baseproc import resolve_configured_stream_dim
 from ezmsg.baseproc.protocols import processor_state
 from ezmsg.baseproc.stateful import BaseStatefulTransformer
 from ezmsg.util.messages.axisarray import AxisArray
@@ -20,7 +20,7 @@ class AlignAlongAxisSettings(ez.Settings):
     axis: str | None = None
     """.. deprecated:: 3.8
         Scheduled for removal in 4.0. The dimension messages accumulate along
-        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`;
+        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.stream_dim`;
         see :mod:`ezmsg.sigproc.util.deprecation`."""
 
     def __post_init__(self) -> None:
@@ -87,7 +87,7 @@ class AlignAlongAxisProcessor(
         return hash(self._extract_gain(message))
 
     def _extract_gain(self, message: AxisArray) -> float | None:
-        align_name = resolve_configured_chunk_dim(self, message, self.settings.axis)
+        align_name = resolve_configured_stream_dim(self, message, self.settings.axis)
         ax = message.axes.get(align_name)
         if ax is not None and hasattr(ax, "gain"):
             return ax.gain
@@ -139,7 +139,7 @@ class AlignAlongAxisProcessor(
         super()._request_reset()
 
     def _reset_state(self, message: AxisArray) -> None:
-        align_axis = resolve_configured_chunk_dim(self, message, self.settings.axis)
+        align_axis = resolve_configured_stream_dim(self, message, self.settings.axis)
         if self._hash == -1 and not getattr(self, "_force_full_reset", False):
             self._state.align_axis = align_axis
             if self._state.buf_a is None:
@@ -167,7 +167,7 @@ class AlignAlongAxisProcessor(
 
     def push_b(self, message: AxisArray) -> _AlignPair | None:
         """Process input B: check gain, detect shape changes, buffer, try align."""
-        align_axis = resolve_configured_chunk_dim(self, message, self.settings.axis)
+        align_axis = resolve_configured_stream_dim(self, message, self.settings.axis)
 
         # Gain compatibility check. Skipped when B's gain can't be estimated
         # (e.g. a single-sample CoordinateAxis yields None) — there is nothing

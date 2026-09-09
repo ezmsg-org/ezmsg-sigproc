@@ -79,8 +79,8 @@ DEPRECATED_SETTINGS = {
 }
 
 # The second wave: these defaulted to a hardcoded ``axis="time"`` rather than to
-# a positional guess, so flipping them to follow ``chunk_dim`` changes results
-# wherever the chunk dimension is not ``"time"``. They pass ``legacy_default``
+# a positional guess, so flipping them to follow ``stream_dim`` changes results
+# wherever the stream dimension is not ``"time"``. They pass ``legacy_default``
 # to surface that population; the rest do not.
 LEGACY_TIME_DEFAULT = {
     "AdaptiveLNCSettings",
@@ -93,8 +93,8 @@ LEGACY_TIME_DEFAULT = {
 }
 
 
-def msg(n_time=32, n_ch=3, chunk_dim="time"):
-    kwargs = {"chunk_dim": chunk_dim} if chunk_dim else {}
+def msg(n_time=32, n_ch=3, stream_dim="time"):
+    kwargs = {"stream_dim": stream_dim} if stream_dim else {}
     return AxisArray(
         np.random.default_rng(0).standard_normal((n_time, n_ch)),
         dims=["time", "ch"],
@@ -152,8 +152,8 @@ class TestTheInventoryIsPinned:
         assert found == DEPRECATED_SETTINGS
 
     def test_flatten_is_deliberately_excluded(self):
-        """Flatten carries no data between messages and already handles the chunk
-        dimension being folded away, so preserving a non-chunk axis is coherent."""
+        """Flatten carries no data between messages and already handles the stream
+        dimension being folded away, so preserving a non-stream axis is coherent."""
         assert "FlattenSettings" not in DEPRECATED_SETTINGS
         with warnings.catch_warnings(record=True) as rec:
             warnings.simplefilter("always")
@@ -299,11 +299,11 @@ class TestBehaviourIsUnchangedUntilRemoval:
             dims=["ch", "time"],
             axes={"time": AxisArray.TimeAxis(fs=FS)},
             key="dev",
-            chunk_dim="time",
+            stream_dim="time",
         )
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            # `ch` is not the chunk dim, and is exactly what removal will stop
+            # `ch` is not the stream dim, and is exactly what removal will stop
             # allowing -- but today it must still be obeyed.
             proc = DiffTransformer(DiffSettings(axis="ch"))
             out = proc(transposed)
@@ -319,20 +319,20 @@ class TestBehaviourIsUnchangedUntilRemoval:
             dims=["win", "time", "ch"],
             axes={"win": AxisArray.TimeAxis(fs=FS / 8), "time": AxisArray.TimeAxis(fs=FS)},
             key="dev",
-            chunk_dim="win",
+            stream_dim="win",
         )
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             proc = DiffTransformer(DiffSettings(axis="time"))
             with caplog.at_level("WARNING"):
                 proc(windowed)
-        assert any("chunk_dim" in r.message for r in caplog.records)
+        assert any("stream_dim" in r.message for r in caplog.records)
 
 
 class TestTheLegacyTimeDefault:
     """The second wave defaulted to a hardcoded ``axis="time"``, not to a
-    positional guess. Flipping those to follow ``chunk_dim`` changes results
-    wherever the chunk dimension is not ``"time"`` -- most obviously downstream
+    positional guess. Flipping those to follow ``stream_dim`` changes results
+    wherever the stream dimension is not ``"time"`` -- most obviously downstream
     of a windowing stage -- and no setting exists to warn about, because the
     affected caller set nothing. ``legacy_default`` is what surfaces them."""
 
@@ -345,23 +345,23 @@ class TestTheLegacyTimeDefault:
             dims=["win", "time", "ch"],
             axes={"win": AxisArray.TimeAxis(fs=FS / 8), "time": AxisArray.TimeAxis(fs=FS)},
             key="dev",
-            chunk_dim="win",
+            stream_dim="win",
         )
 
     def test_it_warns_when_the_resolved_dim_is_not_the_old_default(self, caplog):
-        from ezmsg.baseproc import resolve_configured_chunk_dim
+        from ezmsg.baseproc import resolve_configured_stream_dim
 
         class Proc:
             STREAMING_DIMS = ("time",)
 
         proc = Proc()
         with caplog.at_level("WARNING"):
-            resolved = resolve_configured_chunk_dim(proc, self._windowed(), None, legacy_default="time")
+            resolved = resolve_configured_stream_dim(proc, self._windowed(), None, legacy_default="time")
         assert resolved == "win"
         assert any("used to operate on axis='time'" in r.message for r in caplog.records)
 
     def test_it_warns_only_once(self, caplog):
-        from ezmsg.baseproc import resolve_configured_chunk_dim
+        from ezmsg.baseproc import resolve_configured_stream_dim
 
         class Proc:
             STREAMING_DIMS = ("time",)
@@ -369,26 +369,26 @@ class TestTheLegacyTimeDefault:
         proc = Proc()
         with caplog.at_level("WARNING"):
             for _ in range(3):
-                resolve_configured_chunk_dim(proc, self._windowed(), None, legacy_default="time")
+                resolve_configured_stream_dim(proc, self._windowed(), None, legacy_default="time")
         assert sum("used to operate on" in r.message for r in caplog.records) == 1
 
     def test_a_raw_stream_is_silent(self, caplog):
-        """The overwhelmingly common case: chunk_dim is already "time", so
+        """The overwhelmingly common case: stream_dim is already "time", so
         nothing changed and there is nothing to say."""
-        from ezmsg.baseproc import resolve_configured_chunk_dim
+        from ezmsg.baseproc import resolve_configured_stream_dim
 
         class Proc:
             STREAMING_DIMS = ("time",)
 
         with caplog.at_level("WARNING"):
-            resolved = resolve_configured_chunk_dim(Proc(), msg(), None, legacy_default="time")
+            resolved = resolve_configured_stream_dim(Proc(), msg(), None, legacy_default="time")
         assert resolved == "time"
         assert not caplog.records
 
     def test_a_stream_without_the_old_default_dim_is_silent(self, caplog):
         """If ``time`` is not even present, the old default could not have been
         operating on it, so there is no behaviour change to report."""
-        from ezmsg.baseproc import resolve_configured_chunk_dim
+        from ezmsg.baseproc import resolve_configured_stream_dim
 
         class Proc:
             STREAMING_DIMS = ("time",)
@@ -398,10 +398,10 @@ class TestTheLegacyTimeDefault:
             dims=["win", "ch"],
             axes={"win": AxisArray.TimeAxis(fs=FS)},
             key="dev",
-            chunk_dim="win",
+            stream_dim="win",
         )
         with caplog.at_level("WARNING"):
-            resolve_configured_chunk_dim(Proc(), no_time, None, legacy_default="time")
+            resolve_configured_stream_dim(Proc(), no_time, None, legacy_default="time")
         assert not caplog.records
 
     def test_stages_still_follow_the_declaration_end_to_end(self, caplog):

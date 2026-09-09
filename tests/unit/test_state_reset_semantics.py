@@ -4,7 +4,7 @@ Most processors no longer implement ``_hash_message`` at all: the base class
 folds in the message key, the dims, the length of every dimension except the one
 the stream is chunked along, the coordinate values on those dimensions and the
 gain and offset of any linear axis among them. These tests pin the behaviour
-that fell out of removing those overrides, and the ``chunk_dim`` bookkeeping the
+that fell out of removing those overrides, and the ``stream_dim`` bookkeeping the
 default depends on.
 """
 
@@ -21,7 +21,7 @@ from ezmsg.sigproc.window import WindowSettings, WindowTransformer
 FS = 100.0
 
 
-def _msg(data, labels, fs=FS, key="dev", chunk_dim="time"):
+def _msg(data, labels, fs=FS, key="dev", stream_dim="time"):
     return AxisArray(
         data,
         dims=["time", "ch"],
@@ -30,7 +30,7 @@ def _msg(data, labels, fs=FS, key="dev", chunk_dim="time"):
             "ch": CoordinateAxis(data=np.array(labels), dims=["ch"]),
         },
         key=key,
-        chunk_dim=chunk_dim,
+        stream_dim=stream_dim,
     )
 
 
@@ -79,7 +79,7 @@ class TestPerChannelStateFollowsTheChannels:
         assert out.data.shape[1] == 3
 
 
-class TestChunkDimBookkeeping:
+class TestStreamDimBookkeeping:
     """Every operation that renames, consumes or invents the chunked dimension
     has to say so, or the base class excludes the wrong one."""
 
@@ -93,51 +93,51 @@ class TestChunkDimBookkeeping:
         proc = WindowTransformer(WindowSettings(axis="time", newaxis="win", window_dur=0.2, window_shift=0.1))
         out = proc(self._stream())
         assert out.dims[:2] == ["win", "time"]
-        assert out.chunk_dim == "win"
+        assert out.stream_dim == "win"
 
-    def test_batcher_mode_keeps_the_incoming_chunk_dim(self):
+    def test_batcher_mode_keeps_the_incoming_stream_dim(self):
         """Batcher mode adds no axis: windows tile the target axis."""
         proc = WindowTransformer(
             WindowSettings(axis="time", newaxis=None, window_dur=0.2, window_shift=0.2, batch_windows=True)
         )
         out = proc(self._stream())
         assert "win" not in out.dims
-        assert out.chunk_dim == "time"
+        assert out.stream_dim == "time"
 
     def test_spectrum_clears_it_when_it_consumes_it(self):
         """`time` becomes `freq`: each output is one spectrum, nothing appends."""
         out = SpectrumTransformer(SpectrumSettings(axis="time"))(self._stream())
         assert "time" not in out.dims
-        assert out.chunk_dim is None
+        assert out.stream_dim is None
 
-    def test_spectrum_keeps_a_windowed_chunk_dim(self):
+    def test_spectrum_keeps_a_windowed_stream_dim(self):
         """Windowed input still appends along `win` after the transform."""
         win = WindowTransformer(WindowSettings(axis="time", newaxis="win", window_dur=0.2, window_shift=0.1))(
             self._stream()
         )
         out = SpectrumTransformer(SpectrumSettings(axis="time"))(win)
-        assert out.chunk_dim == "win"
+        assert out.stream_dim == "win"
         assert "win" in out.dims
 
     def test_aggregate_clears_it_when_reducing_it(self):
         out = AggregateTransformer(AggregateSettings(axis="time", operation=AggregationFunction.MEAN))(self._stream())
         assert "time" not in out.dims
-        assert out.chunk_dim is None
+        assert out.stream_dim is None
 
     def test_flatten_follows_a_renamed_preserve_axis(self):
         proc = FlattenTransformer(
             FlattenSettings(preserve_axis="time", sample_axis="sample", flatten_axes=("ch",), output_axis="ch")
         )
         out = proc(self._stream())
-        assert out.chunk_dim == "sample"
+        assert out.stream_dim == "sample"
 
     @pytest.mark.parametrize("declared", ["time", None])
     def test_a_declaration_is_optional(self, declared):
         """Undeclared messages still work -- the base class falls back."""
         rng = np.random.default_rng(4)
-        msg = _msg(rng.standard_normal((32, 2)), ["a", "b"], chunk_dim=declared)
+        msg = _msg(rng.standard_normal((32, 2)), ["a", "b"], stream_dim=declared)
         out = ButterworthFilterTransformer(ButterworthFilterSettings(axis="time", order=2, cuton=1.0, cutoff=20.0))(msg)
-        assert out.chunk_dim == declared
+        assert out.stream_dim == declared
 
 
 class TestOverridesThatRemain:
@@ -157,7 +157,7 @@ class TestOverridesThatRemain:
         assert proc._hash != before
 
     def test_spectrum_reacts_to_a_transform_length_change(self):
-        """The FFT is sized by the chunk dimension -- the one length the default
+        """The FFT is sized by the stream dimension -- the one length the default
         ignores -- so Spectrum has to fold it back in."""
         proc = SpectrumTransformer(SpectrumSettings(axis="time"))
         rng = np.random.default_rng(6)

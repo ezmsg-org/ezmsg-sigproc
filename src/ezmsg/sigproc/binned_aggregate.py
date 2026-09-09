@@ -46,7 +46,7 @@ from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
     processor_state,
-    resolve_configured_chunk_dim,
+    resolve_configured_stream_dim,
 )
 from ezmsg.util.messages.axisarray import (
     AxisArray,
@@ -67,7 +67,7 @@ class BinnedAggregateSettings(ez.Settings):
     axis: str | None = None
     """.. deprecated:: 3.8
         Scheduled for removal in 4.0. The dimension messages accumulate along
-        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.chunk_dim`;
+        now comes from :attr:`~ezmsg.util.messages.axisarray.AxisArray.stream_dim`;
         see :mod:`ezmsg.sigproc.util.deprecation`."""
 
     def __post_init__(self) -> None:
@@ -122,7 +122,7 @@ class BinnedAggregateSettings(ez.Settings):
 @processor_state
 class BinnedAggregateState:
     axis: str = ""
-    """The resolved chunk dimension, fixed at reset so every later use agrees."""
+    """The resolved stream dimension, fixed at reset so every later use agrees."""
 
     schedule: BinSchedule | None = None
     """Shared bin-boundary schedule (see :obj:`ezmsg.sigproc.util.binning`). Owns
@@ -178,7 +178,7 @@ class BinnedAggregateTransformer(
         return await super().__acall__(message)
 
     def _reset_state(self, message: AxisArray) -> None:
-        self._state.axis = resolve_configured_chunk_dim(self, message, self.settings.axis, legacy_default="time")
+        self._state.axis = resolve_configured_stream_dim(self, message, self.settings.axis, legacy_default="time")
         axis_info = message.get_axis(self._state.axis)
         schedule = BinSchedule(
             bin_duration=self.settings.bin_duration,
