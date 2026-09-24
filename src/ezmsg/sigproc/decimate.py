@@ -1,5 +1,6 @@
 """Decimation (downsample with anti-alias filtering)."""
 
+import math
 import typing
 
 import ezmsg.core as ez
@@ -24,7 +25,9 @@ class ChebyForDecimateTransformer(ChebyshevFilterTransformer[BACoeffs | SOSCoeff
         def cheby_opt_design_fun(fs: float) -> BACoeffs | SOSCoeffs | None:
             if fs is None:
                 return None
-            ds_factor = int(fs / (2.5 * self.settings.Wn))
+            if self.settings.Wn is None:
+                return None
+            ds_factor = int(fs / (2.5 * self.settings.Wn)) if self.settings.wn_hz else round(0.8 / self.settings.Wn)
             if ds_factor < 2:
                 return None
             partial_fun = super(ChebyForDecimateTransformer, self).get_design_function()
@@ -73,16 +76,25 @@ class Decimate(ez.Collection):
     DOWNSAMPLE = Downsample()
 
     def configure(self) -> None:
+        factor = self.SETTINGS.factor
+        target_rate = self.SETTINGS.target_rate
+        if factor is not None:
+            if isinstance(factor, bool) or not isinstance(factor, int) or factor < 1:
+                raise ValueError("Decimate factor must be a positive integer")
+        elif target_rate is None or not math.isfinite(target_rate) or target_rate <= 0:
+            raise ValueError("Decimate requires a positive target_rate or a positive integer factor")
         # Already warned about on DecimateSettings, whose `axis` exists only to
         # reach this filter.
         with suppress_axis_deprecation():
             cheby_settings = ChebyshevFilterSettings(
                 order=8,
                 ripple_tol=0.05,
-                Wn=0.4 * self.SETTINGS.target_rate,
+                # Normalized cutoff is relative to Nyquist. A factor of q
+                # therefore uses 0.8/q, equivalent to 0.4 * fs/q Hz.
+                Wn=0.8 / factor if factor is not None else 0.4 * target_rate,
                 btype="lowpass",
                 axis=self.SETTINGS.axis,
-                wn_hz=True,
+                wn_hz=factor is None,
             )
         self.FILTER.apply_settings(cheby_settings)
         # `axis` is the filter's, not the downsampler's -- pass only what
