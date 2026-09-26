@@ -14,6 +14,29 @@ Signal processing primitives for the [ezmsg](https://www.ezmsg.org) message-pass
 
 All modules use [`AxisArray`](https://www.ezmsg.org/ezmsg/reference/API/axisarray.html) as the primary data structure for passing signals between components. The default data backend is NumPy, but other backends are supported via the Array API such as CuPy and MLX.
 
+## Component discovery
+
+This package registers its Units and Collections in the `ezmsg.components`
+entry-point group. Names are qualified by extension (for example,
+`sigproc.ButterworthFilter`); values point directly to the defining class.
+Generic base classes and processor-only implementations are not registered.
+
+```python
+from importlib.metadata import entry_points
+
+components = {ep.name: ep for ep in entry_points(group="ezmsg.components")}
+component_type = components["sigproc.ButterworthFilter"].load()
+```
+
+Enumerating entry points reads installed package metadata without importing
+component modules. Calling `.load()` imports the selected component and may
+raise if a runtime dependency is unavailable; it does not instantiate the Unit.
+Consumers should retain unavailable entries and report their load errors.
+Use the execution environment's Python interpreter to discover its components.
+
+When adding a public component, add its entry point in `pyproject.toml` and
+reinstall the package (including editable installs) to refresh the metadata.
+
 ## Installation
 
 Install from PyPI:
