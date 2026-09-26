@@ -12,8 +12,8 @@ from tests.helpers.synth import EEGSynth
 from tests.helpers.util import get_test_fn
 
 
-@pytest.mark.parametrize("target_rate", [100.0, 500.0])
-def test_decimate_system(target_rate: float):
+@pytest.mark.parametrize("target_rate,factor", [(100.0, None), (500.0, None), (None, 2)])
+def test_decimate_system(target_rate: float | None, factor: int | None):
     test_filename = get_test_fn()
     test_filename_raw = test_filename.parent / (test_filename.stem + "raw" + test_filename.suffix)
 
@@ -24,7 +24,7 @@ def test_decimate_system(target_rate: float):
 
     comps = {
         "SRC": EEGSynth(n_time=n_time, fs=fs, n_ch=n_ch, alpha_freq=10.5),
-        "DECIMATE": Decimate(axis="time", target_rate=target_rate),
+        "DECIMATE": Decimate(axis="time", target_rate=target_rate, factor=factor),
         "LOGRAW": MessageLogger(output=test_filename_raw),
         "LOGFILT": MessageLogger(output=test_filename),
         "TERM": TerminateOnTotal(n_total),
@@ -44,7 +44,7 @@ def test_decimate_system(target_rate: float):
     inputs = AxisArray.concatenate(*inputs, dim="time")
     outputs = AxisArray.concatenate(*messages, dim="time")
 
-    expected_factor: int = int(fs // target_rate)
+    expected_factor: int = factor if factor is not None else int(fs // target_rate)
     if expected_factor == 1:
         expected = inputs.data
     else:
