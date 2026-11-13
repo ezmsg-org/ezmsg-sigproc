@@ -170,6 +170,9 @@ class ResampleState:
     :attr:`ResampleSettings.reference_reset_after_chunks`.
     """
 
+    ref_segment: int | None = None
+    """The ``segment`` of the last reference message; a change drops the reference buffered before it."""
+
 
 class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisArray, ResampleState]):
     # Both fields are read per-chunk inside `__next__` / `_process` only;
@@ -211,6 +214,8 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
             out_gain = 1 / self.settings.resample_rate
             t0 = in_ax.data[0] if hasattr(in_ax, "data") else in_ax.value(0)
             self.state.last_ref_ax_val = t0 - out_gain
+            # Initialised now, so `__next__` has an axis to show even if this message brought no samples.
+            self.state.ref_axis_buffer.write(LinearAxis(unit="s", gain=out_gain, offset=t0), n_samples=0)
         self.state.last_write_time = -np.inf
         self.state.reference_output = None
         self.state.stale_ref_pushes = 0
@@ -236,6 +241,11 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
         ax = message.axes[axis]
         ax_idx = message.get_axis_idx(axis)
         n = message.data.shape[ax_idx]
+        if self.state.ref_segment is not None and message.segment != self.state.ref_segment:
+            # The reference clock broke: rebuild its buffers below rather than splice across the break.
+            self.state.ref_axis_buffer = None
+            self.state.ref_data_buffer = None
+        self.state.ref_segment = message.segment
         if self.state.ref_axis_buffer is None:
             self.state.ref_axis_buffer = HybridAxisBuffer(
                 duration=self.settings.buffer_duration,

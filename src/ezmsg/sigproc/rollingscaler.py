@@ -149,6 +149,10 @@ class RollingScalerProcessor(BaseAdaptiveTransformer[RollingScalerSettings, Axis
             ez.logger.warning("min_samples is greater than k_samples; adjusting min_samples to k_samples.")
             self._state.min_samples = self._state.k_samples
 
+    def _reset_segment(self, message: AxisArray) -> None:
+        # All state is the rolling statistics, counted in samples; a gap in time does not date them.
+        pass
+
     def _add_batch_stats(self, x: npt.NDArray) -> None:
         xp = get_namespace(x)
         x = xp.asarray(x, dtype=xp.float64)

@@ -328,7 +328,8 @@ class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArra
 
             # Note: I tried several alternatives to this loop; all were slower than this.
             #  numba.jit; stride_tricks + np.einsum; threading. Latter might be better with Python 3.13.
-            for k_ix, k in enumerate(self._state.prep_kerns):
+            # np.convolve rejects an empty input; with no samples the tail just carries over.
+            for k_ix, k in enumerate(self._state.prep_kerns if in_dat.shape[-1] else []):
                 n_out = in_dat.shape[-1] + k.shape[-1] - 1
                 self._state.dest_arr[..., k_ix, :n_out] = np.apply_along_axis(np.convolve, -1, in_dat, k, mode="full")
             self._state.dest_arr[..., : self._state.overlap] += self._state.tail
@@ -390,6 +391,7 @@ class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArra
             data=res,
             axes={**self._state.template.axes, axis: out_ax},
             attrs=message.attrs,
+            segment=message.segment,
         )
 
 

@@ -155,6 +155,11 @@ class AdaptiveStandardScalerTransformer(
         # each rebuild the part of its state that actually went stale.
         return 0
 
+    def _reset_segment(self, message: AxisArray) -> None:
+        # The child EWMAs see the new segment themselves and keep their statistics; see `reset_on_resume`.
+        if self.settings.reset_on_resume:
+            self._reset_state(message)
+
     def _reset_state(self, message: AxisArray) -> None:
         # One user-visible setting, already warned about when this transformer's
         # own settings were built. Forwarding it must not warn again -- and this

@@ -169,3 +169,26 @@ def test_rolling_scaler_empty_first():
     result = proc(empty)
     check_empty_result(result)
     check_state_not_corrupted(proc, normal)
+
+
+def test_statistics_survive_a_new_segment():
+    """A gap in the stream (a new ``segment``) must not discard statistics trained with partial_fit."""
+    rng = np.random.default_rng(0)
+    proc = RollingScalerProcessor(settings=RollingScalerSettings(k_samples=20))
+
+    def msg(offset, segment):
+        return AxisArray(
+            rng.standard_normal((50, 3)) * 5.0 + 20.0,
+            dims=["time", "ch"],
+            axes={"time": AxisArray.TimeAxis(fs=100.0, offset=offset)},
+            stream_dim="time",
+            segment=segment,
+        )
+
+    proc(msg(0.0, 0))
+    for i in range(5):
+        proc.partial_fit(msg(i * 0.5, 0))
+    n, mean = proc.state.N, proc.state.mean.copy()
+    out = proc(msg(100.0, 1))
+    assert proc.state.N == n and np.array_equal(proc.state.mean, mean)
+    assert np.abs(out.data).mean() < 3.0  # z-scored against the trained statistics, not passed through raw
