@@ -57,7 +57,8 @@ class FilterbankDesignSettings(ez.Settings):
         warn_axis_deprecated(self)
 
     new_axis: str = "kernel"
-    """The name of the new axis corresponding to the kernel index."""
+    """The name of the new axis corresponding to the kernel index. It carries a coordinate axis of
+      ``(lo, hi)`` pass-band edges in Hz; see :attr:`FilterbankSettings.bands`."""
 
 
 @processor_state
@@ -121,6 +122,23 @@ class FilterbankDesignTransformer(
             kernels.append(np.array([1.0]) if output is None else output[0])
         return kernels
 
+    def _bands(self, fs: float) -> list[tuple[float, float]]:
+        """Pass-band edges in Hz per filter; (nan, nan) for band-stop and multi-band filters."""
+        nyq = fs / 2
+        bands = []
+        for filter in self.settings.filters:
+            edges = [] if filter.cutoff is None else np.atleast_1d(filter.cutoff) * (1.0 if filter.wn_hz else nyq)
+            pass_zero = filter.pass_zero in (True, "lowpass", "bandstop")
+            if len(edges) == 0:
+                bands.append((0.0, nyq))
+            elif len(edges) == 1:
+                bands.append((0.0, float(edges[0])) if pass_zero else (float(edges[0]), nyq))
+            elif len(edges) == 2 and not pass_zero:
+                bands.append((float(edges[0]), float(edges[1])))
+            else:
+                bands.append((np.nan, np.nan))
+        return bands
+
     def __call__(self, message: AxisArray) -> AxisArray:
         if self.state.filterbank is not None and self.state.needs_redesign:
             self._reset_state(message)
@@ -154,6 +172,7 @@ class FilterbankDesignTransformer(
                 compensate_delay=self.settings.compensate_delay,
                 axis=self.state.axis,
                 new_axis=self.settings.new_axis,
+                bands=self._bands(fs),
             )
             self.state.filterbank = FilterbankTransformer(settings=new_settings)
 

@@ -23,6 +23,7 @@ from scipy.special import lambertw
 
 from .spectrum import OptionsEnum
 from .util.deprecation import warn_axis_deprecated
+from .util.message import with_fingerprint
 from .util.minphase import MinPhaseMode, is_linear_phase, kernel_delay, min_phase_kernel
 from .window import WindowTransformer
 
@@ -78,6 +79,13 @@ class FilterbankSettings(ez.Settings):
 
     new_axis: str = "kernel"
     """The name of the new axis corresponding to the kernel index."""
+
+    bands: list[tuple[float, float]] | None = None
+    """
+    Optional ``(lo, hi)`` pass-band edges in Hz, one per kernel. If given, the output carries a
+      :obj:`~ezmsg.util.messages.axisarray.AxisArray.CoordinateAxis` on ``new_axis`` whose data is
+      a structured array with fields ``lo`` and ``hi``. Purely descriptive; the kernels are not checked.
+    """
 
 
 @processor_state
@@ -136,6 +144,16 @@ class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArra
             axes={k: deepcopy(v) for k, v in message.axes.items()},
             key=message.key,
         )
+        if self.settings.bands is not None:
+            if len(self.settings.bands) != len(kernels):
+                raise ValueError(f"bands has {len(self.settings.bands)} entries for {len(kernels)} kernels.")
+            self._state.template.axes[self.settings.new_axis] = with_fingerprint(
+                AxisArray.CoordinateAxis(
+                    data=np.array([tuple(b) for b in self.settings.bands], dtype=[("lo", float), ("hi", float)]),
+                    dims=[self.settings.new_axis],
+                    unit="Hz",
+                )
+            )
 
         # Determine optimal mode. Assumes 100 msec chunks.
         self._state.mode = self.settings.mode

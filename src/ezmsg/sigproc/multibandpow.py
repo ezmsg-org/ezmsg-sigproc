@@ -33,7 +33,6 @@ from .math.abs import AbsTransformer
 from .math.log import LogSettings, LogTransformer
 from .math.pow import PowSettings, PowTransformer
 from .spectrum import OptionsEnum
-from .util.message import with_fingerprint
 from .util.minphase import MinPhaseMode
 
 
@@ -127,7 +126,6 @@ def design_analytic_kernels(settings: MultiBandEnvelopePowerSettings, fs: float)
 class AnalyticFilterbankState:
     axis: str = ""
     filterbank: FilterbankTransformer | None = None
-    band_axis: AxisArray.CoordinateAxis | None = None
 
 
 class AnalyticFilterbankTransformer(
@@ -155,15 +153,9 @@ class AnalyticFilterbankTransformer(
                     compensate_delay=True,
                     axis=self._state.axis,
                     new_axis="band",
+                    bands=[tuple(b) for b in self.settings.bands],
                 )
             )
-        self._state.band_axis = with_fingerprint(
-            AxisArray.CoordinateAxis(
-                data=np.array([tuple(b) for b in self.settings.bands], dtype=[("lo", float), ("hi", float)]),
-                dims=["band"],
-                unit="Hz",
-            )
-        )
 
     def _process(self, message: AxisArray) -> AxisArray:
         out = self._state.filterbank(message)  # dims: (*other, band, axis)
@@ -171,7 +163,6 @@ class AnalyticFilterbankTransformer(
             out,
             data=np.moveaxis(out.data, -1, message.get_axis_idx(self._state.axis)),
             dims=list(message.dims) + ["band"],
-            axes={**out.axes, "band": self._state.band_axis},
             stream_dim=self._state.axis,
         )
 
