@@ -24,6 +24,7 @@ from scipy.special import lambertw
 from .spectrum import OptionsEnum
 from .util.deprecation import warn_axis_deprecated
 from .util.minphase import MinPhaseMode, is_linear_phase, kernel_delay, min_phase_kernel
+from .util.startup import StartupMode, hold_for_startup, prime_with_constant, prime_with_reflection, startup_n_pad
 from .window import WindowTransformer
 
 
@@ -67,6 +68,21 @@ class FilterbankSettings(ez.Settings):
       response.
     """
 
+    startup: StartupMode = StartupMode.ZERO
+    """
+    What the filterbank assumes before the first sample. ZERO (default) is a zero pre-history, so
+      the start of a stream matches an offline convolution. CONSTANT primes the overlap-add tail
+      with the first sample's value held for ``max kernel length - 1`` samples, which removes the
+      step transient of a DC offset. FIRST_CHUNK and BUFFERED prime it from an odd reflection of
+      the first samples instead; see :attr:`ezmsg.sigproc.filter.FilterBaseSettings.startup`,
+      including why that suits low-pass kernels and not band-pass ones.
+      CONV mode only: in FFT mode (including AUTO resolving to FFT) a non-default value raises
+      ``ValueError``.
+    """
+
+    startup_max_dur: float | None = 1.0
+    """Upper limit, in seconds, on the start-up pad; None for no limit."""
+
     axis: str | None = None
     """.. deprecated:: 3.8
         Scheduled for removal in 4.0. The dimension messages accumulate along
@@ -95,6 +111,9 @@ class FilterbankState:
     mode: FilterbankMode | None = None
     delay: float = 0.0
     """Common delay (samples) subtracted from the output offset when ``compensate_delay``."""
+    startup_pending: bool = False
+    startup_held: list | None = None
+    startup_n_pad: int = 0
 
 
 class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArray, AxisArray, FilterbankState]):
@@ -150,6 +169,16 @@ class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArra
                 if sps.choose_conv_method(dummy_arr, concat_kernel, mode="full") == "direct"
                 else FilterbankMode.FFT
             )
+        if self.settings.startup != StartupMode.ZERO and self._state.mode == FilterbankMode.FFT:
+            raise ValueError(
+                f"startup={self.settings.startup} is not supported in FFT mode (resolved from "
+                f"mode={self.settings.mode}). Use mode=CONV or startup=StartupMode.ZERO."
+            )
+        self._state.startup_held = []
+        self._state.startup_pending = self.settings.startup != StartupMode.ZERO
+        if self._state.startup_pending:
+            # The tail is fully determined by the last `overlap` inputs.
+            self._state.startup_n_pad = startup_n_pad(self._state.overlap, message, axis, self.settings.startup_max_dur)
         if self._state.mode == FilterbankMode.CONV:
             # Preallocate memory for convolution result and overlap-add
             dest_shape = in_shape + (
@@ -241,6 +270,15 @@ class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArra
 
     def _process(self, message: AxisArray) -> AxisArray:
         axis = resolve_configured_stream_dim(self, message, self.settings.axis)
+        if self._state.startup_pending and message.data.size > 0:
+            if self.settings.startup == StartupMode.BUFFERED:
+                released = hold_for_startup(self._state.startup_held, message, axis, self._state.startup_n_pad + 1)
+                if released is None:
+                    return self._output(self._state.template.data, message, axis)
+                message = released
+            self._state.startup_pending = False
+            prime = prime_with_constant if self.settings.startup == StartupMode.CONSTANT else prime_with_reflection
+            prime(self._process, message, axis, self._state.startup_n_pad)
         targ_ax_ix = message.get_axis_idx(axis)
 
         # Make sure target axis is in -1th position.
@@ -297,10 +335,14 @@ class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArra
             # Concat over win axis, without overlap.
             res = overlapped[..., : -self._state.overlap].reshape(overlapped.shape[:-2] + (-1,))
 
+        # FFT output starts at the first buffered window, not at this message.
+        offset = win_msg.axes["win"].offset if self._state.mode == FilterbankMode.FFT else None
+        return self._output(res, message, axis, offset)
+
+    def _output(self, res: npt.NDArray, message: AxisArray, axis: str, offset: float | None = None) -> AxisArray:
         out_ax = message.axes[axis]
-        if self._state.mode == FilterbankMode.FFT:
-            # Output starts at the first buffered window, not at this message.
-            out_ax = replace(out_ax, offset=win_msg.axes["win"].offset)
+        if offset is not None:
+            out_ax = replace(out_ax, offset=offset)
         if self.settings.compensate_delay and self._state.delay:
             out_ax = replace(out_ax, offset=out_ax.offset - self._state.delay * out_ax.gain)
         return replace(

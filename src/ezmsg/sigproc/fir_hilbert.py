@@ -6,8 +6,13 @@ import typing
 import ezmsg.core as ez
 import numpy as np
 import scipy.signal as sps
-from ezmsg.baseproc import BaseStatefulTransformer, processor_state, resolve_configured_stream_dim
-from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.baseproc import (
+    BaseStatefulTransformer,
+    processor_state,
+    resolve_configured_stream_dim,
+    suppress_axis_deprecation,
+)
+from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
 from ezmsg.util.messages.util import replace
 
 from ezmsg.sigproc.filter import (
@@ -18,6 +23,7 @@ from ezmsg.sigproc.filter import (
     FilterByDesignTransformer,
 )
 from ezmsg.sigproc.util.minphase import MinPhaseMode
+from ezmsg.sigproc.util.startup import StartupMode, hold_for_startup, prime_with_reflection, startup_n_pad
 
 
 class FIRHilbertFilterSettings(FilterBaseSettings):
@@ -204,6 +210,8 @@ class FIRHilbertEnvelopeState:
     filter: FIRHilbertFilterTransformer | None = None
     delay_buf: np.ndarray | None = None
     dly: int | None = None
+    startup_pending: bool = False
+    startup_held: list | None = None
 
 
 class FIRHilbertEnvelopeTransformer(
@@ -262,11 +270,35 @@ class FIRHilbertEnvelopeTransformer(
     """
 
     def _reset_state(self, message: AxisArray) -> None:
-        self._state.filter = FIRHilbertFilterTransformer(settings=self.settings)
+        # Start-up priming is done here, over the whole envelope, so the inner filter must not also do it.
+        with suppress_axis_deprecation():
+            inner_settings = replace(self.settings, startup=StartupMode.CONSTANT)
+        self._state.filter = FIRHilbertFilterTransformer(settings=inner_settings)
         self._state.delay_buf = None
         self._state.dly = None
+        self._state.startup_held = []
+        self._state.startup_pending = self.settings.startup != StartupMode.CONSTANT
 
     def _process(self, message: AxisArray) -> AxisArray:
+        if self._state.startup_pending:
+            # Prime the Hilbert FIR and the real part's delay buffer from the same reflected samples.
+            axis = resolve_configured_stream_dim(self, message, self.settings.axis)
+            axis_idx = message.get_axis_idx(axis)
+            # A zero-length pass designs the inner filter and stamps the time axis like real output.
+            empty = self._state.filter(replace(message, data=slice_along_axis(message.data, slice(0, 0), axis_idx)))
+            empty = replace(empty, data=empty.data.astype(np.float32))
+            if message.data.size == 0:
+                return empty
+            n_pad = startup_n_pad(self._state.filter.get_taps() - 1, message, axis, self.settings.startup_max_dur)
+            if self.settings.startup == StartupMode.BUFFERED:
+                message = hold_for_startup(self._state.startup_held, message, axis, n_pad + 1)
+                if message is None:
+                    return empty
+            self._state.startup_pending = False
+            prime_with_reflection(self._envelope, message, axis, n_pad)
+        return self._envelope(message)
+
+    def _envelope(self, message: AxisArray) -> AxisArray:
         y_imag_msg = self._state.filter(message)
         y_imag = y_imag_msg.data
 
@@ -287,6 +319,9 @@ class FIRHilbertEnvelopeTransformer(
         if self._state.delay_buf is None:
             lead_shape = x.shape[:-1]
             self._state.delay_buf = np.zeros(lead_shape + (self._state.dly,), dtype=x.dtype)
+            if self.settings.startup != StartupMode.CONSTANT:
+                # Assume the constant pre-history the inner FIR starts from, so the two stay aligned.
+                self._state.delay_buf += x[..., :1]
 
         x_cat = np.concatenate([self._state.delay_buf, x], axis=-1)
         x_delayed_full = x_cat[..., : -self._state.dly]
