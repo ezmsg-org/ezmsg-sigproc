@@ -23,6 +23,7 @@ from scipy.special import lambertw
 
 from .spectrum import OptionsEnum
 from .util.deprecation import warn_axis_deprecated
+from .util.message import with_fingerprint
 from .util.minphase import MinPhaseMode, is_linear_phase, kernel_delay, min_phase_kernel
 from .util.startup import StartupMode, hold_for_startup, prime_with_reflection, startup_n_pad
 from .window import WindowTransformer
@@ -97,6 +98,13 @@ class FilterbankSettings(ez.Settings):
     new_axis: str = "kernel"
     """The name of the new axis corresponding to the kernel index."""
 
+    bands: list[tuple[float, float]] | None = None
+    """
+    Optional ``(lo, hi)`` pass-band edges in Hz, one per kernel. If given, the output carries a
+      :obj:`~ezmsg.util.messages.axisarray.AxisArray.CoordinateAxis` on ``new_axis`` whose data is
+      a structured array with fields ``lo`` and ``hi``. Purely descriptive; the kernels are not checked.
+    """
+
 
 @processor_state
 class FilterbankState:
@@ -158,6 +166,16 @@ class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArra
             axes={k: deepcopy(v) for k, v in message.axes.items()},
             key=message.key,
         )
+        if self.settings.bands is not None:
+            if len(self.settings.bands) != len(kernels):
+                raise ValueError(f"bands has {len(self.settings.bands)} entries for {len(kernels)} kernels.")
+            self._state.template.axes[self.settings.new_axis] = with_fingerprint(
+                AxisArray.CoordinateAxis(
+                    data=np.array([tuple(b) for b in self.settings.bands], dtype=[("lo", float), ("hi", float)]),
+                    dims=[self.settings.new_axis],
+                    unit="Hz",
+                )
+            )
 
         # Determine optimal mode. Assumes 100 msec chunks.
         self._state.mode = self.settings.mode
@@ -286,11 +304,9 @@ class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArra
                 message = released
             self._state.startup_pending = False
             if self.settings.startup == StartupMode.CONSTANT:
-                x0 = np.moveaxis(message.data, message.get_axis_idx(axis), -1)[..., :1, None]
-                tail = x0 * self._state.const_tail  # (*in_shape, kernel, overlap)
-                self._state.tail = tail[..., None, :] if self._state.mode == FilterbankMode.FFT else tail
+                self._seed_constant(message)
             else:
-                prime_with_reflection(self._process, message, axis, self._state.startup_n_pad)
+                prime_with_reflection(self._prime, message, axis, self._state.startup_n_pad)
         targ_ax_ix = message.get_axis_idx(axis)
 
         # Make sure target axis is in -1th position.
@@ -350,6 +366,18 @@ class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArra
         # FFT output starts at the first buffered window, not at this message.
         offset = win_msg.axes["win"].offset if self._state.mode == FilterbankMode.FFT else None
         return self._output(res, message, axis, offset)
+
+    def _seed_constant(self, message: AxisArray) -> None:
+        """Set the overlap-add tail as if ``message``'s first sample had been held before it."""
+        axis = resolve_configured_stream_dim(self, message, self.settings.axis)
+        x0 = np.moveaxis(message.data, message.get_axis_idx(axis), -1)[..., :1, None]
+        tail = x0 * self._state.const_tail  # (*in_shape, kernel, overlap)
+        self._state.tail = tail[..., None, :] if self._state.mode == FilterbankMode.FFT else tail
+
+    def _prime(self, pad: AxisArray) -> None:
+        # A pad capped short of the kernels still starts from a constant, not from zeros.
+        self._seed_constant(pad)
+        self._process(pad)
 
     def _output(self, res: npt.NDArray, message: AxisArray, axis: str, offset: float | None = None) -> AxisArray:
         out_ax = message.axes[axis]

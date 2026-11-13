@@ -649,3 +649,24 @@ def test_filterbankdesign_ripple_width_variations():
 
         result = transformer(msg)
         assert result.data.shape == (1, n_times)
+
+
+def test_band_axis_describes_each_filter():
+    """The kernel axis carries (lo, hi) pass-band edges in Hz for every filter shape."""
+    fs = 200.0
+    filters = [
+        KaiserFilterSettings(cutoff=10.0, ripple=60.0, width=5.0, pass_zero=True),  # low-pass
+        KaiserFilterSettings(cutoff=30.0, ripple=60.0, width=5.0, pass_zero=False),  # high-pass
+        KaiserFilterSettings(cutoff=[8.0, 12.0], ripple=60.0, width=5.0, pass_zero="bandpass"),
+        KaiserFilterSettings(cutoff=[0.4, 0.6], ripple=60.0, width=0.05, pass_zero=False, wn_hz=False),
+        KaiserFilterSettings(cutoff=[48.0, 52.0], ripple=60.0, width=5.0, pass_zero="bandstop"),
+        KaiserFilterSettings(),  # all-pass
+    ]
+    proc = FilterbankDesignTransformer(FilterbankDesignSettings(filters=filters, new_axis="band"))
+    msg = AxisArray(np.zeros(400), dims=["time"], axes={"time": AxisArray.TimeAxis(fs=fs)})
+    out = proc(msg)
+    band_ax = out.axes["band"]
+    assert band_ax.dims == ["band"] and band_ax.unit == "Hz"
+    np.testing.assert_allclose(band_ax.data["lo"], [0.0, 30.0, 8.0, 40.0, np.nan, 0.0])
+    np.testing.assert_allclose(band_ax.data["hi"], [10.0, 100.0, 12.0, 60.0, np.nan, 100.0])
+    assert proc(msg).axes["band"] is band_ax  # built once at reset, shared across messages
