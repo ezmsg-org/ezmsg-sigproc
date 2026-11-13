@@ -22,7 +22,7 @@ from scipy.special import lambertw
 
 from .spectrum import OptionsEnum
 from .util.deprecation import warn_axis_deprecated
-from .util.minphase import MinPhaseMode, min_phase_kernel
+from .util.minphase import MinPhaseMode, is_linear_phase, kernel_delay, min_phase_kernel
 from .window import WindowTransformer
 
 
@@ -55,6 +55,18 @@ class FilterbankSettings(ez.Settings):
       the homomorphic modes only.
     """
 
+    compensate_delay: bool = False
+    """
+    If True, put every kernel on one time base and stamp the output with it: each kernel's
+      delay is measured with :func:`~ezmsg.sigproc.util.minphase.kernel_delay`, leading zeros
+      are prepended so all kernels share the largest delay (to within half a sample), and that
+      delay is subtracted from the stream axis offset. With ``min_phase=HOMOMORPHICFULL`` only the
+      kernels that would otherwise set the common delay are converted; the rest stay linear
+      phase. HILBERT and HOMOMORPHIC still convert every kernel, since they change the magnitude
+      response. Not supported in FFT mode (raises ``ValueError``), whose output timestamps do not
+      track its windowing.
+    """
+
     axis: str | None = None
     """.. deprecated:: 3.8
         Scheduled for removal in 4.0. The dimension messages accumulate along
@@ -81,6 +93,8 @@ class FilterbankState:
     infft: int | None = None
     overlap: int | None = None
     mode: FilterbankMode | None = None
+    delay: float = 0.0
+    """Common delay (samples) subtracted from the output offset when ``compensate_delay``."""
 
 
 class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArray, AxisArray, FilterbankState]):
@@ -99,8 +113,7 @@ class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArra
         targ_ax_ix = message.get_axis_idx(axis)
         in_shape = message.data.shape[:targ_ax_ix] + message.data.shape[targ_ax_ix + 1 :]
 
-        kernels = self.settings.kernels
-        kernels = [min_phase_kernel(k, self.settings.min_phase) for k in kernels]
+        kernels = self._prepare_kernels(gain)
 
         # Determine if this will be operating with complex data.
         b_complex = message.data.dtype.kind == "c" or any([_.dtype.kind == "c" for _ in kernels])
@@ -136,6 +149,11 @@ class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArra
                 FilterbankMode.CONV
                 if sps.choose_conv_method(dummy_arr, concat_kernel, mode="full") == "direct"
                 else FilterbankMode.FFT
+            )
+        if self.settings.compensate_delay and self._state.mode == FilterbankMode.FFT:
+            raise ValueError(
+                "compensate_delay=True is not supported in FFT mode: its output timestamps do not account "
+                "for the samples held in its window buffer. Use mode=CONV."
             )
 
         if self._state.mode == FilterbankMode.CONV:
@@ -184,6 +202,47 @@ class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArra
             self._state.prep_kerns = np.array([self._state.fft(_) for _ in kernels])
             self._state.prep_kerns = np.expand_dims(self._state.prep_kerns, -2)
             # TODO: If fft_kernels have significant stretches of zeros, convert to sparse array.
+
+    def _prepare_kernels(self, gain: float) -> list[npt.NDArray]:
+        """Apply ``min_phase`` and, with ``compensate_delay``, align the kernels on one delay. Logs the delays."""
+        mode = self.settings.min_phase
+        kernels = [np.asarray(k) for k in self.settings.kernels]
+        converted = [False] * len(kernels)
+        if self.settings.compensate_delay and mode == MinPhaseMode.HOMOMORPHICFULL:
+            # Convert only the bottleneck: while the slowest kernel is still linear phase, convert it.
+            delays = [kernel_delay(k) for k in kernels]
+            while not converted[k_ix := int(np.argmax(delays))]:
+                kernels[k_ix] = min_phase_kernel(kernels[k_ix], mode)
+                converted[k_ix] = True
+                delays[k_ix] = kernel_delay(kernels[k_ix])
+        elif mode != MinPhaseMode.NONE:
+            kernels = [min_phase_kernel(k, mode) for k in kernels]
+            converted = [True] * len(kernels)
+            delays = [kernel_delay(k) for k in kernels]
+        else:
+            delays = [kernel_delay(k) for k in kernels]
+
+        approx = "" if all(is_linear_phase(k) for k in kernels) else "approximate "
+        per_kernel = ", ".join(
+            f"{k_ix}: {d:.4g} ({d * gain * 1e3:.4g} ms{', min-phase' if c else ''})"
+            for k_ix, (d, c) in enumerate(zip(delays, converted))
+        )
+        msg = f"Filterbank {approx}kernel delays in samples: {per_kernel}."
+        self._state.delay = 0.0
+        if self.settings.compensate_delay:
+            d_max = max(delays)
+            pads = [round(d_max - d) for d in delays]
+            kernels = [np.concatenate([np.zeros(p, dtype=k.dtype), k]) for k, p in zip(kernels, pads)]
+            residual = max(abs(d_max - d - p) for d, p in zip(delays, pads))
+            self._state.delay = d_max
+            msg += (
+                f" Equalised to a common {approx}delay of {d_max:.4g} samples ({d_max * gain * 1e3:.4g} ms),"
+                f" worst residual misalignment {residual:.3g} samples; compensated on the time axis."
+            )
+        else:
+            msg += " Not compensated on the time axis."
+        ez.logger.info(msg)
+        return kernels
 
     def _process(self, message: AxisArray) -> AxisArray:
         axis = resolve_configured_stream_dim(self, message, self.settings.axis)
@@ -243,10 +302,13 @@ class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArra
             # Concat over win axis, without overlap.
             res = overlapped[..., : -self._state.overlap].reshape(overlapped.shape[:-2] + (-1,))
 
+        out_ax = message.axes[axis]
+        if self.settings.compensate_delay and self._state.delay:
+            out_ax = replace(out_ax, offset=out_ax.offset - self._state.delay * out_ax.gain)
         return replace(
             self._state.template,
             data=res,
-            axes={**self._state.template.axes, axis: message.axes[axis]},
+            axes={**self._state.template.axes, axis: out_ax},
         )
 
 

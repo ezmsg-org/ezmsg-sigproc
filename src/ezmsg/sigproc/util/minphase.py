@@ -74,3 +74,32 @@ def min_phase_kernel(h: npt.NDArray, mode: MinPhaseMode) -> npt.NDArray:
     if mode == MinPhaseMode.HILBERT:
         return sps.minimum_phase(h, method="hilbert")
     return sps.minimum_phase(h, method="homomorphic", half=mode == MinPhaseMode.HOMOMORPHIC)
+
+
+def is_linear_phase(h: npt.NDArray) -> bool:
+    """Whether a 1-D FIR kernel is (generalized) linear phase.
+
+    True for symmetric and antisymmetric real kernels and for conjugate-symmetric or
+    conjugate-antisymmetric complex ones, i.e. ``h == ±conj(h[::-1])``.
+    """
+    h = np.asarray(h)
+    h_rev = np.conj(h[::-1])
+    atol = 1e-9 * float(np.max(np.abs(h), initial=0.0))
+    return bool(np.allclose(h, h_rev, rtol=0, atol=atol) or np.allclose(h, -h_rev, rtol=0, atol=atol))
+
+
+def kernel_delay(h: npt.NDArray) -> float:
+    """Delay of a 1-D FIR kernel, in samples.
+
+    Exactly ``(len(h) - 1) / 2`` for a linear-phase kernel (see :func:`is_linear_phase`).
+    Otherwise the group delay at the frequency where ``|H|`` peaks -- the envelope delay at
+    band centre, which is an approximation because the delay varies with frequency.
+    """
+    h = np.asarray(h)
+    if is_linear_phase(h):
+        return (h.shape[0] - 1) / 2
+    whole = np.iscomplexobj(h)  # a complex kernel's response is not mirrored about DC
+    n_freqs = max(1024, 8 * h.shape[0])
+    w, resp = sps.freqz(h, worN=n_freqs, whole=whole)
+    _, gd = sps.group_delay((h, 1), w=[w[np.argmax(np.abs(resp))]], whole=whole)
+    return float(gd[0])
