@@ -32,6 +32,7 @@ from .filter import (
     _sosfilt_mlx_metal_xp,
 )
 from .util.array import xp_asarray, xp_copy, xp_empty, xp_flip
+from .util.startup import StartupMode
 
 if _HAS_MLX_METAL:
     import mlx.core as _mx
@@ -109,6 +110,14 @@ class ButterworthBackwardFilterTransformer(FilterByDesignTransformer[Butterworth
             coef_type=self.settings.coef_type,
             wn_hz=self.settings.wn_hz,
         )
+
+    def _design_coefs(self, fs: float) -> BACoeffs | SOSCoeffs | None:
+        if self.settings.startup != StartupMode.CONSTANT:
+            raise ValueError(
+                f"startup={self.settings.startup} is not supported by the zero-phase Butterworth filter, "
+                "which already pads its backward pass; use startup=StartupMode.CONSTANT."
+            )
+        return super()._design_coefs(fs)
 
     def _compute_pad_length(self, fs: float) -> int:
         """
