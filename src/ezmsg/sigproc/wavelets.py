@@ -162,6 +162,7 @@ class CWTTransformer(BaseStatefulTransformer[CWTSettings, AxisArray, AxisArray, 
                 **self._state.template.axes,
                 self._state.axis: message.axes[self._state.axis],
             },
+            attrs=message.attrs,
         )
 
 

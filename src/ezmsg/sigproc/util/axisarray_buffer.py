@@ -350,6 +350,8 @@ class HybridAxisArrayBuffer:
 
         self._data_buffer.write(msg.data)
         self._axis_buffer.write(msg.axes[self._axis], msg.data.shape[self._sample_axis])
+        # attrs are not part of the layout, so output carries the latest rather than the first.
+        self._attrs = msg.attrs
 
     def peek(self, n_samples: int | None = None) -> AxisArray | None:
         """Retrieves the oldest unread data as a new AxisArray without advancing the read head."""
@@ -368,6 +370,7 @@ class HybridAxisArrayBuffer:
             self._template_msg,
             data=data_array,
             axes={**self._template_msg.axes, self._axis: out_axis},
+            attrs=self._attrs,
         )
 
     def peek_axis(self, n_samples: int | None = None) -> LinearAxis | CoordinateAxis | None:
