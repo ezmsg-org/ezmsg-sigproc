@@ -71,7 +71,7 @@ from ezmsg.baseproc import (
     processor_state,
     resolve_configured_stream_dim,
 )
-from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.axisarray import AxisArray, slice_along_axis
 from ezmsg.util.messages.util import replace
 
 from .util.deprecation import warn_axis_deprecated
@@ -124,6 +124,26 @@ class CancelMethod(str, enum.Enum):
     """Emit the input unchanged -- no cancellation and no frequency tracking."""
 
 
+class WarmStart(str, enum.Enum):
+    """How :class:`AdaptiveLNCTransformer` initialises its canceller at reset."""
+
+    OFF = "off"
+    """Start cold: zero filter memory, no line estimate (the loops converge
+    over ``adapt_time_constant``)."""
+
+    FIRST_CHUNK = "first_chunk"
+    """Least-squares fit the line to the first message and seed the canceller
+    from it; no added latency. The output therefore depends on the first
+    chunk's length: a short chunk gives a poor fit (shorter than one line
+    period, no fit at all), after which the loops converge as they do cold."""
+
+    BUFFERED = "buffered"
+    """Withhold output (emitting zero-length messages) until
+    ``warm_start_duration`` of samples has arrived, fit the line to exactly that
+    window, then release every held sample in one message stamped with the
+    first held sample's time. The result does not depend on chunking."""
+
+
 class AdaptiveLNCSettings(ez.Settings):
     """Settings for :class:`AdaptiveLNCTransformer`."""
 
@@ -168,6 +188,26 @@ class AdaptiveLNCSettings(ez.Settings):
     unchanged. (Per-channel sampling-delay alignment is handled separately,
     upstream, by ``SamplingDelayAlignmentTransformer``.)"""
 
+    warm_start: WarmStart = WarmStart.OFF
+    """Initialise the canceller from the first window instead of starting cold;
+    see :class:`WarmStart`. At reset the line is least-squares fitted per
+    channel and harmonic (``sin``/``cos`` at ``k * omega`` plus a DC term) and
+    the notch filter memory (``NOTCH``) or the line estimate (``SUBTRACT``) is
+    set to its steady state for that line, so cancellation is near its
+    converged depth from the first output sample. No effect for
+    ``PASSTHROUGH``."""
+
+    warm_start_duration: float = 0.1
+    """Fit window in seconds for ``warm_start="buffered"`` (also the added
+    latency at start-up). Should span at least a few line periods."""
+
+    keep_frequency_on_reset: bool = False
+    """On reset, keep the FLL-tracked frequency instead of reseeding from
+    ``line_freq``, provided the sample rate is unchanged and the kept value is
+    within the new ``max_freq_deviation`` bounds. Phase, filter memory and
+    accumulators are still reset. Useful when restarting after a gap: the mains
+    frequency survives it, the phase does not."""
+
     axis: str | None = None
     """.. deprecated:: 3.8
         Scheduled for removal in 4.0. The dimension messages accumulate along
@@ -187,6 +227,10 @@ class AdaptiveLNCState:
 
     omega: float = 0.0
     """Current NCO angular frequency in rad/sample (tracked by the FLL)."""
+
+    fs: float = 0.0
+    """Sample rate at the last reset; ``keep_frequency_on_reset`` keeps
+    ``omega`` only if it is unchanged."""
 
     omega_min: float | None = None
     """Lower FLL bound in rad/sample, or ``None`` when tracking is unbounded."""
@@ -253,6 +297,14 @@ class AdaptiveLNCState:
     Smoothing (time constant ``adapt_time_constant``) keeps the line estimate
     from chasing transient in-band signal."""
 
+    warm_held: list | None = None
+    """Input segments (time-first, backend arrays) held while a warm start
+    fills its fit window; ``None`` when not holding."""
+
+    warm_axis: Any = None
+    """Stream axis of the first held message, stamped on the zero-length and
+    release messages."""
+
 
 class AdaptiveLNCTransformer(
     BaseStatefulTransformer[
@@ -294,10 +346,11 @@ class AdaptiveLNCTransformer(
     and ``beta = 1 - exp(-window_dt/freq_time_constant)``.
     """
 
-    # These are read fresh every chunk inside `_process`, so changing them must
-    # NOT reset the filter state. line_freq seeds omega, axis/delay model and
-    # num_harmonics shape the state, so those do force a reset.
-    NONRESET_SETTINGS_FIELDS = frozenset({"adapt_time_constant", "freq_time_constant"})
+    # These are read fresh every chunk inside `_process` (or, for
+    # keep_frequency_on_reset, only at a reset), so changing them must NOT reset
+    # the filter state. line_freq seeds omega, axis/delay model, num_harmonics
+    # and the warm-start window shape the state, so those do force a reset.
+    NONRESET_SETTINGS_FIELDS = frozenset({"adapt_time_constant", "freq_time_constant", "keep_frequency_on_reset"})
 
     def _reset_state(self, message: AxisArray) -> None:
         self._state.axis = resolve_configured_stream_dim(self, message, self.settings.axis, legacy_default="time")
@@ -306,6 +359,10 @@ class AdaptiveLNCTransformer(
         xp, is_mlx = _namespace(message.data)
 
         fs = 1.0 / message.axes[self._state.axis].gain
+        # The state object is reused across resets, so the last tracked omega is
+        # still here; keep it only for an unchanged fs (checked against bounds below).
+        kept_omega = self._state.omega if self.settings.keep_frequency_on_reset and self._state.fs == fs else None
+        self._state.fs = fs
         # Seed the NCO at the nominal normalised frequency; the FLL refines it.
         self._state.omega = 2.0 * np.pi * self.settings.line_freq / fs
         max_deviation = self.settings.max_freq_deviation
@@ -319,6 +376,10 @@ class AdaptiveLNCTransformer(
         else:
             self._state.omega_min = None
             self._state.omega_max = None
+        if kept_omega is not None and (
+            self._state.omega_min is None or self._state.omega_min <= kept_omega <= self._state.omega_max
+        ):
+            self._state.omega = kept_omega
         self._state.phase = 0.0
 
         # Frequency-update window: one mains period, inferred from line_freq/fs.
@@ -346,6 +407,51 @@ class AdaptiveLNCTransformer(
         self._state.sub_amp = None
         self._state.sub_phase_off = None
         self._state.sub_yc_smooth = None
+
+        # Warm start: hold input in `_process` until the fit window is in.
+        warm = self.settings.warm_start != WarmStart.OFF and self.settings.cancel_method != CancelMethod.PASSTHROUGH
+        self._state.warm_held = [] if warm else None
+        self._state.warm_axis = None
+
+    def _warm_start(self, x: npt.NDArray, fs: float, n_harm: int, is_mlx: bool, xp: Any) -> None:
+        """Fit the line to ``x`` (time-first) and set the canceller to its steady
+        state for it. Least squares per channel of ``x`` on ``cos``/``sin`` at
+        each harmonic of ``omega`` plus DC (so an offset does not bias the fit);
+        the DC term is not seeded. Runs right after a reset, so ``phase == 0``
+        at ``x[0]``."""
+        st = self._state
+        n = x.shape[0]
+        if n < st.block_len:
+            # Under one line period DC and the sinusoids are near-collinear and the
+            # fit can blow up; stay cold rather than seed a spurious line.
+            return
+        x_np = _to_numpy(x).reshape(n, -1).astype(np.float64)
+        ph = st.omega * np.arange(n)
+        k = np.arange(1, n_harm + 1)
+        design = np.concatenate([np.ones((n, 1)), np.cos(np.outer(ph, k)), np.sin(np.outer(ph, k))], axis=1)
+        coef = np.linalg.lstsq(design, x_np, rcond=None)[0]
+        # Harmonic k of the fit is Re(P_k * exp(j*k*phase)), P_k per channel.
+        P = coef[1 : n_harm + 1] - 1j * coef[n_harm + 1 :]
+
+        if self.settings.cancel_method == CancelMethod.SUBTRACT:
+            self._commit_rank1(list(P), xp)
+            return
+
+        # Notch: closed-form steady-state DF-II-T memory for the fitted line, so
+        # a pure fitted line produces zero output from the first sample. Section
+        # i sees each harmonic j as phasor X_j (already shaped by sections < i):
+        #   z1 = Re sum_j (H_i - b0) X_j,   z2 = Re sum_j (b2 - a2 H_i) X_j e^{-jW_j}
+        mu = 2.0 / (self.settings.adapt_time_constant * fs)
+        e = np.exp(-1j * st.omega * k)[:, None]  # e^{-jW_j}, (n_harm, 1)
+        X = P
+        zi = np.zeros((n_harm, 2, X.shape[1]))
+        for i, (b0, b1, b2, _, a1, a2) in enumerate(design_lnc_sos(st.omega, mu, n_harm)):
+            H = (b0 + b1 * e + b2 * e * e) / (1.0 + a1 * e + a2 * e * e)
+            zi[i, 0] = np.real(np.sum((H - b0) * X, axis=0))
+            zi[i, 1] = np.real(np.sum((b2 - a2 * H) * X * e, axis=0))
+            X = H * X
+        zi = zi.reshape((n_harm, 2) + tuple(x.shape[1:]))
+        st.zi = _mx.array(np.moveaxis(zi, 1, -1).astype(np.float32)) if is_mlx else zi
 
     @staticmethod
     def _cat(pieces: list, is_mlx: bool, xp: Any) -> npt.NDArray:
@@ -440,7 +546,6 @@ class AdaptiveLNCTransformer(
         st = self._state
         scale = 2.0 / st.block_len  # demod sum -> sinusoid amplitude (window is ~1 period)
         smoothed = []
-        amps, offs = [], []
         z0 = None
         for kidx in range(n_harm):
             z = scale * (_to_numpy(st.sub_z_real[kidx]).reshape(-1) - 1j * _to_numpy(st.sub_z_imag[kidx]).reshape(-1))
@@ -449,6 +554,21 @@ class AdaptiveLNCTransformer(
             if st.sub_yc_smooth is not None:
                 z = (1.0 - alpha) * st.sub_yc_smooth[kidx] + alpha * z
             smoothed.append(z)
+        self._commit_rank1(smoothed, xp)
+
+        if tracking and z0 is not None:
+            self._fll_step(z0, beta)
+
+        st.sub_z_real = [z * 0 for z in st.sub_z_real]
+        st.sub_z_imag = [z * 0 for z in st.sub_z_imag]
+
+    def _commit_rank1(self, smoothed: list, xp: Any) -> None:
+        """Commit the per-harmonic per-channel line phasors ``smoothed`` (numpy
+        complex) as the rank-1 estimate (global phase + per-channel amplitude)
+        used by :meth:`_reconstruct`."""
+        st = self._state
+        amps, offs = [], []
+        for z in smoothed:
             # Global common-mode phase: amplitude-weighted pool (rank-1 direction).
             theta = float(np.angle(np.sum(z * np.abs(z)))) if np.any(z) else 0.0
             a = np.clip(np.real(z * np.exp(-1j * theta)), 0.0, None)  # per-channel amplitude
@@ -457,12 +577,6 @@ class AdaptiveLNCTransformer(
         st.sub_yc_smooth = smoothed
         st.sub_amp = amps
         st.sub_phase_off = offs
-
-        if tracking and z0 is not None:
-            self._fll_step(z0, beta)
-
-        st.sub_z_real = [z * 0 for z in st.sub_z_real]
-        st.sub_z_imag = [z * 0 for z in st.sub_z_imag]
 
     def _reconstruct(self, seg_len: int, n_harm: int, xp: Any) -> npt.NDArray | None:
         """Reconstruct the committed common-mode line over one segment, using the
@@ -492,15 +606,32 @@ class AdaptiveLNCTransformer(
         if moved:
             x_data = xp.moveaxis(x_data, ax_idx, 0)
 
-        n = x_data.shape[0]
         st = self._state
         dtype = x_data.dtype
         fs = 1.0 / message.axes[self._state.axis].gain
+        n_harm = max(1, int(self.settings.num_harmonics))
+
+        if st.warm_held is not None:
+            # Warm start pending: hold input until the fit window is complete.
+            if st.warm_axis is None:
+                st.warm_axis = message.axes[st.axis]
+            st.warm_held.append(x_data)
+            buffered = self.settings.warm_start == WarmStart.BUFFERED
+            need = max(1, int(round(self.settings.warm_start_duration * fs))) if buffered else 1
+            if sum(h.shape[0] for h in st.warm_held) < need:
+                empty = slice_along_axis(message.data, slice(0, 0), ax_idx)
+                return replace(message, data=empty, axes={**message.axes, st.axis: st.warm_axis})
+            x_data = self._cat(st.warm_held, is_mlx, xp)
+            message = replace(message, axes={**message.axes, st.axis: st.warm_axis})
+            st.warm_held = None
+            st.warm_axis = None
+            self._warm_start(x_data[:need] if buffered else x_data, fs, n_harm, is_mlx, xp)
+
+        n = x_data.shape[0]
 
         # Time constants -> gains (independent of chunk size and fs).
         # mu = 2 / (tau_adapt * fs); beta = 1 - exp(-window_dt / tau_freq).
         mu = 2.0 / (self.settings.adapt_time_constant * fs)
-        n_harm = max(1, int(self.settings.num_harmonics))
         tau_freq = self.settings.freq_time_constant
         tracking = tau_freq is not None and tau_freq > 0
         beta = 1.0 - np.exp(-(st.block_len / fs) / tau_freq) if tracking else 0.0

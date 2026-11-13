@@ -21,6 +21,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from ezmsg.util.messages.axisarray import AxisArray, LinearAxis
+from ezmsg.util.messages.util import replace
 
 from ezmsg.sigproc.adaptive_lnc import (
     AdaptiveLNCSettings,
@@ -149,6 +150,7 @@ def adaptive_lnc(
     max_freq_deviation: float | None = 2.0,
     cancel_method: str = "notch",
     axis: str = "time",
+    **kwargs,
 ) -> AdaptiveLNCTransformer:
     """Construct an :class:`AdaptiveLNCTransformer` with the given parameters."""
     return AdaptiveLNCTransformer(
@@ -160,6 +162,7 @@ def adaptive_lnc(
             max_freq_deviation=max_freq_deviation,
             cancel_method=cancel_method,
             axis=axis,
+            **kwargs,
         )
     )
 
@@ -472,3 +475,249 @@ def test_mlx_backend_matches_numpy():
     rel = np.max(np.abs(y_mx - y_np)) / np.max(np.abs(mixture))
     assert rel < 1e-2, f"MLX vs numpy rel diff {rel:.2e}"
     assert p_mx._state.omega == pytest.approx(p_np._state.omega, rel=1e-3)
+
+
+# --------------------------------------------------------------------------- #
+# Warm start and keeping the tracked frequency across a reset                 #
+# --------------------------------------------------------------------------- #
+WARM_N = int(0.1 * FS)  # first 100 ms (6 line periods, 1 period of the 10 Hz 'neural' tone)
+
+
+def _line_amp(y: np.ndarray, omega: float, start: int, stop: int) -> float:
+    """Mean per-channel amplitude of ``y`` at ``omega`` over ``[start, stop)``
+    (rectangular DFT bin; windows here span whole periods)."""
+    k = np.arange(start, stop)
+    z = np.sum(y[start:stop] * np.exp(-1j * omega * k)[:, None], axis=0)
+    return float(np.mean(np.abs(z)) * 2 / (stop - start))
+
+
+def _messages(proc: AdaptiveLNCTransformer, data: np.ndarray, chunk_sizes: list[int]) -> list[AxisArray]:
+    """Like :func:`_stream_in_chunks` but return the output messages."""
+    outs, start = [], 0
+    for size in chunk_sizes:
+        outs.append(proc(_make_axisarray(data[start : start + size], offset=start / FS)))
+        start += size
+    return outs
+
+
+def test_warm_start_seed_is_steady_state():
+    """The closed-form notch seed is the exact steady state of the fitted line:
+    a pure line (3 harmonics, nominal frequency) is cancelled from sample 0."""
+    n = WARM_N
+    k = np.arange(n)
+    w = 2.0 * np.pi * LINE_FREQ / FS
+    x = np.stack([200 * np.sin(w * k + c) + 80 * np.cos(3 * w * k + 0.3 * c) for c in range(3)], axis=1)
+    y = _stream_in_chunks(adaptive_lnc(num_harmonics=3, freq_time_constant=None, warm_start="first_chunk"), x, [n])
+    assert np.max(np.abs(y)) < 1e-6 * 200
+
+
+def test_warm_start_cancels_from_first_sample():
+    """Line + noise at the nominal frequency: residual line over the first 100 ms
+    drops from ~the full line (cold) to near the converged level (warm)."""
+    n = int(FS * 1.5)
+    w = 2.0 * np.pi * LINE_FREQ / FS
+    x = _line_signal(n, 4, w, amp=200.0, seed=30)
+    chunks = [300] * (n // 300)
+    cold = _stream_in_chunks(adaptive_lnc(), x, chunks)
+    warm = _stream_in_chunks(adaptive_lnc(warm_start="buffered"), x, chunks)
+    first = _stream_in_chunks(adaptive_lnc(warm_start="first_chunk"), x, [WARM_N] + chunks[10:])
+
+    cold_early = _line_amp(cold, w, 0, WARM_N)
+    warm_early = _line_amp(warm, w, 0, WARM_N)
+    converged = _line_amp(cold, w, n - WARM_N, n)
+    print(f"cold {cold_early:.3g}, warm {warm_early:.3g}, converged {converged:.3g}")
+    assert warm_early < 3 * converged
+    assert warm_early < 0.01 * cold_early
+    # first_chunk with a 100 ms first chunk fits the same window as buffered.
+    np.testing.assert_allclose(first, warm, rtol=1e-6, atol=1e-6)
+
+
+def test_warm_start_offset_frequency_no_worse_than_cold():
+    """Line at 60.5 Hz (inside max_freq_deviation): warm start is far better over
+    the first 100 ms, no worse integrated over the run, and converges the same."""
+    n = int(FS * 3.0)
+    w = 2.0 * np.pi * 60.5 / FS
+    x = _line_signal(n, 4, w, amp=200.0, seed=31)
+    chunks = [300] * (n // 300)
+    p_cold, p_warm = adaptive_lnc(), adaptive_lnc(warm_start="buffered")
+    cold = _stream_in_chunks(p_cold, x, chunks)
+    warm = _stream_in_chunks(p_warm, x, chunks)
+
+    def wins(y):
+        return np.array([_line_amp(y, w, i, i + WARM_N) for i in range(0, n, WARM_N)])
+
+    wc, ww = wins(cold), wins(warm)
+    print(f"first 100 ms cold {wc[0]:.3g} warm {ww[0]:.3g}")
+    print(f"mean power cold {np.mean(wc**2):.4g} warm {np.mean(ww**2):.4g}")
+    assert ww[0] < 0.1 * wc[0]
+    assert np.mean(ww**2) <= np.mean(wc**2)
+    assert p_warm.state.omega == pytest.approx(w, rel=2e-3)
+    assert ww[-1] <= 1.1 * wc[-1]
+
+
+def test_warm_start_without_line_matches_cold():
+    """No line: the fit is ~zero (noise only), so warm output equals cold."""
+    n = int(FS * 0.5)
+    x = _line_signal(n, 4, 2.0 * np.pi * LINE_FREQ / FS, amp=0.0, seed=32)
+    chunks = [300] * (n // 300)
+    cold = _stream_in_chunks(adaptive_lnc(), x, chunks)
+    warm = _stream_in_chunks(adaptive_lnc(warm_start="buffered"), x, chunks)
+    diff = np.max(np.abs(warm - cold))
+    print(f"max |warm - cold| = {diff:.3g} (signal peak {np.max(np.abs(x)):.3g})")
+    assert diff < 0.5
+
+
+def test_warm_start_harmonics():
+    """Fundamental + 3rd harmonic with num_harmonics=3: both are cancelled over
+    the first 100 ms with warm start, not with cold."""
+    n = int(FS * 0.5)
+    k = np.arange(n)
+    w = 2.0 * np.pi * LINE_FREQ / FS
+    rng = np.random.default_rng(33)
+    x = (200 * np.sin(w * k) + 120 * np.sin(3 * w * k + 0.5) + rng.normal(0, 5, n)).astype(np.float32)[:, None]
+    chunks = [250] * (n // 250)
+    cold = _stream_in_chunks(adaptive_lnc(num_harmonics=3), x, chunks)
+    warm = _stream_in_chunks(adaptive_lnc(num_harmonics=3, warm_start="buffered"), x, chunks)
+    for h, amp in [(1, 200.0), (3, 120.0)]:
+        c, wa = _line_amp(cold, h * w, 0, WARM_N), _line_amp(warm, h * w, 0, WARM_N)
+        print(f"harmonic {h}: cold {c:.3g} warm {wa:.3g}")
+        assert wa < 0.01 * amp
+        assert wa < 0.05 * c
+
+
+def test_warm_start_subtract():
+    """SUBTRACT seeds its line estimate from the fit: the line is removed in the
+    first window instead of after the estimate has converged."""
+    n, nch = int(FS * 0.5), 16
+    x, line, _ = _common_mode_scene(n, nch, seed=34)
+    chunks = [250] * (n // 250)
+
+    def run(**kw):
+        p = adaptive_lnc(adapt_time_constant=0.5, freq_time_constant=None, cancel_method="subtract", **kw)
+        return _stream_in_chunks(p, x, chunks)
+
+    period = int(FS / LINE_FREQ)  # the cold estimate is first committed after one period
+    cold, warm = run(), run(warm_start="buffered")
+    fc, fw = _fraction(cold[:period], line[:period]), _fraction(warm[:period], line[:period])
+    fc100, fw100 = _fraction(cold[:WARM_N], line[:WARM_N]), _fraction(warm[:WARM_N], line[:WARM_N])
+    print(f"line fraction, first period: cold {fc:.3g} warm {fw:.3g}; first 100 ms: cold {fc100:.3g} warm {fw100:.3g}")
+    assert fc > 0.9
+    assert abs(fw) < 0.05
+    assert abs(fw100) < abs(fc100)
+
+
+def test_warm_start_buffered_holds_then_releases():
+    """buffered: zero-length output until the window fills, then every held
+    sample at its original time; identical output for any chunking."""
+    n = int(FS * 0.5)
+    x = _line_signal(n, 3, 2.0 * np.pi * 60.4 / FS, amp=200.0, seed=35)
+
+    msgs = _messages(adaptive_lnc(warm_start="buffered"), x, [700] * 4 + [n - 2800])
+    for m in msgs[:3]:
+        assert m.data.shape == (0, 3) and m.data.dtype == x.dtype
+        assert m.axes["time"].offset == 0.0 and m.axes["time"].gain == 1.0 / FS
+    assert msgs[3].data.shape == (0, 3)  # 2800 < 3000
+    assert msgs[4].data.shape == (n, 3) and msgs[4].axes["time"].offset == 0.0
+
+    def run(chunks):
+        out = _messages(adaptive_lnc(warm_start="buffered"), x, chunks)
+        return np.concatenate([m.data for m in out]), out
+
+    ref, _ = run([n])
+    for chunks in ([1] * 3200 + [n - 3200], [37, 211, 2751, 2, 999] + [1000] * 11):
+        got, out = run(chunks)
+        assert got.shape == ref.shape  # nothing lost or duplicated
+        np.testing.assert_allclose(got, ref, rtol=1e-3, atol=1e-1)
+        # After the release each message keeps its own original timestamp.
+        starts = np.cumsum([0] + chunks[:-1])
+        nonempty = [(m, s) for m, s in zip(out, starts) if m.data.shape[0]]
+        assert nonempty[0][0].axes["time"].offset == 0.0
+        for m, s in nonempty[1:]:
+            assert m.axes["time"].offset == pytest.approx(s / FS)
+
+
+def test_keep_frequency_on_reset_reconverges_faster():
+    """After a gap (reset), keeping the tracked off-nominal frequency cancels
+    better than restarting from line_freq; with warm start too, the fit uses
+    the kept frequency and the restart is clean from the first sample."""
+    n, gap = int(FS * 3.0), int(FS * 0.37)
+    w = (2.0 * np.pi * LINE_FREQ / FS) * 1.01
+    sig = _line_signal(n + gap + int(FS * 1.0), 4, w, amp=200.0, seed=36)
+    before, after = sig[:n], sig[n + gap :]
+
+    def restart(keep, warm_start="off"):
+        p = adaptive_lnc(freq_time_constant=0.2, keep_frequency_on_reset=keep, warm_start=warm_start)
+        _stream_in_chunks(p, before, [300] * (n // 300))
+        assert p.state.omega == pytest.approx(w, rel=2e-3)
+        p._request_reset()
+        return _stream_in_chunks(p, after, [300] * 100)
+
+    y_keep, y_cold = restart(True), restart(False)
+    rk, rc = _line_amp(y_keep, w, 6000, 15000), _line_amp(y_cold, w, 6000, 15000)
+    y_kw, y_w = restart(True, "buffered"), restart(False, "buffered")
+    rkw, rw = (max(_line_amp(y, w, i, i + WARM_N) for i in range(0, 15000, WARM_N)) for y in (y_kw, y_w))
+    print(f"0.2-0.5 s after restart: kept {rk:.3g} cold {rc:.3g}")
+    print(f"worst 100 ms over 0.5 s: kept+warm {rkw:.3g} warm {rw:.3g}")
+    assert rk < 0.6 * rc
+    assert rkw < 3.0
+    assert rkw < 0.1 * rw
+
+
+def test_keep_frequency_on_reset_fallbacks():
+    """The kept omega survives a plain reset, but reseeds to nominal when fs
+    changes or the kept value is outside the new bounds."""
+    w = (2.0 * np.pi * LINE_FREQ / FS) * 1.01  # 60.6 Hz
+    x = _line_signal(int(FS * 2.0), 2, w, amp=200.0, seed=38)
+    p = adaptive_lnc(freq_time_constant=0.2, keep_frequency_on_reset=True)
+    _stream_in_chunks(p, x, [300] * 200)
+    kept = p.state.omega
+    assert kept == pytest.approx(w, rel=2e-3)
+
+    p._request_reset()
+    p(_make_axisarray(x[:100]))  # shorter than an FLL window: omega untouched
+    assert p.state.omega == kept
+
+    # Sample rate change -> nominal for the new fs.
+    half = AxisArray(x[:100], dims=["time", "ch"], axes={"time": LinearAxis(gain=2.0 / FS)}, key="test_lnc")
+    p(half)
+    assert p.state.omega == pytest.approx(2.0 * np.pi * LINE_FREQ / (FS / 2))
+
+    # Back at FS (omega no longer comparable) and then out of bounds -> nominal.
+    p = adaptive_lnc(freq_time_constant=0.2, keep_frequency_on_reset=True)
+    _stream_in_chunks(p, x, [300] * 200)
+    p.update_settings(replace(p.settings, max_freq_deviation=0.25))  # forces a reset
+    p(_make_axisarray(x[:100]))
+    assert p.state.omega == pytest.approx(2.0 * np.pi * LINE_FREQ / FS)
+
+
+@pytest.mark.parametrize("cancel_method", ["notch", "subtract"])
+def test_warm_start_mlx_matches_numpy(cancel_method):
+    """Warm start (buffered) on MLX reproduces numpy, incl. the zero-length hold."""
+    mx = pytest.importorskip("mlx.core")
+    n = int(FS * 0.5)
+    w = 2.0 * np.pi * LINE_FREQ / FS
+    k = np.arange(n)
+    line = 200.0 * np.sin(w * k + 0.7) + 80.0 * np.sin(3 * w * k + 0.4)  # common-mode, as SUBTRACT assumes
+    x = (_line_signal(n, 8, w, amp=0.0, seed=39) + line[:, None]).astype(np.float32)
+    chunks = [1000] * (n // 1000)
+
+    def make():
+        return adaptive_lnc(num_harmonics=3, cancel_method=cancel_method, warm_start="buffered")
+
+    y_np = _stream_in_chunks(make(), x, chunks)
+    p_mx, outs, start = make(), [], 0
+    for size in chunks:
+        msg = AxisArray(
+            mx.array(x[start : start + size]),
+            dims=["time", "ch"],
+            axes={"time": LinearAxis(offset=start / FS, gain=1.0 / FS)},
+            key="test_lnc",
+        )
+        out = p_mx(msg)
+        assert isinstance(out.data, mx.array)
+        outs.append(np.array(out.data))
+        start += size
+    assert outs[0].shape == (0, 8) and outs[2].shape == (3000, 8)
+    y_mx = np.concatenate(outs, axis=0)
+    assert np.max(np.abs(y_mx - y_np)) / np.max(np.abs(x)) < 1e-2
+    assert _line_amp(y_mx, w, 0, WARM_N) < 2.0
