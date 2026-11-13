@@ -236,7 +236,8 @@ class ButterworthBackwardFilterTransformer(FilterByDesignTransformer[Butterworth
 
         # Check if we need to redesign filter
         if self._coefs_cache is None or self.state.needs_redesign:
-            self._coefs_cache = self.get_design_function()(fs)
+            # Routed through the shared design step so an unsupported min_phase raises.
+            self._coefs_cache = self._design_coefs(fs)
             self._pad_length = self._compute_pad_length(fs)
             self._zi_tiled = None  # Invalidate; recomputed on next use.
             self._sos_mx = None

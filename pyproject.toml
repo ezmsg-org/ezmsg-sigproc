@@ -19,7 +19,7 @@ dependencies = [
   "numba>=0.61.0",
   "numpy>=1.26.0",
   "pywavelets>=1.6.0",
-  "scipy>=1.13.1",
+  "scipy>=1.14",
   "sparse>=0.15.4",
 ]
 

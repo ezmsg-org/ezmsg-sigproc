@@ -3,7 +3,7 @@ import pytest
 import scipy.signal as sps
 from ezmsg.util.messages.axisarray import AxisArray
 
-from ezmsg.sigproc.filterbank import FilterbankMode, FilterbankSettings, FilterbankTransformer
+from ezmsg.sigproc.filterbank import FilterbankMode, FilterbankSettings, FilterbankTransformer, MinPhaseMode
 from tests.helpers.util import gaussian, make_chirp
 
 
@@ -131,3 +131,34 @@ def test_template_axes_cached_and_owned():
 
     assert all(output.axes["ch"] is outputs[0].axes["ch"] for output in outputs)
     assert all(output.axes["ch"] is not message.axes["ch"] for output, message in zip(outputs, messages))
+
+
+@pytest.mark.parametrize("mode", [FilterbankMode.CONV, FilterbankMode.FFT])
+def test_filterbank_complex_min_phase_chunk_invariant(mode):
+    """Complex (analytic) kernels can be min-phased; one buffer and many small chunks agree."""
+    fs = 500.0
+    n = np.arange(101) - 50
+    lp = sps.firwin(101, 10.0, fs=fs)
+    kernels = [lp * np.exp(2j * np.pi * fc * n / fs) for fc in (30.0, 60.0, 120.0)]
+    data = np.random.default_rng(0).standard_normal((2000, 3))
+
+    def run(step):
+        proc = FilterbankTransformer(
+            FilterbankSettings(kernels=kernels, mode=mode, min_phase=MinPhaseMode.HOMOMORPHICFULL, axis="time")
+        )
+        outs = [
+            proc(
+                AxisArray(
+                    data=data[i : i + step],
+                    dims=["time", "ch"],
+                    axes={"time": AxisArray.TimeAxis(fs=fs, offset=i / fs)},
+                    key="test_fb_minphase",
+                )
+            )
+            for i in range(0, data.shape[0], step)
+        ]
+        return AxisArray.concatenate(*outs, dim="time").data
+
+    one_shot = run(data.shape[0])
+    assert np.iscomplexobj(one_shot) and one_shot.shape[-1] > 0
+    np.testing.assert_allclose(run(37), one_shot, rtol=1e-10, atol=1e-12)
