@@ -27,7 +27,7 @@ from scipy.fft import next_fast_len as _next_fast_len
 from .util import sosfilt_direct
 from .util.array import array_device, xp_asarray, xp_create
 from .util.deprecation import warn_axis_deprecated
-from .util.minphase import MinPhaseMode, min_phase_kernel
+from .util.minphase import MinPhaseMode, is_linear_phase, kernel_delay, min_phase_kernel
 from .util.threaded_filt import DEFAULT_MIN_BYTES as _DEFAULT_THREAD_MIN_BYTES
 from .util.threaded_filt import filt_threaded, should_thread
 
@@ -104,6 +104,23 @@ _FIR_NUMPY_DTYPES = (np.dtype(np.float32), np.dtype(np.float64))
 def _is_fir(b: npt.NDArray, a: npt.NDArray) -> bool:
     """Whether BA coefficients describe a filter with no feedback."""
     return len(a) == 1 or bool(np.allclose(a[1:], 0))
+
+
+def _fir_b(coef_type: str, coefs: typing.Any) -> npt.NDArray | None:
+    """The ``b`` taps of FIR BA coefficients; None for no, IIR or SOS coefficients."""
+    kind, coefs = _normalize_coefs(coefs)
+    if coefs is None or coef_type != "ba" or kind != "ba" or len(coefs) != 2 or not _is_fir(*coefs):
+        return None
+    return np.asarray(coefs[0])
+
+
+def _check_compensable(settings: "FilterBaseSettings", coefs: typing.Any, owner: str) -> None:
+    """Raise if ``compensate_delay`` is requested for coefficients that have no single delay."""
+    if settings.compensate_delay and coefs is not None and _fir_b(settings.coef_type, coefs) is None:
+        raise ValueError(
+            f"compensate_delay=True requires FIR coefficients with coef_type='ba'; {owner} has IIR or SOS "
+            "coefficients, whose delay depends on frequency, so there is no single correction."
+        )
 
 
 def _fir_taps(b: npt.NDArray, a: npt.NDArray, data: typing.Any) -> tuple[npt.NDArray, typing.Any] | None:
@@ -388,6 +405,16 @@ class FilterBaseSettings(ez.Settings):
     Only FIR designs with ``coef_type="ba"`` can be converted; any other combination
     raises ``ValueError`` rather than ignoring the setting."""
 
+    compensate_delay: bool = False
+    """If True, subtract the FIR filter's delay (see
+    :func:`~ezmsg.sigproc.util.minphase.kernel_delay`) from the stream axis offset of each
+    output message, so samples are stamped with the time of the content they carry. The
+    samples still arrive late; only their timestamps move.
+
+    The delay is exact for linear-phase filters and the envelope delay at the passband peak
+    otherwise (e.g. after ``min_phase``). IIR and SOS filters have no single delay and raise
+    ``ValueError``. The delay is logged at info level whether or not it is compensated."""
+
 
 class FilterSettings(FilterBaseSettings):
     coefs: FilterCoefficients | None = None
@@ -403,6 +430,7 @@ class FilterSettings(FilterBaseSettings):
                 "honoured by filter-design transformers. Convert the taps with "
                 "ezmsg.sigproc.util.minphase.min_phase_kernel instead."
             )
+        _check_compensable(self, self.coefs, "FilterSettings")
 
 
 @processor_state
@@ -415,6 +443,8 @@ class FilterState:
     sos_mx: typing.Any | None = None  # cached mlx.core.array of SOS coefs
     sos_direct: typing.Any | None = None  # DirectSosfilt with per-call setup hoisted
     sos_direct_dtype: typing.Any | None = None  # promoted dtype sos_direct was built for
+    delay: float | None = None  # FIR delay in samples; None for IIR/SOS
+    delay_for: typing.Any | None = None  # the coefs object `delay` was computed for
 
 
 class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisArray, FilterState]):
@@ -424,17 +454,51 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
 
     NONRESET_SETTINGS_FIELDS = frozenset({"mlx_metal_chunk_sizes"})
 
+    @property
+    def delay_samples(self) -> float | None:
+        """FIR delay in samples (see :attr:`FilterBaseSettings.compensate_delay`); None
+        before the first message after a coefficient change, and for IIR or SOS filters."""
+        return self.state.delay if self.state.delay_for is self.settings.coefs else None
+
+    def _update_delay(self, message: AxisArray, axis: str) -> None:
+        """Measure the delay of the current coefficients and log it once."""
+        b = _fir_b(self.settings.coef_type, self.settings.coefs)
+        self.state.delay_for = self.settings.coefs
+        self.state.delay = None if b is None else kernel_delay(b)
+        if b is None:
+            return
+        gain = getattr(message.axes.get(axis), "gain", None)
+        ms = "" if gain is None else f" ({self.state.delay * gain * 1e3:.4g} ms)"
+        ez.logger.info(
+            f"FIR filter ({len(b)} taps): {'' if is_linear_phase(b) else 'approximate '}delay "
+            f"{self.state.delay:.4g} samples{ms}, "
+            f"{'compensated' if self.settings.compensate_delay else 'not compensated'} on the time axis."
+        )
+
     def __call__(self, message: AxisArray) -> AxisArray:
         if self.settings.coefs is None:
             return message
         # Empty chunks can't supply the first sample that zi edge-scaling
         # needs, so defer state creation until the first non-empty chunk.
         if message.data.size == 0:
-            return message
+            # Still stamped, so an empty message does not sit `delay` ahead of its neighbours.
+            return self._stamp(message, resolve_configured_stream_dim(self, message, self.settings.axis))
         if self._state.zi is None:
             self._reset_state(message)
             self._hash = self._hash_message(message)
         return super().__call__(message)
+
+    def _stamp(self, message: AxisArray, axis: str) -> AxisArray:
+        """Subtract the FIR delay from the stream axis offset when ``compensate_delay`` is set."""
+        if self.state.delay_for is not self.settings.coefs:
+            self._update_delay(message, axis)
+        if not (self.settings.compensate_delay and self.state.delay):
+            return message
+        ax = message.axes.get(axis)
+        if not isinstance(ax, AxisArray.LinearAxis):
+            raise TypeError(f"compensate_delay=True requires a LinearAxis on the '{axis}' dimension.")
+        shifted = replace(ax, offset=ax.offset - self.state.delay * ax.gain)
+        return replace(message, axes={**message.axes, axis: shifted})
 
     def _build_fir_taps(self, b: npt.NDArray, work_dtype: typing.Any, data: typing.Any, axis_idx: int) -> None:
         """Cache the converted taps that both dedicated FIR paths read."""
@@ -680,8 +744,8 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
         return self.state.sos_direct
 
     def _process(self, message: AxisArray) -> AxisArray:
+        axis = resolve_configured_stream_dim(self, message, self.settings.axis)
         if message.data.size > 0:
-            axis = resolve_configured_stream_dim(self, message, self.settings.axis)
             axis_idx = message.get_axis_idx(axis)
             if self.state.fir_method is not None and self.state.fir_b_1d is None:
                 self._refresh_fir_taps(message, axis_idx)
@@ -774,7 +838,7 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
         else:
             dat_out = message.data
 
-        return replace(message, data=dat_out)
+        return self._stamp(replace(message, data=dat_out), axis)
 
 
 class Filter(BaseTransformerUnit[FilterSettings, AxisArray, AxisArray, FilterTransformer]):
@@ -810,6 +874,26 @@ class FilterByDesignTransformer(
             return AxisArray
         else:
             raise ValueError(f"Invalid direction: {dir}. Must be 'in' or 'out'.")
+
+    @property
+    def delay_samples(self) -> float | None:
+        """FIR delay of the designed filter in samples; None before it is designed, or if it is IIR or SOS."""
+        return None if self.state.filter is None else self.state.filter.delay_samples
+
+    def _forwarded_settings(self) -> dict[str, typing.Any]:
+        """Settings the child :obj:`FilterTransformer` applies. ``min_phase`` is not among them:
+        it is applied at design time, and the child rejects it."""
+        return {
+            name: getattr(self.settings, name)
+            for name in (
+                "use_fast_sosfilt",
+                "use_mlx_metal",
+                "mlx_metal_chunk_sizes",
+                "thread_min_bytes",
+                "fir_fft_min_taps",
+                "compensate_delay",
+            )
+        }
 
     @abstractmethod
     def get_design_function(self) -> typing.Callable[[float], FilterCoefsType | None]:
@@ -860,6 +944,7 @@ class FilterByDesignTransformer(
                 # It's BA format, convert to SOS
                 b, a = coefs
                 coefs = scipy.signal.tf2sos(b, a)
+        _check_compensable(self.settings, coefs, type(self).__name__)
         return coefs
 
     def __call__(self, message: AxisArray) -> AxisArray:
@@ -875,6 +960,8 @@ class FilterByDesignTransformer(
             axis = self.state.filter.settings.axis
             fs = 1 / message.axes[axis].gain
             coefs = self._design_coefs(fs)
+            with suppress_axis_deprecation():  # the child's axis is ours, not the user's
+                self.state.filter.settings = replace(self.state.filter.settings, **self._forwarded_settings())
             self.state.filter.update_coefficients(coefs, coef_type=self.settings.coef_type)
             self.state.needs_redesign = False
 
@@ -895,8 +982,7 @@ class FilterByDesignTransformer(
                 axis=axis,
                 coef_type=self.settings.coef_type,
                 coefs=coefs,
-                use_mlx_metal=self.settings.use_mlx_metal,
-                mlx_metal_chunk_sizes=self.settings.mlx_metal_chunk_sizes,
+                **self._forwarded_settings(),
             )
             self.state.filter = FilterTransformer(settings=new_settings)
         self.state.needs_redesign = False

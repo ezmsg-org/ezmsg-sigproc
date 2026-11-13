@@ -43,6 +43,10 @@ class FilterbankDesignSettings(ez.Settings):
       a filter in ``filters`` with its own ``min_phase`` raises ``ValueError``.
     """
 
+    compensate_delay: bool = False
+    """Align the kernels on one delay and subtract it from the output offset. See
+      :attr:`FilterbankSettings.compensate_delay`."""
+
     axis: str | None = None
     """.. deprecated:: 3.8
         Scheduled for removal in 4.0. The dimension messages accumulate along
@@ -147,6 +151,7 @@ class FilterbankDesignTransformer(
                 kernels=kernels,
                 mode=self.settings.mode,
                 min_phase=self.settings.min_phase,
+                compensate_delay=self.settings.compensate_delay,
                 axis=self.state.axis,
                 new_axis=self.settings.new_axis,
             )

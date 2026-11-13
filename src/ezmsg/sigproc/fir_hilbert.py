@@ -300,7 +300,9 @@ class FIRHilbertEnvelopeTransformer(
         if move_axis:
             out = np.moveaxis(out, -1, axis_idx)
 
-        return replace(message, data=out, axes=message.axes)
+        # The inner filter's axes carry its delay correction (compensate_delay), which also
+        # covers the real part: it is delayed by the same (taps - 1) // 2 samples above.
+        return replace(message, data=out, axes=y_imag_msg.axes)
 
 
 class FIRHilbertEnvelopeUnit(
