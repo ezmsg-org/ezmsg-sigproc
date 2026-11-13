@@ -38,9 +38,9 @@ class FilterbankDesignSettings(ez.Settings):
 
     min_phase: MinPhaseMode = MinPhaseMode.NONE
     """
-    If not None, convert the kernels to minimum-phase equivalents. Valid options are
-      'hilbert', 'homomorphic', and 'homomorphic-full'. Complex filters not supported.
-      See `scipy.signal.minimum_phase` for details.
+    If not NONE, convert the kernels to minimum-phase equivalents. See
+      :attr:`FilterbankSettings.min_phase`. This is the only min_phase honoured here;
+      a filter in ``filters`` with its own ``min_phase`` raises ``ValueError``.
     """
 
     axis: str | None = None
@@ -100,6 +100,11 @@ class FilterbankDesignTransformer(
     def _calculate_kernels(self, fs: float) -> list[npt.NDArray]:
         kernels = []
         for filter in self.settings.filters:
+            if filter.min_phase != MinPhaseMode.NONE:
+                raise ValueError(
+                    "KaiserFilterSettings.min_phase is ignored inside a filterbank; "
+                    "set FilterbankDesignSettings.min_phase instead."
+                )
             output = kaiser_design_fun(
                 fs,
                 cutoff=filter.cutoff,

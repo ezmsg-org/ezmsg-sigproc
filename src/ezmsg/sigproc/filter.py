@@ -27,6 +27,7 @@ from scipy.fft import next_fast_len as _next_fast_len
 from .util import sosfilt_direct
 from .util.array import array_device, xp_asarray, xp_create
 from .util.deprecation import warn_axis_deprecated
+from .util.minphase import MinPhaseMode, min_phase_kernel
 from .util.threaded_filt import DEFAULT_MIN_BYTES as _DEFAULT_THREAD_MIN_BYTES
 from .util.threaded_filt import filt_threaded, should_thread
 
@@ -375,12 +376,33 @@ class FilterBaseSettings(ez.Settings):
     across chunkings rather than accuracy. Set this very high to force the
     time-domain path everywhere and keep FIR output chunk-invariant."""
 
+    min_phase: MinPhaseMode = MinPhaseMode.NONE
+    """If not NONE, convert the designed FIR taps to minimum phase (see
+    :func:`~ezmsg.sigproc.util.minphase.min_phase_kernel`), trading the linear-phase
+    delay of ``(n_taps - 1) / 2`` samples for a much shorter, frequency-dependent one.
+
+    HILBERT and HOMOMORPHIC return a half-length kernel whose magnitude response is
+    the *square root* of the designed one -- e.g. 40 dB of stopband attenuation becomes
+    about 20 dB. Use HOMOMORPHICFULL when the filter must keep its design response.
+
+    Only FIR designs with ``coef_type="ba"`` can be converted; any other combination
+    raises ``ValueError`` rather than ignoring the setting."""
+
 
 class FilterSettings(FilterBaseSettings):
     coefs: FilterCoefficients | None = None
     """The pre-calculated filter coefficients."""
 
     # Note: coef_type = "ba" is assumed for this class.
+
+    def __post_init__(self) -> None:
+        warn_axis_deprecated(self)
+        if self.min_phase != MinPhaseMode.NONE:
+            raise ValueError(
+                "FilterSettings applies pre-calculated coefficients as given; min_phase is only "
+                "honoured by filter-design transformers. Convert the taps with "
+                "ezmsg.sigproc.util.minphase.min_phase_kernel instead."
+            )
 
 
 @processor_state
@@ -819,6 +841,27 @@ class FilterByDesignTransformer(
             else:
                 self.state.needs_redesign = True
 
+    def _design_coefs(self, fs: float) -> FilterCoefsType | None:
+        """Design coefficients for ``fs``, apply ``min_phase``, and convert to SOS if requested."""
+        coefs = self.get_design_function()(fs)
+        min_phase = self.settings.min_phase
+        if min_phase != MinPhaseMode.NONE and coefs is not None:
+            if self.settings.coef_type != "ba" or not (isinstance(coefs, tuple) and _is_fir(*coefs)):
+                raise ValueError(
+                    f"min_phase={min_phase} requires an FIR design with coef_type='ba'; "
+                    f"{type(self).__name__} designed an IIR or SOS filter."
+                )
+            b, a = coefs
+            coefs = (min_phase_kernel(b, min_phase), a)
+
+        # Convert BA to SOS if requested
+        if coefs is not None and self.settings.coef_type == "sos":
+            if isinstance(coefs, tuple) and len(coefs) == 2:
+                # It's BA format, convert to SOS
+                b, a = coefs
+                coefs = scipy.signal.tf2sos(b, a)
+        return coefs
+
     def __call__(self, message: AxisArray) -> AxisArray:
         # Offer a shortcut when there is no design function or order is 0.
         if hasattr(self.settings, "order") and not self.settings.order:
@@ -831,32 +874,16 @@ class FilterByDesignTransformer(
         if self.state.filter is not None and self.state.needs_redesign:
             axis = self.state.filter.settings.axis
             fs = 1 / message.axes[axis].gain
-            coefs = design_fun(fs)
-
-            # Convert BA to SOS if requested
-            if coefs is not None and self.settings.coef_type == "sos":
-                if isinstance(coefs, tuple) and len(coefs) == 2:
-                    # It's BA format, convert to SOS
-                    b, a = coefs
-                    coefs = scipy.signal.tf2sos(b, a)
-
+            coefs = self._design_coefs(fs)
             self.state.filter.update_coefficients(coefs, coef_type=self.settings.coef_type)
             self.state.needs_redesign = False
 
         return super().__call__(message)
 
     def _reset_state(self, message: AxisArray) -> None:
-        design_fun = self.get_design_function()
         axis = resolve_configured_stream_dim(self, message, self.settings.axis)
         fs = 1 / message.axes[axis].gain
-        coefs = design_fun(fs)
-
-        # Convert BA to SOS if requested
-        if coefs is not None and self.settings.coef_type == "sos":
-            if isinstance(coefs, tuple) and len(coefs) == 2:
-                # It's BA format, convert to SOS
-                b, a = coefs
-                coefs = scipy.signal.tf2sos(b, a)
+        coefs = self._design_coefs(fs)
 
         # The child is handed the axis this transformer already resolved, so it
         # filters the same dimension. Suppressed because this runs on every reset

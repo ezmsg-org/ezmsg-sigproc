@@ -22,6 +22,7 @@ from scipy.special import lambertw
 
 from .spectrum import OptionsEnum
 from .util.deprecation import warn_axis_deprecated
+from .util.minphase import MinPhaseMode, min_phase_kernel
 from .window import WindowTransformer
 
 
@@ -31,21 +32,6 @@ class FilterbankMode(OptionsEnum):
     CONV = "Direct Convolution"
     FFT = "FFT Convolution"
     AUTO = "Automatic"
-
-
-class MinPhaseMode(OptionsEnum):
-    """The mode of operation for the filterbank."""
-
-    NONE = "No kernel modification"
-    HILBERT = (
-        "Hilbert Method; designed to be used with equiripple filters (e.g., from remez) with unity or zero gain regions"
-    )
-    HOMOMORPHIC = (
-        "Works best with filters with an odd number of taps, and the resulting minimum phase filter "
-        "will have a magnitude response that approximates the square root of the original filter’s "
-        "magnitude response using half the number of taps"
-    )
-    # HOMOMORPHICFULL = "Like HOMOMORPHIC, but uses the full number of taps and same magnitude"
 
 
 class FilterbankSettings(ez.Settings):
@@ -62,9 +48,11 @@ class FilterbankSettings(ez.Settings):
 
     min_phase: MinPhaseMode = MinPhaseMode.NONE
     """
-    If not None, convert the kernels to minimum-phase equivalents. Valid options are
-      'hilbert', 'homomorphic', and 'homomorphic-full'. Complex filters not supported.
-      See `scipy.signal.minimum_phase` for details.
+    If not NONE, convert the kernels to minimum-phase equivalents with
+      :func:`~ezmsg.sigproc.util.minphase.min_phase_kernel`. HILBERT and HOMOMORPHIC return
+      half-length kernels with the square root of the original magnitude response;
+      HOMOMORPHICFULL keeps the length and magnitude response. Complex kernels support
+      the homomorphic modes only.
     """
 
     axis: str | None = None
@@ -112,20 +100,7 @@ class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArra
         in_shape = message.data.shape[:targ_ax_ix] + message.data.shape[targ_ax_ix + 1 :]
 
         kernels = self.settings.kernels
-        if self.settings.min_phase != MinPhaseMode.NONE:
-            if any(np.iscomplexobj(k) for k in kernels):
-                raise ValueError(
-                    "min_phase conversion is not supported for complex kernels: "
-                    "scipy.signal.minimum_phase only accepts real filters. Complex/analytic "
-                    "wavelets (e.g. 'cmor') cannot be min-phased; use MinPhaseMode.NONE or a "
-                    "real wavelet/kernel."
-                )
-            method, half = {
-                MinPhaseMode.HILBERT: ("hilbert", False),
-                MinPhaseMode.HOMOMORPHIC: ("homomorphic", False),
-                # MinPhaseMode.HOMOMORPHICFULL: ("homomorphic", True),
-            }[self.settings.min_phase]
-            kernels = [sps.minimum_phase(k, method=method) for k in kernels]
+        kernels = [min_phase_kernel(k, self.settings.min_phase) for k in kernels]
 
         # Determine if this will be operating with complex data.
         b_complex = message.data.dtype.kind == "c" or any([_.dtype.kind == "c" for _ in kernels])

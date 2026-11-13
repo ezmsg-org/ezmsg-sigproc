@@ -17,6 +17,7 @@ from ezmsg.sigproc.filter import (
     FilterBaseSettings,
     FilterByDesignTransformer,
 )
+from ezmsg.sigproc.util.minphase import MinPhaseMode
 
 
 class FIRHilbertFilterSettings(FilterBaseSettings):
@@ -169,6 +170,9 @@ class FIRHilbertFilterTransformer(FilterByDesignTransformer[FIRHilbertFilterSett
         if self.settings.coef_type != "ba":
             ez.logger.error("FIRHilbert only supports coef_type='ba'.")
             raise ValueError("FIRHilbert only supports coef_type='ba'.")
+        if self.settings.min_phase != MinPhaseMode.NONE:
+            # Min-phasing keeps only the magnitude response, discarding the 90 degree phase shift.
+            raise ValueError("FIRHilbert does not support min_phase: it would destroy the Hilbert phase shift.")
 
         return functools.partial(
             fir_hilbert_design_fun,

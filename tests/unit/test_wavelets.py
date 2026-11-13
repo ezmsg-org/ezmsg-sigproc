@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 import pywt
 from ezmsg.util.messages.axisarray import AxisArray
 
@@ -163,13 +164,13 @@ def test_cwt_rejects_input_with_freq_axis():
         proc(msg)
 
 
-def test_cwt_complex_wavelet_min_phase_informative_error():
-    """Regression for #41: complex/analytic wavelet + min_phase used to bubble
-    up scipy's bare 'Complex filters not supported'."""
-    import pytest
-
+@pytest.mark.parametrize("min_phase", [MinPhaseMode.HOMOMORPHIC, MinPhaseMode.HOMOMORPHICFULL, MinPhaseMode.HILBERT])
+def test_cwt_complex_wavelet_min_phase(min_phase):
+    """Complex/analytic wavelets can be min-phased with the homomorphic modes
+    (#41 used to raise scipy's bare 'Complex filters not supported'); HILBERT
+    has no complex counterpart and raises."""
     msg = AxisArray(
-        data=np.zeros((2, 100)),
+        data=np.random.default_rng(0).standard_normal((2, 100)),
         dims=["ch", "time"],
         axes={
             "ch": AxisArray.CoordinateAxis(data=np.array(["Ch0", "Ch1"]), dims=["ch"]),
@@ -182,12 +183,18 @@ def test_cwt_complex_wavelet_min_phase_informative_error():
             frequencies=None,
             scales=np.geomspace(4, 64, num=8),
             wavelet="cmor3.0-0.5",
-            min_phase=MinPhaseMode.HOMOMORPHIC,
+            min_phase=min_phase,
             axis="time",
         )
     )
-    with pytest.raises(ValueError, match="[Cc]omplex.*min[_ ]phase|min_phase.*complex"):
-        proc(msg)
+    if min_phase == MinPhaseMode.HILBERT:
+        with pytest.raises(ValueError, match="HILBERT"):
+            proc(msg)
+        return
+    out = proc(msg)
+    assert np.iscomplexobj(out.data)
+    assert out.data.shape == (2, 8, 100)
+    assert np.all(np.isfinite(out.data))
 
 
 def test_template_axes_cached_and_owned():
