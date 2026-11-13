@@ -389,6 +389,7 @@ class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArra
             self._state.template,
             data=res,
             axes={**self._state.template.axes, axis: out_ax},
+            attrs=message.attrs,
         )
 
 
