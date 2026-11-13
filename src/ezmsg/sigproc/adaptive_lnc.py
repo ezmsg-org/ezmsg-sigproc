@@ -413,6 +413,12 @@ class AdaptiveLNCTransformer(
         self._state.warm_held = [] if warm else None
         self._state.warm_axis = None
 
+    def _reset_segment(self, message: AxisArray) -> None:
+        # As keep_frequency_on_reset: the mains frequency survives a gap, the phase does not.
+        omega = self._state.omega
+        self._reset_state(message)
+        self._state.omega = omega
+
     def _warm_start(self, x: npt.NDArray, fs: float, n_harm: int, is_mlx: bool, xp: Any) -> None:
         """Fit the line to ``x`` (time-first) and set the canceller to its steady
         state for it. Least squares per channel of ``x`` on ``cos``/``sin`` at
@@ -628,6 +634,8 @@ class AdaptiveLNCTransformer(
             self._warm_start(x_data[:need] if buffered else x_data, fs, n_harm, is_mlx, xp)
 
         n = x_data.shape[0]
+        if n == 0:  # nothing to cancel, and the segment loops below would have no pieces to join
+            return message
 
         # Time constants -> gains (independent of chunk size and fs).
         # mu = 2 / (tau_adapt * fs); beta = 1 - exp(-window_dt / tau_freq).

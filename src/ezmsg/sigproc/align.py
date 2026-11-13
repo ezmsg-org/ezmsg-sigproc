@@ -11,9 +11,11 @@ from ezmsg.baseproc import resolve_configured_stream_dim
 from ezmsg.baseproc.protocols import processor_state
 from ezmsg.baseproc.stateful import BaseStatefulTransformer
 from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.util import replace
 
 from .util.axisarray_buffer import HybridAxisArrayBuffer
 from .util.deprecation import warn_axis_deprecated
+from .util.segment import SegmentJoin
 
 
 class AlignAlongAxisSettings(ez.Settings):
@@ -68,6 +70,10 @@ class AlignAlongAxisProcessor(
 
     Returns ``(aligned_a, aligned_b)`` when alignment succeeds, else ``None``.
     """
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._segments = SegmentJoin()
 
     # -- Helpers -------------------------------------------------------------
 
@@ -152,6 +158,8 @@ class AlignAlongAxisProcessor(
 
     def _process(self, message: AxisArray) -> _AlignPair | None:
         """Process input A: detect shape changes, buffer, try align."""
+        # A new segment on A has already reset both buffers (`_reset_segment`); just count it.
+        self._segments.update(a=message.segment)
         shape_sig = self._non_align_shape(message, self._state.align_axis)
         if self._state.a_shape_sig is not None and shape_sig != self._state.a_shape_sig:
             self._reset_a_state()
@@ -168,6 +176,9 @@ class AlignAlongAxisProcessor(
     def push_b(self, message: AxisArray) -> _AlignPair | None:
         """Process input B: check gain, detect shape changes, buffer, try align."""
         align_axis = resolve_configured_stream_dim(self, message, self.settings.axis)
+        if self._segments.update(b=message.segment):
+            # As for A: neither buffer may pair samples from before the break with samples after it.
+            self._full_reset(align_axis)
 
         # Gain compatibility check. Skipped when B's gain can't be estimated
         # (e.g. a single-sample CoordinateAxis yields None) — there is nothing
@@ -254,7 +265,8 @@ class AlignAlongAxisProcessor(
                         )
             self._state.aligned = True
 
-        return aa_a, aa_b
+        seg = self._segments.segment
+        return replace(aa_a, segment=seg), replace(aa_b, segment=seg)
 
 
 class AlignAlongAxis(ez.Unit):

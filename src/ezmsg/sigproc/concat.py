@@ -17,6 +17,7 @@ from ezmsg.util.messages.util import replace
 from ezmsg.sigproc.util.channels import AxisFingerprintMemo
 
 from .util.message import with_fingerprint
+from .util.segment import SegmentJoin
 
 logger = logging.getLogger(__name__)
 
@@ -534,6 +535,7 @@ class ConcatState:
     b_fingerprint: tuple | None = None
     memo_a: _FingerprintMemo = field(default_factory=_FingerprintMemo)
     memo_b: _FingerprintMemo = field(default_factory=_FingerprintMemo)
+    segments: SegmentJoin = field(default_factory=SegmentJoin)
 
 
 class ConcatProcessor:
@@ -621,7 +623,16 @@ class ConcatProcessor:
         # dimension intact; concatenating along the stream dimension itself would
         # not, hence the membership check.
         stream_dim = a.stream_dim if a.stream_dim in a.dims else None
-        return AxisArray(data, dims=list(a.dims), axes=axes, key=key, attrs=attrs, stream_dim=stream_dim)
+        self._state.segments.update(a=a.segment, b=b.segment)
+        return AxisArray(
+            data,
+            dims=list(a.dims),
+            axes=axes,
+            key=key,
+            attrs=attrs,
+            stream_dim=stream_dim,
+            segment=self._state.segments.segment,
+        )
 
     def _fingerprint(self, msg: AxisArray, memo: _FingerprintMemo | None = None) -> tuple:
         """Summarize everything ``_rebuild_cache`` reads, so the cache invalidates.

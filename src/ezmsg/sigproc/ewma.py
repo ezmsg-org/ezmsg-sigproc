@@ -206,7 +206,11 @@ class EWMASettings(ez.Settings):
     assumes.
 
     Empty chunks are not gaps -- they carry no samples past the filter -- so they
-    never trigger this."""
+    never trigger this.
+
+    A gap in the stream itself, reported by a change of
+    :attr:`~ezmsg.util.messages.axisarray.AxisArray.segment`, poses the same
+    question and gets the same answer: the estimate is kept unless this is True."""
 
     mlx_metal_chunk_sizes: tuple[int, ...] = (32, 1024)
     """Allowable compile-time chunk sizes for EWMA Metal kernels. The smallest
@@ -281,6 +285,11 @@ class EWMATransformer(BaseStatefulTransformer[EWMASettings, AxisArray, AxisArray
         if self._skip(message):
             return message
         return await super().__acall__(message)
+
+    def _reset_segment(self, message: AxisArray) -> None:
+        # A gap is not evidence the signal's statistics changed; see `reset_on_resume`.
+        if self.settings.reset_on_resume:
+            self._reset_state(message)
 
     def _reset_state(self, message: AxisArray) -> None:
         axis = resolve_configured_stream_dim(self, message, self.settings.axis)

@@ -119,6 +119,12 @@ class AdaptiveLatticeNotchFilterTransformer(
         # for feat_ix in range(np.prod(sample_shape)):
         #     self._state.zi[:, feat_ix] = scipy.signal.lfiltic(b, a, s[::-1, feat_ix], x=None)
 
+    def _reset_segment(self, message: AxisArray) -> None:
+        # The tracked notch frequency survives a gap; the filter memory does not.
+        k1 = self._state.k1
+        self._reset_state(message)
+        self._state.k1 = k1
+
     def _process(self, message: AxisArray) -> AxisArray:
         x_data = message.data
         axis = self._state.axis

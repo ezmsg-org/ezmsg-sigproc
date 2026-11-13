@@ -66,6 +66,7 @@ dependencies = [
 "sigproc.Filter" = "ezmsg.sigproc.filter:Filter"
 "sigproc.Filterbank" = "ezmsg.sigproc.filterbank:Filterbank"
 "sigproc.Flatten" = "ezmsg.sigproc.flatten:Flatten"
+"sigproc.GapDetect" = "ezmsg.sigproc.gapdetect:GapDetect"
 "sigproc.GaussianSmoothingFilter" = "ezmsg.sigproc.gaussiansmoothing:GaussianSmoothingFilter"
 "sigproc.InverseAnscombe" = "ezmsg.sigproc.math.anscombe:InverseAnscombe"
 "sigproc.Invert" = "ezmsg.sigproc.math.invert:Invert"

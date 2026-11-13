@@ -90,13 +90,13 @@ def hold_for_startup(held: list[AxisArray], message: AxisArray, axis: str, n: in
 
     Appends ``message`` to ``held``. Returns None while fewer than ``n`` samples are held; then
     empties ``held`` and returns everything as one message carrying the first held message's axes
-    and the latest message's attrs.
+    and the latest message's attrs and segment.
     """
     held.append(message)
     ax_idx = message.get_axis_idx(axis)
     if sum(m.data.shape[ax_idx] for m in held) < n:
         return None
     data = get_namespace(message.data).concat([m.data for m in held], axis=ax_idx)
-    released = replace(held[0], data=data, attrs=message.attrs)
+    released = replace(held[0], data=data, attrs=message.attrs, segment=message.segment)
     held.clear()
     return released
