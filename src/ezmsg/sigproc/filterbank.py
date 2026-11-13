@@ -15,6 +15,7 @@ from ezmsg.baseproc import (
     BaseTransformerUnit,
     processor_state,
     resolve_configured_stream_dim,
+    suppress_axis_deprecation,
 )
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
@@ -63,8 +64,7 @@ class FilterbankSettings(ez.Settings):
       delay is subtracted from the stream axis offset. With ``min_phase=HOMOMORPHICFULL`` only the
       kernels that would otherwise set the common delay are converted; the rest stay linear
       phase. HILBERT and HOMOMORPHIC still convert every kernel, since they change the magnitude
-      response. Not supported in FFT mode (raises ``ValueError``), whose output timestamps do not
-      track its windowing.
+      response.
     """
 
     axis: str | None = None
@@ -150,12 +150,6 @@ class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArra
                 if sps.choose_conv_method(dummy_arr, concat_kernel, mode="full") == "direct"
                 else FilterbankMode.FFT
             )
-        if self.settings.compensate_delay and self._state.mode == FilterbankMode.FFT:
-            raise ValueError(
-                "compensate_delay=True is not supported in FFT mode: its output timestamps do not account "
-                "for the samples held in its window buffer. Use mode=CONV."
-            )
-
         if self._state.mode == FilterbankMode.CONV:
             # Preallocate memory for convolution result and overlap-add
             dest_shape = in_shape + (
@@ -176,13 +170,14 @@ class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArra
             # Note: We could do windowing manually to avoid the overhead of the message structure,
             #  but windowing is difficult to do correctly, so we lean on the heavily-tested `windowing` generator.
             win_dur = win_len * gain
-            self._state.windower = WindowTransformer(
-                axis=axis,
-                newaxis="win",
-                window_dur=win_dur,
-                window_shift=win_dur,
-                zero_pad_until="none",
-            )
+            with suppress_axis_deprecation():  # our own resolved axis, not the user's setting
+                self._state.windower = WindowTransformer(
+                    axis=axis,
+                    newaxis="win",
+                    window_dur=win_dur,
+                    window_shift=win_dur,
+                    zero_pad_until="none",
+                )
 
             # Windowing output has an extra "win" dimension, so we need our tail to match.
             self._state.tail = np.expand_dims(self._state.tail, -2)
@@ -303,6 +298,9 @@ class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArra
             res = overlapped[..., : -self._state.overlap].reshape(overlapped.shape[:-2] + (-1,))
 
         out_ax = message.axes[axis]
+        if self._state.mode == FilterbankMode.FFT:
+            # Output starts at the first buffered window, not at this message.
+            out_ax = replace(out_ax, offset=win_msg.axes["win"].offset)
         if self.settings.compensate_delay and self._state.delay:
             out_ax = replace(out_ax, offset=out_ax.offset - self._state.delay * out_ax.gain)
         return replace(
