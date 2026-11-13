@@ -450,9 +450,8 @@ GAP_REFERENCE = {
     "AdaptiveLNCTransformer": _fresh_keeping("omega"),
     # The tracked notch coefficient survives a gap; the filter memory does not.
     "AdaptiveLatticeNotchFilterTransformer": _fresh_keeping("k1"),
-    # Exponentially-weighted statistics survive a gap unless `reset_on_resume`; Detrend inherits it from EWMA.
+    # Exponentially-weighted statistics survive a gap unless `reset_on_resume`. Detrend always resets.
     "EWMATransformer": _keeps_everything,
-    "DetrendTransformer": _keeps_everything,
     "AdaptiveStandardScalerTransformer": _keeps_everything,
 }
 
