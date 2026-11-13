@@ -94,3 +94,19 @@ def test_async_path_matches():
 def test_tolerance_is_required():
     with pytest.raises(TypeError):
         GapDetectSettings()
+
+
+def test_tolerance_none_passes_messages_through_untouched():
+    proc = GapDetectTransformer(tolerance=None)
+    msgs = [chunk(0.0, segment=7), chunk(5.0, segment=7), chunk(1.0, segment=9)]
+    assert all(proc(m) is m for m in msgs)
+
+
+def test_detection_can_be_switched_off_and_on_while_running():
+    proc = GapDetectTransformer(tolerance=0.002)
+    assert segments(proc, [chunk(0.0), chunk(5.0)]) == [0, 1]
+    proc.update_settings(GapDetectSettings(tolerance=None))
+    assert segments(proc, [chunk(9.0, segment=4), chunk(20.0, segment=4)]) == [4, 4]
+    proc.update_settings(GapDetectSettings(tolerance=0.002))
+    # The jump from the last chunk seen before or during the pause is not a gap: counting starts afresh.
+    assert segments(proc, [chunk(50.0, segment=4), chunk(50.1, segment=4), chunk(60.0, segment=4)]) == [0, 0, 1]
