@@ -28,6 +28,7 @@ from .util import sosfilt_direct
 from .util.array import array_device, xp_asarray, xp_create
 from .util.deprecation import warn_axis_deprecated
 from .util.minphase import MinPhaseMode, is_linear_phase, kernel_delay, min_phase_kernel
+from .util.startup import StartupMode, hold_for_startup, prime_with_reflection, settle_samples, startup_n_pad
 from .util.threaded_filt import DEFAULT_MIN_BYTES as _DEFAULT_THREAD_MIN_BYTES
 from .util.threaded_filt import filt_threaded, should_thread
 
@@ -415,6 +416,35 @@ class FilterBaseSettings(ez.Settings):
     otherwise (e.g. after ``min_phase``). IIR and SOS filters have no single delay and raise
     ``ValueError``. The delay is logged at info level whether or not it is compensated."""
 
+    startup: StartupMode = StartupMode.CONSTANT
+    """What the filter assumes about the signal before the first sample, at start and after every reset.
+
+    * CONSTANT (default): a constant pre-history at the first sample's value. Removes the step
+      transient from a DC offset, but oscillating content still takes the filter's full settling
+      time to come through. This is what SciPy documents (``lfilter_zi * x[0]``) and what online
+      EEG tools do; prefer it for band-pass filters.
+    * FIRST_CHUNK: build the state from a synthetic pre-history, the odd reflection of the first
+      samples about the first one (as :func:`scipy.signal.filtfilt` pads), so the filter starts as
+      if it had been running on a signal that joins the real one in value and slope. The pad is
+      taken from the first message alone, so no latency is added, but the output depends on how
+      long that message is: a short first chunk primes little.
+    * BUFFERED: like FIRST_CHUNK, but output is withheld (zero-length messages are emitted) until
+      enough samples have arrived for the full pad, then everything held is released in one
+      message stamped with the first held sample's time. The output does not depend on chunking.
+
+    The pad length is inferred from the filter: ``taps - 1`` for an FIR, and for an IIR the samples
+    its slowest pole takes to decay to 1e-3. It is capped by :attr:`startup_max_dur`. Requires a
+    LinearAxis on the stream dimension.
+
+    The reflection matches the signal's value and slope at the first sample, so it removes the
+    start-up transient of offsets and drifts. It helps a pass-band oscillation only if the stream
+    starts near the oscillation's mean: started away from it, the reflection carries a DC step of
+    ``2 * (x[0] - mean)`` and the transient can be longer than with CONSTANT."""
+
+    startup_max_dur: float | None = 1.0
+    """Upper limit, in seconds, on the start-up pad (see :attr:`startup`); None for no limit. Bounds the
+    latency of BUFFERED start-up for narrow-band IIR filters, whose settling time can be long."""
+
 
 class FilterSettings(FilterBaseSettings):
     coefs: FilterCoefficients | None = None
@@ -445,6 +475,9 @@ class FilterState:
     sos_direct_dtype: typing.Any | None = None  # promoted dtype sos_direct was built for
     delay: float | None = None  # FIR delay in samples; None for IIR/SOS
     delay_for: typing.Any | None = None  # the coefs object `delay` was computed for
+    startup_pending: bool = False  # data-primed start-up has yet to run since the last reset
+    startup_held: list | None = None  # messages withheld by BUFFERED start-up
+    startup_n_pad: int = 0  # start-up pad length in samples
 
 
 class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisArray, FilterState]):
@@ -529,6 +562,28 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
             self._build_fir_taps(fir[0], fir[1], message.data, axis_idx)
 
     def _reset_state(self, message: AxisArray) -> None:
+        self._init_filter_state(message)
+        if self.settings.startup == StartupMode.ZERO:
+            raise ValueError("startup=ZERO is for filterbanks; a filter starts from CONSTANT at the least.")
+        self.state.startup_held = []
+        self.state.startup_pending = self.settings.startup != StartupMode.CONSTANT
+        if self.state.startup_pending:
+            axis = resolve_configured_stream_dim(self, message, self.settings.axis)
+            _, coefs = _normalize_coefs(self.settings.coefs)
+            if self.settings.coef_type == "sos":
+                poles, order = scipy.signal.sos2zpk(coefs[0])[1], 2 * len(coefs[0])
+            else:
+                poles, order = np.roots(coefs[1]), max(len(coefs[0]), len(coefs[1])) - 1
+            self.state.startup_n_pad = startup_n_pad(
+                settle_samples(poles, order), message, axis, self.settings.startup_max_dur
+            )
+
+    def _prime(self, pad: AxisArray) -> None:
+        """Start the filter from the pad's first sample and run the pad through it (output discarded)."""
+        self._init_filter_state(pad)
+        self._process(pad)
+
+    def _init_filter_state(self, message: AxisArray) -> None:
         # __call__ guarantees a non-empty message here. Initial conditions are
         # edge-scaled by the first sample x0 -- the scipy ``lfilter_zi * x[0]``
         # idiom -- treating the pre-stream signal as constant x0 so that a DC
@@ -743,12 +798,27 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
                 pass
         return self.state.sos_direct
 
+    def _empty_output(self, data: typing.Any, axis_idx: int) -> typing.Any:
+        """A zero-length slice of ``data`` in the dtype filtering it would produce."""
+        empty = slice_along_axis(data, slice(0, 0), axis_idx)
+        if not is_numpy_array(empty):
+            return empty  # device backends filter in the input's dtype
+        return empty.astype(np.result_type(*_normalize_coefs(self.settings.coefs)[1], empty))
+
     def _process(self, message: AxisArray) -> AxisArray:
         axis = resolve_configured_stream_dim(self, message, self.settings.axis)
         if message.data.size > 0:
             axis_idx = message.get_axis_idx(axis)
             if self.state.fir_method is not None and self.state.fir_b_1d is None:
                 self._refresh_fir_taps(message, axis_idx)
+            if self.state.startup_pending:
+                if self.settings.startup == StartupMode.BUFFERED:
+                    released = hold_for_startup(self.state.startup_held, message, axis, self.state.startup_n_pad + 1)
+                    if released is None:
+                        return self._stamp(replace(message, data=self._empty_output(message.data, axis_idx)), axis)
+                    message = released
+                self.state.startup_pending = False
+                prime_with_reflection(self._prime, message, axis, self.state.startup_n_pad)
             if self.state.fir_method == "conv1d":
                 dat_out, self.state.zi = _fir_filt_conv1d(self.state.fir_b_1d, message.data, self.state.zi, axis_idx)
             elif self.state.fir_method == "conv":
@@ -892,6 +962,8 @@ class FilterByDesignTransformer(
                 "thread_min_bytes",
                 "fir_fft_min_taps",
                 "compensate_delay",
+                "startup",
+                "startup_max_dur",
             )
         }
 

@@ -19,6 +19,7 @@ from .filterbank import (
     FilterbankSettings,
     FilterbankTransformer,
     MinPhaseMode,
+    StartupMode,
 )
 from .kaiser import KaiserFilterSettings, kaiser_design_fun
 from .util.deprecation import warn_axis_deprecated
@@ -46,6 +47,12 @@ class FilterbankDesignSettings(ez.Settings):
     compensate_delay: bool = False
     """Align the kernels on one delay and subtract it from the output offset. See
       :attr:`FilterbankSettings.compensate_delay`."""
+
+    startup: StartupMode = StartupMode.CONSTANT
+    """Data-primed start-up. See :attr:`FilterbankSettings.startup`."""
+
+    startup_max_dur: float | None = 1.0
+    """Upper limit, in seconds, on the start-up pad; None for no limit."""
 
     axis: str | None = None
     """.. deprecated:: 3.8
@@ -170,6 +177,8 @@ class FilterbankDesignTransformer(
                 mode=self.settings.mode,
                 min_phase=self.settings.min_phase,
                 compensate_delay=self.settings.compensate_delay,
+                startup=self.settings.startup,
+                startup_max_dur=self.settings.startup_max_dur,
                 axis=self.state.axis,
                 new_axis=self.settings.new_axis,
                 bands=self._bands(fs),
