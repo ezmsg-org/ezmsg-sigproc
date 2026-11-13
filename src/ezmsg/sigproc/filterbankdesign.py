@@ -48,7 +48,7 @@ class FilterbankDesignSettings(ez.Settings):
     """Align the kernels on one delay and subtract it from the output offset. See
       :attr:`FilterbankSettings.compensate_delay`."""
 
-    startup: StartupMode = StartupMode.ZERO
+    startup: StartupMode = StartupMode.CONSTANT
     """Data-primed start-up. See :attr:`FilterbankSettings.startup`."""
 
     startup_max_dur: float | None = 1.0

@@ -85,19 +85,6 @@ def prime_with_reflection(
     run(replace(message, data=pad, axes={**message.axes, axis: replace(ax, offset=ax.offset - n_pad * ax.gain)}))
 
 
-def prime_with_constant(
-    run: typing.Callable[[AxisArray], typing.Any], message: AxisArray, axis: str, n_pad: int
-) -> None:
-    """As :func:`prime_with_reflection`, but the pad is ``message``'s first sample held for ``n_pad`` samples."""
-    ax_idx = message.get_axis_idx(axis)
-    if n_pad <= 0 or message.data.shape[ax_idx] == 0:
-        return
-    ax = _linear_axis(message, axis)
-    xp = get_namespace(message.data)
-    pad = xp.repeat(slice_along_axis(message.data, slice(0, 1), ax_idx), n_pad, axis=ax_idx)
-    run(replace(message, data=pad, axes={**message.axes, axis: replace(ax, offset=ax.offset - n_pad * ax.gain)}))
-
-
 def hold_for_startup(held: list[AxisArray], message: AxisArray, axis: str, n: int) -> AxisArray | None:
     """Collect messages until they hold ``n`` samples on ``axis``.
 
