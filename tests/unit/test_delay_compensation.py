@@ -392,10 +392,23 @@ def test_filterbank_log_when_not_compensated(caplog):
     assert "approximate" not in msg
 
 
-@pytest.mark.parametrize("mode", [FilterbankMode.FFT, FilterbankMode.AUTO])
-def test_filterbank_fft_mode_with_compensate_delay_raises(mode):
-    # A long kernel makes AUTO choose FFT.
-    kernels = [sps.firwin(1501, 10.0, fs=FS), sps.firwin(1001, 20.0, fs=FS)]
-    proc = FilterbankTransformer(FilterbankSettings(kernels=kernels, mode=mode, compensate_delay=True))
-    with pytest.raises(ValueError, match="FFT mode"):
-        proc(_msg(np.zeros(100)))
+@pytest.mark.parametrize("compensate", [False, True])
+def test_filterbank_fft_mode_timestamps_match_conv(compensate):
+    """FFT mode holds samples in a window buffer; each sample must still get the stamp CONV gives it."""
+    kernels = [sps.firwin(101, 10.0, fs=FS), sps.firwin(41, 20.0, fs=FS)]
+    x = np.random.default_rng(0).standard_normal(3000)
+    stamped = {}
+    for mode in (FilterbankMode.CONV, FilterbankMode.FFT):
+        proc = FilterbankTransformer(FilterbankSettings(kernels=kernels, mode=mode, compensate_delay=compensate))
+        t, y = [], []
+        for start in range(0, x.size, 37):
+            out = proc(_msg(x[start : start + 37], offset=5.0 + start / FS))
+            ax = out.axes["time"]
+            t.append(ax.offset + np.arange(out.data.shape[-1]) * ax.gain)
+            y.append(out.data)
+        stamped[mode] = np.concatenate(t), np.concatenate(y, axis=-1)
+    t_fft, y_fft = stamped[FilterbankMode.FFT]
+    t_conv, y_conv = stamped[FilterbankMode.CONV]
+    assert 0 < t_fft.size < t_conv.size  # FFT mode lags by its buffered window
+    np.testing.assert_allclose(t_fft, t_conv[: t_fft.size], atol=1e-9)
+    np.testing.assert_allclose(y_fft, y_conv[..., : t_fft.size], atol=1e-9)
