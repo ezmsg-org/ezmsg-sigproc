@@ -34,6 +34,7 @@ from .math.log import LogSettings, LogTransformer
 from .math.pow import PowSettings, PowTransformer
 from .spectrum import OptionsEnum
 from .util.minphase import MinPhaseMode
+from .util.startup import StartupMode
 
 
 class EnvelopePowerOutput(OptionsEnum):
@@ -89,6 +90,10 @@ class MultiBandEnvelopePowerSettings(ez.Settings):
     latency; their delay is then frequency dependent, so alignment is approximate.
     HILBERT and HOMOMORPHIC raise: complex kernels do not support the former, and the latter
     halves the magnitude response in dB."""
+
+    startup: StartupMode = StartupMode.CONSTANT
+    """Passed to :attr:`FilterbankSettings.startup`. The default holds the first sample as the
+    pre-history, so a DC offset does not ring through the bands at the start of a stream."""
 
     materialize: MaterializeMode = MaterializeMode.ASYNC
     """How to evaluate the output on a lazy backend (MLX); see
@@ -151,6 +156,7 @@ class AnalyticFilterbankTransformer(
                     mode=FilterbankMode.CONV,
                     min_phase=self.settings.min_phase,
                     compensate_delay=True,
+                    startup=self.settings.startup,
                     axis=self._state.axis,
                     new_axis="band",
                     bands=[tuple(b) for b in self.settings.bands],

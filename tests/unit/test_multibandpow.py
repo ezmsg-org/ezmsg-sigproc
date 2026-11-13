@@ -178,3 +178,19 @@ def test_invalid_settings_raise(bands, kwargs):
     proc = MultiBandEnvelopePowerTransformer(MultiBandEnvelopePowerSettings(bands=bands, **kwargs))
     with pytest.raises(ValueError):
         proc(_msg(np.zeros((100, 1))))
+
+
+def test_startup_constant_keeps_dc_offset_out_of_the_bands():
+    from ezmsg.sigproc.util.startup import StartupMode
+
+    x = np.full((2000, 1), 1000.0)
+
+    def run(startup, chunk=100):
+        proc = MultiBandEnvelopePowerTransformer(MultiBandEnvelopePowerSettings(bands=BANDS, startup=startup))
+        outs = [proc(_msg(x[i : i + chunk], offset=i / FS)) for i in range(0, len(x), chunk)]
+        return np.concatenate([o.data for o in outs if o.data.size], axis=0)
+
+    # Stop-band leakage of the offset (-60 dB of 1e6) against the step a zero pre-history rings with.
+    assert run(StartupMode.CONSTANT).max() < 10.0
+    assert run(StartupMode.ZERO).max() > 1e4
+    assert run(StartupMode.BUFFERED).max() < 10.0  # withheld start-up passes through the later stages
