@@ -4,6 +4,8 @@ import asyncio
 import copy
 
 import numpy as np
+import pytest
+from ezmsg.baseproc import end_of_stream
 from ezmsg.util.messages.axisarray import AxisArray, chain_config_id
 from frozendict import frozendict
 
@@ -280,3 +282,43 @@ class TestAddConfigId:
             processor.push_b(_declared(ids[1]))
             processor()
         assert calls == [(1, 2), (3, 2)]
+
+
+def _seg_msg(value: float, segment: int, config_id: int) -> AxisArray:
+    return AxisArray(
+        np.full((2, 2), value),
+        dims=["time", "ch"],
+        axes=frozendict({"time": AxisArray.TimeAxis(fs=100.0)}),
+        segment=segment,
+        config_id=config_id,
+    )
+
+
+@pytest.mark.parametrize("side", ["a", "b"])
+def test_end_of_stream_on_one_input_gives_one_empty_output(side):
+    """An empty new-segment message on one input is not paired with the other input's data."""
+    processor = AddProcessor()
+    a0, b0 = _seg_msg(1.0, 0, 1), _seg_msg(10.0, 0, 2)
+    processor.push_a(a0)
+    processor.push_b(b0)
+    getattr(processor, f"push_{side}")(end_of_stream(a0 if side == "a" else b0))
+    processor.push_a(_seg_msg(2.0, 2 if side == "a" else 0, 1))
+    processor.push_b(_seg_msg(20.0, 2 if side == "b" else 0, 2))
+
+    out = [processor() for _ in range(3)]
+    assert [o.segment for o in out] == [0, 1, 2]
+    assert out[1].data.shape == (0, 2)
+    assert out[1].config_id == out[0].config_id == chain_config_id(1, 2)
+    np.testing.assert_array_equal(out[0].data, np.full((2, 2), 11.0))
+    np.testing.assert_array_equal(out[2].data, np.full((2, 2), 22.0))
+
+
+def test_end_of_stream_before_any_pair_emits_nothing():
+    """With nothing yet to base an empty output on, the message is dropped; pairing carries on."""
+    processor = AddProcessor()
+    processor.push_a(end_of_stream(_seg_msg(1.0, 0, 1)))
+    processor.push_a(_seg_msg(1.0, 2, 1))
+    processor.push_b(_seg_msg(10.0, 0, 2))
+    out = processor()
+    np.testing.assert_array_equal(out.data, np.full((2, 2), 11.0))
+    assert processor.state.queue_a.empty() and processor.state.queue_b.empty()
