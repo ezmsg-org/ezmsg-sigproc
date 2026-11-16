@@ -11,7 +11,8 @@ keep the stream's cadence.
 import asyncio
 
 import numpy as np
-from ezmsg.util.messages.axisarray import AxisArray
+import pytest
+from ezmsg.util.messages.axisarray import AxisArray, replace
 
 from ezmsg.sigproc.binned_aggregate import BinnedAggregate, BinnedAggregateSettings
 from ezmsg.sigproc.downsample import Downsample, DownsampleSettings
@@ -127,3 +128,49 @@ def test_resampleconcat_drain_gate():
     # drain instead of being published.
     unit.processor = _StubProcessor([_null_template()])
     assert list(unit._drain()) == []
+
+
+def _units():
+    downsample = Downsample(DownsampleSettings(target_rate=50.0))
+    binned = BinnedAggregate(BinnedAggregateSettings(axis="time", bin_duration=0.02))
+    window_kw = dict(axis="time", window_dur=0.1, window_shift=0.1, zero_pad_until="none")
+    window = Window(WindowSettings(**window_kw))  # unbundles windows into separate messages
+    windows = Window(WindowSettings(newaxis="win", **window_kw))
+    return [downsample, binned, window, windows]
+
+
+@pytest.mark.parametrize("unit", _units(), ids=["downsample", "binned", "window", "window_multi"])
+def test_empty_message_starting_a_segment_is_published(unit):
+    """An empty result is swallowed within a segment, but one that opens a new segment
+    flows: downstream units flush and reset on the segment change (e.g. end of file)."""
+    unit.create_processor()
+    _drive(unit, make_msg(n_time=1, fs=1000.0))
+    assert _drive(unit, make_msg(n_time=1, fs=1000.0)) == []
+    published = _drive(unit, replace(make_msg(n_time=0, fs=1000.0), segment=1))
+    # A unit holding a tail (BinnedAggregate's open bin) publishes it first, in the old segment.
+    assert [m.segment for _, m in published[:-1]] == [0] * (len(published) - 1)
+    _, msg_out = published[-1]
+    assert msg_out.segment == 1
+    assert is_empty_along(msg_out, ("time",)) or is_empty_along(msg_out, ("win",))
+    assert _drive(unit, replace(make_msg(n_time=0, fs=1000.0), segment=1)) == []
+
+
+@pytest.mark.parametrize("unit", _units(), ids=["downsample", "binned", "window", "window_multi"])
+def test_unit_flushes_before_a_new_segment(unit):
+    """The unit releases what its processor holds (``aflush``) before the new segment's
+    message, and only on a segment change -- not on the first message."""
+    unit.create_processor()
+    tail = make_msg(n_time=50, fs=1000.0)
+    calls = []
+
+    async def aflush(message=None):
+        calls.append(message)
+        return tail
+
+    unit.processor.aflush = aflush
+    _drive(unit, make_msg(n_time=50, fs=1000.0))
+    _drive(unit, make_msg(n_time=50, fs=1000.0))
+    assert calls == []
+    published = _drive(unit, replace(make_msg(n_time=50, fs=1000.0), segment=1))
+    assert calls == [None]
+    assert published[0][1] is tail

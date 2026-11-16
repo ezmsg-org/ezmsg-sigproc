@@ -937,8 +937,10 @@ def test_a_steady_stream_derives_its_config_id_once(name, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# A message with no samples (e.g. one that ends a stream) must change nothing about what the
-# real data after it gives.
+# End of stream: a source ends a segment with one message with no samples, in a new segment
+# (baseproc's ``end_of_stream``), and the unit flushes before that message and before
+# whatever follows it. The empty message must change nothing about what the real data
+# around it gives, and a flush with nothing real held must not emit samples.
 # ---------------------------------------------------------------------------
 
 
@@ -1040,11 +1042,24 @@ def _assert_finite(outs):
             assert np.all(np.isfinite(np.asarray(out.data))), out
 
 
+def _assert_same_ids(outs, expected):
+    _assert_same(outs, expected)
+    assert [o.config_id for o in outs] == [e.config_id for e in expected]
+
+
+def _assert_same_tail(tail, expected):
+    """A flush gives one message, or nothing (None or no samples) when nothing real is held."""
+    if _no_samples(expected):
+        assert _no_samples(tail), tail
+    else:
+        _assert_same_ids([tail], [expected])
+
+
 @pytest.mark.parametrize("name", sorted(EOS_CASES))
 def test_an_empty_first_message_changes_nothing(name):
     """S1: a fresh processor's first message has no samples (and an offset the data does not continue)."""
     factory, messages, drive = EOS_CASES[name]
-    data = messages()
+    data = _declared(messages, ID_A)
     empty = _head(data[0], 0)
     ax = empty.axes[empty.stream_dim]
     empty = replace(empty, axes={**empty.axes, empty.stream_dim: replace(ax, offset=ax.offset - GAP)})
@@ -1057,7 +1072,55 @@ def test_an_empty_first_message_changes_nothing(name):
         proc = factory()
         first = _one(drive)(proc, [empty])
         outs = drive(proc, data)
-        expected = drive(factory(), data)
+        tail = proc.flush()
+        ref = factory()
+        expected = drive(ref, data)
+        ref_tail = ref.flush()
     assert all(_no_samples(o) for o in first)
-    _assert_finite(first)
-    _assert_same(outs, expected)
+    _assert_finite(first + [tail])
+    _assert_same_ids(outs, expected)
+    _assert_same_tail(tail, ref_tail)
+
+
+@pytest.mark.parametrize("short", [False, True], ids=["", "short"])
+@pytest.mark.parametrize("third", [False, True], ids=["data-in-marker-segment", "data-in-third-segment"])
+@pytest.mark.parametrize("name", sorted(EOS_CASES))
+def test_an_end_of_stream_marker_changes_nothing(name, third, short):
+    """S2/S3/S4: data in A, flush, the marker in B, (flush twice,) data in B or C, flush.
+
+    The reference is the same sequence without the marker and its flushes, so a processor that
+    keeps some state across a segment change is held to that too. ``short`` data after the
+    marker is too little to finish a start-up, a window or a bin, so the final flush releases it.
+    """
+    from ezmsg.baseproc import end_of_stream
+
+    factory, messages, drive = EOS_CASES[name]
+    pre = [replace(m, config_id=ID_A) for m in _before_gap(messages)]
+    post = [replace(m, config_id=ID_A, segment=SEGMENT + 1 + third) for m in _after_gap(messages)]
+    if short:
+        post = [_head(post[0], 7)]
+    marker = replace(end_of_stream(pre[-1]), segment=SEGMENT + 1)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        ref = factory()
+        drive(ref, pre)
+        ref.flush()
+        expected = drive(ref, post)
+        ref_tail = ref.flush()
+        proc = factory()
+        drive(proc, pre)
+        held = proc.flush()
+        if name in EMPTY_UNSUPPORTED:
+            with pytest.raises(EMPTY_UNSUPPORTED[name]):
+                proc(marker)
+            return
+        at_marker = _one(drive)(proc, [marker])
+        # S4: the stream may end here; flushing again holds nothing either.
+        gap_tails = [proc.flush(), proc.flush()] if third else []
+        outs = drive(proc, post)
+        tail = proc.flush()
+    assert all(_no_samples(o) for o in at_marker + gap_tails)
+    assert all(o.segment == SEGMENT + 1 for o in at_marker if o is not None)
+    _assert_finite([held] + at_marker + gap_tails + [tail])
+    _assert_same_ids(outs, expected)
+    _assert_same_tail(tail, ref_tail)

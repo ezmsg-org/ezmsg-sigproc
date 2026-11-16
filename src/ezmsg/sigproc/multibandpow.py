@@ -164,13 +164,26 @@ class AnalyticFilterbankTransformer(
             )
 
     def _process(self, message: AxisArray) -> AxisArray:
-        out = self._state.filterbank(message)  # dims: (*other, band, axis)
+        return self._restore_layout(self._state.filterbank(message), message)
+
+    def _restore_layout(self, out: AxisArray, message: AxisArray) -> AxisArray:
+        """Move the filterbank's stream axis (last) back to where it is in ``message``."""
         return replace(
             out,
             data=np.moveaxis(out.data, -1, message.get_axis_idx(self._state.axis)),
             dims=list(message.dims) + ["band"],
             stream_dim=self._state.axis,
         )
+
+    def flush(self, message: AxisArray | None = None) -> AxisArray | None:
+        """Process ``message`` if given, then release what BUFFERED start-up still holds
+        (see :meth:`~ezmsg.sigproc.filterbank.FilterbankTransformer.flush`)."""
+        out = None if message is None else self(message)
+        held = None if self._state.filterbank is None else self._state.filterbank.state.startup_held
+        if not held:
+            return out
+        last = held[-1]  # the filterbank's flush empties `held`
+        return self._restore_layout(self._state.filterbank.flush(), last)
 
 
 class MultiBandEnvelopePowerTransformer(CompositeProcessor[MultiBandEnvelopePowerSettings, AxisArray, AxisArray]):

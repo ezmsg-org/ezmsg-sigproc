@@ -1,6 +1,8 @@
 import numpy as np
+import pytest
 import scipy.signal as sps
 from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.util import replace
 
 from ezmsg.sigproc.fir_hilbert import (
     FIRHilbertEnvelopeTransformer,
@@ -308,3 +310,151 @@ def test_hilbert_envelope_empty_first():
     result = proc(empty)
     check_empty_result(result)
     check_state_not_corrupted(proc, normal)
+
+
+# --- flush: the samples the filter delay holds back ------------------------------------------
+
+FLUSH_FS = 500.0
+
+
+def _env(**kw):
+    from ezmsg.sigproc.fir_hilbert import FIRHilbertFilterSettings
+
+    return FIRHilbertEnvelopeTransformer(FIRHilbertFilterSettings(order=100, f_lo=5.0, f_hi=100.0, **kw))
+
+
+def _env_msg(x: np.ndarray, start: int, segment: int = 3) -> AxisArray:
+    return replace(axisarray(x, FLUSH_FS, t0=start / FLUSH_FS), segment=segment)
+
+
+def _env_feed(proc, x: np.ndarray, chunk: int) -> list[AxisArray]:
+    return [proc(_env_msg(x[s : s + chunk], s)) for s in range(0, len(x), chunk)]
+
+
+def _env_cat(outs: list[AxisArray]) -> tuple[np.ndarray, np.ndarray]:
+    outs = [o for o in outs if o.data.shape[0]]
+    t = np.concatenate([o.axes["time"].offset + np.arange(o.data.shape[0]) / FLUSH_FS for o in outs])
+    return np.concatenate([o.data for o in outs]), t
+
+
+def _flush_signal(n: int = 1000) -> np.ndarray:
+    t = np.arange(n) / FLUSH_FS
+    tone = np.sin(2 * np.pi * 20 * t) * (1 + 0.5 * np.sin(2 * np.pi * 1.3 * t))
+    return np.stack([tone, 3.0 + tone], axis=1)  # the second channel ends on a DC offset
+
+
+def _offline_envelope(x: np.ndarray, b: np.ndarray, end: np.ndarray) -> np.ndarray:
+    """CONSTANT start-up (inner FIR from the held first sample, real part from zeros), ``end`` past the end."""
+    d = len(end)
+    padded = np.concatenate([np.repeat(x[:1], 2 * d, axis=0), x, end])
+    imag = np.stack([np.convolve(padded[:, c], b, mode="valid") for c in range(x.shape[1])], axis=1)
+    real = np.concatenate([np.zeros((d, x.shape[1])), x])
+    return np.abs(real + 1j * imag)
+
+
+@pytest.mark.parametrize("compensate_delay", [False, True])
+def test_hilbert_envelope_flush_emits_delayed_tail(compensate_delay):
+    """Streamed output plus the flushed tail is the whole envelope: every input sample's content
+    comes out once, on a contiguous time base, matching an offline convolution in which the input
+    continues past the end as zeros, as the first sample is held before the start."""
+    x = _flush_signal()
+    proc = _env(compensate_delay=compensate_delay)
+    assert proc.flush() is None  # nothing held before the first message
+    outs = _env_feed(proc, x, 73)
+    tail = proc.flush()
+    d = proc.state.dly
+    assert d == 50 and tail.data.shape == (d, 2) and tail.segment == 3
+    y, t = _env_cat(outs + [tail])
+    # One output per input sample, delayed by d; the tail carries the last d samples' content.
+    t0 = -d / FLUSH_FS if compensate_delay else 0.0
+    np.testing.assert_allclose(t, t0 + np.arange(len(x) + d) / FLUSH_FS, rtol=0, atol=1e-9)
+
+    b = proc.state.filter.state.filter.settings.coefs[0]
+    y_ref = _offline_envelope(x, b, np.zeros((d, 2)))
+    np.testing.assert_allclose(y, y_ref, rtol=0, atol=1e-5)  # float32 output
+    assert proc.flush() is None  # nothing left
+
+
+def test_hilbert_envelope_flush_shorter_than_delay():
+    """A stream shorter than the delay still emits all d delayed samples on a contiguous time base."""
+    x = _flush_signal(1020)[1000:]  # 20 samples, not starting at time zero
+    proc = _env()
+    outs = [proc(_env_msg(x[s : s + 10], 1000 + s)) for s in (0, 10)]
+    tail = proc.flush()
+    d = proc.state.dly
+    assert d == 50 and tail.data.shape == (d, 2)
+    assert tail.axes["time"].offset == pytest.approx(1020 / FLUSH_FS)
+    y, t = _env_cat(outs + [tail])
+    np.testing.assert_allclose(t, (1000 + np.arange(20 + d)) / FLUSH_FS, rtol=0, atol=1e-9)
+    b = proc.state.filter.state.filter.settings.coefs[0]
+    np.testing.assert_allclose(y, _offline_envelope(x, b, np.zeros((d, 2))), rtol=0, atol=1e-5)
+    assert proc.flush() is None
+
+
+def test_hilbert_envelope_flush_tail_accuracy():
+    """On zero-mean band-limited tones that continue past the flush, the zero-padded tail's envelope
+    is closer to the true one (median RMS error) than hold-last's or even reflection's. (With a DC
+    offset zero padding is the worst of the three: the caveat in ``flush``.)"""
+    rng = np.random.default_rng(0)
+    n, d = 300, 50
+    t = np.arange(n + d) / FLUSH_FS
+    errs = {"zeros": [], "hold": [], "even": []}
+    for _ in range(36):
+        x = np.sin(2 * np.pi * rng.uniform(6.0, 100.0) * t + rng.uniform(0, 2 * np.pi))[:, None]
+        proc = _env()
+        proc(_env_msg(x[:n], 0))
+        b = proc.state.filter.state.filter.settings.coefs[0]
+        true = _offline_envelope(x[:n], b, x[n:])[-d:]
+        tails = {
+            "zeros": proc.flush().data,
+            "hold": _offline_envelope(x[:n], b, np.repeat(x[n - 1 : n], d, axis=0))[-d:],
+            "even": _offline_envelope(x[:n], b, x[n - 2 - np.arange(d)])[-d:],  # about the last sample
+        }
+        for k, env in tails.items():
+            errs[k].append(np.sqrt(np.mean((env - true) ** 2)))
+    med = {k: np.median(v) for k, v in errs.items()}
+    assert med["zeros"] < med["hold"]  # measured 0.091 vs 0.163
+    assert med["zeros"] < med["even"]  # measured 0.091 vs 0.130 (seeds 0-9: 0.082-0.096 vs 0.102-0.150)
+
+
+def test_hilbert_envelope_flush_with_final_message():
+    x = _flush_signal(400)
+    proc = _env()
+    _env_feed(proc, x[:350], 50)
+    tail = proc.flush(_env_msg(x[350:], 350))
+    ref = _env()
+    y_ref, t_ref = _env_cat(_env_feed(ref, x, 50)[-1:] + [ref.flush()])
+    y, t = _env_cat([tail])
+    np.testing.assert_array_equal(y, y_ref)
+    np.testing.assert_allclose(t, t_ref, rtol=0, atol=1e-12)
+
+
+@pytest.mark.parametrize("segment", [3, 4], ids=["same-segment", "new-segment"])
+def test_hilbert_envelope_restarts_after_flush(segment):
+    """The padding the tail was pushed out with is not real input, so whatever comes next starts
+    the filter afresh: no tail sample is emitted again."""
+    x = _flush_signal(400)
+    proc = _env()
+    _env_feed(proc, x[:300], 50)
+    proc.flush()
+    nxt = _env_msg(x[300:], 300, segment=segment)
+    np.testing.assert_array_equal(proc(nxt).data, _env()(nxt).data)
+
+
+def test_hilbert_envelope_flush_releases_unfilled_buffer():
+    """BUFFERED start-up that never filled: the held samples are primed from the reflection of all
+    of them, which is what FIRST_CHUNK does with them as one message, and the delayed tail follows."""
+    from ezmsg.sigproc.util.startup import StartupMode
+
+    x = _flush_signal(60)  # fewer than the 100-sample pad
+    proc = _env(startup=StartupMode.BUFFERED)
+    assert proc.flush() is None
+    outs = _env_feed(proc, x, 20)
+    assert all(o.data.shape == (0, 2) for o in outs)
+    y, t = _env_cat([proc.flush()])
+    ref = _env(startup=StartupMode.FIRST_CHUNK)
+    y_ref, t_ref = _env_cat([ref(_env_msg(x, 0)), ref.flush()])
+    assert y.shape == (60 + 50, 2)
+    np.testing.assert_allclose(y, y_ref, rtol=0, atol=1e-6)
+    np.testing.assert_allclose(t, np.arange(110) / FLUSH_FS, rtol=0, atol=1e-9)
+    assert proc.flush() is None

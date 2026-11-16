@@ -61,6 +61,28 @@ from .util.deprecation import warn_axis_deprecated
 from .util.message import is_empty_along, with_fingerprint
 from .util.segment import ConfigChain
 
+# Whether each operation's value is independent of how many samples the bin holds,
+# which decides if `flush` may emit a short final bin next to full ones. Every
+# AggregationFunction must appear here (a test enforces it).
+_MEAN_LIKE: dict[AggregationFunction, bool] = {
+    AggregationFunction.NONE: True,
+    AggregationFunction.MAX: True,
+    AggregationFunction.MIN: True,
+    AggregationFunction.MEAN: True,
+    AggregationFunction.MEDIAN: True,
+    AggregationFunction.STD: True,
+    AggregationFunction.SUM: False,
+    AggregationFunction.NANMAX: True,
+    AggregationFunction.NANMIN: True,
+    AggregationFunction.NANMEAN: True,
+    AggregationFunction.NANMEDIAN: True,
+    AggregationFunction.NANSTD: True,
+    AggregationFunction.NANSUM: False,
+    AggregationFunction.ARGMIN: True,  # a time within the bin
+    AggregationFunction.ARGMAX: True,
+    AggregationFunction.TRAPEZOID: False,  # an integral grows with the bin's duration
+}
+
 
 class BinnedAggregateSettings(ez.Settings):
     """Settings for :obj:`BinnedAggregate`."""
@@ -136,6 +158,17 @@ class BinnedAggregateState:
     aggregation works for any operation (not just sums). Its length is kept in
     sync with ``schedule.carry_count``."""
 
+    template: AxisArray | None = None
+    """The input's layout with no data, taken at reset (the layout cannot change
+    without one). `flush` labels the open bin from it."""
+
+    next_offset: float = 0.0
+    """Stream-axis offset just past the last input sample, where the next chunk would start."""
+
+    last_attrs: dict | None = None
+    last_config_id: int = 0
+    """The last input's attrs and config_id, which can change without a reset; `flush` gives them to the open bin."""
+
     metric_axis: AxisArray.CoordinateAxis | None = None
     """The trailing axis attached to every multi-operation output.
 
@@ -204,6 +237,11 @@ class BinnedAggregateTransformer(
         metric = self._state.metric_axis
         self._state.configs = ConfigChain(
             self._state.axis, schedule.output_gain, None if metric is None else metric.fingerprint
+        )
+        # Copied empty, not viewed, so the input's buffer is not kept alive.
+        axis_idx = message.get_axis_idx(self._state.axis)
+        self._state.template = replace(
+            message, data=xp_copy(slice_along_axis(message.data, slice(0, 0), axis=axis_idx))
         )
 
     @property
@@ -279,21 +317,27 @@ class BinnedAggregateTransformer(
         xp = get_namespace(message.data)
 
         carry = self._state.carry
+        n_new = message.data.shape[axis_idx]
+        self._state.next_offset = axis_info.value(n_new)
+        self._state.last_attrs = message.attrs
+        self._state.last_config_id = message.config_id
 
         # The schedule owns all boundary/gain/offset arithmetic; this transformer
         # only slices and aggregates the data at the cut points it returns.
         step = self._state.schedule.advance(
-            n_new=message.data.shape[axis_idx],
+            n_new=n_new,
             in_offset=axis_info.offset,
             gain_in=axis_info.gain,
         )
 
         if step.n_bins == 0:
             # No bin completes in this chunk; grow the carry and emit nothing.
-            # `xp_copy` is intentional.
-            self._state.carry = (
-                xp_copy(message.data) if carry is None else xp.concat((carry, message.data), axis=axis_idx)
-            )
+            # `xp_copy` is intentional. A chunk with no samples leaves the carry as it was: a
+            # zero-length carry would be an open bin with nothing in it, which `flush` would emit.
+            if n_new:
+                self._state.carry = (
+                    xp_copy(message.data) if carry is None else xp.concat((carry, message.data), axis=axis_idx)
+                )
             return self._empty_like(message, axis_idx, step)
 
         # Prepend the carried partial-bin samples so bin 0 spans carry + current.
@@ -326,6 +370,47 @@ class BinnedAggregateTransformer(
             config_id=self._state.configs.update(message.config_id),
         )
 
+    def flush(self, message: AxisArray | None = None) -> AxisArray | None:
+        """Process ``message`` if given, then emit the open partial bin.
+
+        The partial bin is aggregated over the samples it has, which are the first
+        samples the full bin would have had, and is labelled with that bin's place
+        on the grid. It is emitted only when every operation is mean-like (see
+        ``_MEAN_LIKE``): a sum over a short bin is not comparable with the full ones,
+        so then nothing is emitted for it and the open bin is kept, completing as
+        usual if the stream continues after all.
+
+        Once the partial bin is emitted it is gone, and the next message starts a
+        fresh grid at its own offset, as after a gap.
+        """
+        out = None if message is None else self(message)
+        carry = self._state.carry
+        if self.settings.passthrough or carry is None or not all(_MEAN_LIKE[op] for op in self._operations):
+            return out
+        st = self._state
+        template = replace(st.template, attrs=st.last_attrs, config_id=st.last_config_id)
+        axis_info = replace(template.get_axis(st.axis), offset=st.next_offset)
+        axis_idx = template.get_axis_idx(self._state.axis)
+        # No new samples: closes no bin, only reports where the open one sits.
+        step = self._state.schedule.advance(n_new=0, in_offset=axis_info.offset, gain_in=axis_info.gain)
+        n = carry.shape[axis_idx]
+        coordinates = (
+            self._work_coordinates(carry, axis_idx, axis_info, n) if needs_coordinates(self._operations) else None
+        )
+        data = self._aggregate(carry, [slice(0, n)], axis_idx, coordinates)
+        self._state.carry = None
+        self._request_reset()
+        if out is not None and out.data.shape[axis_idx] > 0:
+            return replace(out, data=get_namespace(data).concat((out.data, data), axis=axis_idx))
+        tail = replace(
+            template,
+            data=data,
+            dims=self._out_dims(template),
+            axes=self._out_axes(template, step),
+            config_id=self._state.configs.update(template.config_id),
+        )
+        return self._verify_output(tail) if self.VERIFY_OUTPUT_CONFIG else tail
+
 
 class BinnedAggregate(BaseTransformerUnit[BinnedAggregateSettings, AxisArray, AxisArray, BinnedAggregateTransformer]):
     SETTINGS = BinnedAggregateSettings
@@ -340,8 +425,17 @@ class BinnedAggregate(BaseTransformerUnit[BinnedAggregateSettings, AxisArray, Ax
         round-trip across SHM/socket. Only emptiness along the binned axis is
         suppressed: a message that is empty along other axes (e.g. all channels
         sliced away upstream) still flows so downstream consumers keep its
-        cadence.
+        cadence. An empty message that starts a new segment also flows, since
+        downstream units flush and reset on the segment change.
         """
+        segment = getattr(message, "segment", None)
+        new_segment = self._segment is not BaseTransformerUnit._segment and segment != self._segment
+        if new_segment:
+            # Release what the processor holds before the new segment resets it.
+            tail = await self.processor.aflush()
+            if tail is not None:
+                yield self.OUTPUT_SIGNAL, tail
+        self._segment = segment
         result = await self.processor.__acall__(message)
-        if result is not None and not is_empty_along(result, (self.processor.state.axis,)):
+        if result is not None and (new_segment or not is_empty_along(result, (self.processor.state.axis,))):
             yield self.OUTPUT_SIGNAL, result

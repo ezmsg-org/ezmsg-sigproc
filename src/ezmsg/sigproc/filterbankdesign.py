@@ -187,3 +187,11 @@ class FilterbankDesignTransformer(
 
     def _process(self, message: AxisArray) -> AxisArray:
         return self.state.filterbank(message)
+
+    def flush(self, message: AxisArray | None = None) -> AxisArray | None:
+        """Process ``message`` if given, then release what the filterbank holds
+        (see :meth:`~ezmsg.sigproc.filterbank.FilterbankTransformer.flush`)."""
+        out = None if message is None else self(message)
+        held = None if self.state.filterbank is None else self.state.filterbank.flush()
+        # Anything held means every output since the reset, `out` included, was empty.
+        return out if held is None else held

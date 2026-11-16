@@ -28,7 +28,14 @@ from .util import sosfilt_direct
 from .util.array import array_device, xp_asarray, xp_create
 from .util.deprecation import warn_axis_deprecated
 from .util.minphase import MinPhaseMode, is_linear_phase, kernel_delay, min_phase_kernel
-from .util.startup import StartupMode, hold_for_startup, prime_with_reflection, settle_samples, startup_n_pad
+from .util.startup import (
+    StartupMode,
+    hold_for_startup,
+    prime_with_reflection,
+    release_held,
+    settle_samples,
+    startup_n_pad,
+)
 from .util.threaded_filt import DEFAULT_MIN_BYTES as _DEFAULT_THREAD_MIN_BYTES
 from .util.threaded_filt import filt_threaded, should_thread
 
@@ -910,6 +917,24 @@ class FilterTransformer(BaseStatefulTransformer[FilterSettings, AxisArray, AxisA
 
         return self._stamp(replace(message, data=dat_out), axis)
 
+    def flush(self, message: AxisArray | None = None) -> AxisArray | None:
+        """Process ``message`` if given, then release what BUFFERED start-up still holds.
+
+        If the stream breaks before the start-up pad has arrived, the held samples are primed from
+        the odd reflection of as many of them as there are, which is what FIRST_CHUNK would do with
+        them as one message, and emitted together. A filter that has started holds nothing extra
+        and returns what ``message`` gave (None without one). Nothing about the filter's state is
+        invented, so if the same segment continues it is simply filtered on from there.
+        """
+        out = None if message is None else self(message)
+        if not self.state.startup_held:
+            return out
+        axis = resolve_configured_stream_dim(self, self.state.startup_held[-1], self.settings.axis)
+        released = release_held(self.state.startup_held, axis)
+        self.state.startup_pending = False
+        prime_with_reflection(self._prime, released, axis, self.state.startup_n_pad)
+        return self._process(released)
+
 
 class Filter(BaseTransformerUnit[FilterSettings, AxisArray, AxisArray, FilterTransformer]):
     SETTINGS = FilterSettings
@@ -1068,6 +1093,13 @@ class FilterByDesignTransformer(
         if self.state.needs_redesign:
             self._reset_state(message)
         return self.state.filter(message)
+
+    def flush(self, message: AxisArray | None = None) -> AxisArray | None:
+        """Process ``message`` if given, then release what the filter holds (see :meth:`FilterTransformer.flush`)."""
+        out = None if message is None else self(message)
+        held = None if self.state.filter is None else self.state.filter.flush()
+        # Anything held means every output since the reset, `out` included, was empty.
+        return out if held is None else held
 
 
 class BaseFilterByDesignTransformerUnit(

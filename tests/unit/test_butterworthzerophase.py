@@ -1,7 +1,9 @@
+import asyncio
+
 import numpy as np
 import pytest
 import scipy.signal
-from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.axisarray import AxisArray, replace
 from frozendict import frozendict
 
 from ezmsg.sigproc.butterworthzerophase import (
@@ -985,6 +987,67 @@ def test_edge_scaling_makes_output_dc_invariant():
     y_dc = _run_zerophase_streaming(noise + 5000.0, fs)
     # Adding a DC offset should not change the band-passed output.
     assert np.max(np.abs(y_zero - y_dc)) < 0.05 * float(y_zero.std())
+
+
+def _at(msg: AxisArray, data, offset: float) -> AxisArray:
+    return replace(msg, data=data, axes={**msg.axes, "time": replace(msg.axes["time"], offset=offset)})
+
+
+@pytest.mark.parametrize("mode", ["sync", "async"])
+@pytest.mark.parametrize("coef_type", ["ba", "sos"])
+def test_flush_emits_held_tail_matching_offline_reference(coef_type, mode):
+    """A stream that ends with ``flush(last_chunk)`` emits every sample. The held-back
+    tail is backward-filtered from the real end of the stream, so it equals the offline
+    forward-backward pass (CONSTANT edges, i.e. ``padtype=None``) to rounding error."""
+    fs, order, cutoff, n_times, chunk = 1000.0, 4, 50.0, 3000, 137
+    x = np.random.default_rng(0).standard_normal((n_times, 2))
+    template = _make_message(x[:0], ["time", "ch"], fs)
+    transformer = ButterworthZeroPhaseTransformer(
+        ButterworthZeroPhaseSettings(order=order, cutoff=cutoff, coef_type=coef_type)
+    )
+    pad_length = _compute_pad_length(order, coef_type, fs, cutoff=cutoff)
+
+    starts = list(range(0, n_times, chunk))
+    outs = [transformer(_at(template, x[s : s + chunk], s / fs)) for s in starts[:-1]]
+    last = _at(template, x[starts[-1] :], starts[-1] / fs)
+    if mode == "sync":
+        outs.append(transformer.flush(last))
+        again = transformer.flush()
+    else:
+        outs.append(asyncio.run(transformer.aflush(last)))
+        again = asyncio.run(transformer.aflush())
+    assert again is None
+
+    y = np.concatenate([o.data for o in outs])
+    assert y.shape == x.shape
+    # Each output starts where the previous one ended.
+    n_before = sum(o.data.shape[0] for o in outs[:-1])
+    assert outs[-1].axes["time"].offset == pytest.approx(n_before / fs)
+    assert outs[-1].key == "test" and outs[-1].dims == ["time", "ch"]
+
+    btype, Wn = ButterworthZeroPhaseSettings(order=order, cutoff=cutoff).filter_specs()
+    if coef_type == "ba":
+        b, a = scipy.signal.butter(order, Wn, btype=btype, fs=fs, output="ba")
+        ref = scipy.signal.filtfilt(b, a, x, axis=0, padtype=None)
+    else:
+        sos = scipy.signal.butter(order, Wn, btype=btype, fs=fs, output="sos")
+        ref = scipy.signal.sosfiltfilt(sos, x, axis=0, padtype=None)
+    np.testing.assert_allclose(y[-pad_length:], ref[-pad_length:], rtol=1e-10, atol=1e-12)
+
+
+def test_flush_with_nothing_held():
+    transformer = ButterworthZeroPhaseTransformer(ButterworthZeroPhaseSettings(order=4, cutoff=50.0))
+    assert transformer.flush() is None  # before any message
+
+    # A first chunk shorter than pad_length is held whole; flushing it emits all of it.
+    fs = 1000.0
+    x = np.random.default_rng(1).standard_normal((10, 2))
+    out = transformer.flush(_at(_make_message(x, ["time", "ch"], fs), x, 0.5))
+    assert out.data.shape == x.shape
+    assert out.axes["time"].offset == 0.5
+    sos = scipy.signal.butter(4, 50.0, fs=fs, output="sos")
+    np.testing.assert_allclose(out.data, scipy.signal.sosfiltfilt(sos, x, axis=0, padtype=None), rtol=1e-10)
+    assert transformer.flush() is None
 
 
 def test_short_first_chunk_is_held_as_a_copy():

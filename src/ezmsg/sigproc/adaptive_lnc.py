@@ -305,6 +305,10 @@ class AdaptiveLNCState:
     """Stream axis of the first held message, stamped on the zero-length and
     release messages."""
 
+    warm_last: AxisArray | None = None
+    """Latest held message, the layout :meth:`AdaptiveLNCTransformer.flush`
+    releases the held input in."""
+
 
 class AdaptiveLNCTransformer(
     BaseStatefulTransformer[
@@ -412,6 +416,7 @@ class AdaptiveLNCTransformer(
         warm = self.settings.warm_start != WarmStart.OFF and self.settings.cancel_method != CancelMethod.PASSTHROUGH
         self._state.warm_held = [] if warm else None
         self._state.warm_axis = None
+        self._state.warm_last = None
 
     def _reset_segment(self, message: AxisArray) -> None:
         # As keep_frequency_on_reset: the mains frequency survives a gap, the phase does not.
@@ -600,7 +605,8 @@ class AdaptiveLNCTransformer(
             line = term if line is None else line + term
         return line
 
-    def _process(self, message: AxisArray) -> AxisArray:
+    def _process(self, message: AxisArray, release: bool = False) -> AxisArray:
+        """``release``: end a pending warm start with what is held, however short (see :meth:`flush`)."""
         if self.settings.cancel_method == CancelMethod.PASSTHROUGH:
             # No cancellation and no frequency tracking; emit the input as-is.
             return message
@@ -617,21 +623,23 @@ class AdaptiveLNCTransformer(
         fs = 1.0 / message.axes[self._state.axis].gain
         n_harm = max(1, int(self.settings.num_harmonics))
 
-        if st.warm_held is not None and x_data.shape[0]:
+        if st.warm_held is not None and (x_data.shape[0] or release):
             # Warm start pending: hold input until the fit window is complete. A message with no
             # samples (e.g. an end-of-stream marker) is not held: it would date the fit to its offset.
             if st.warm_axis is None:
                 st.warm_axis = message.axes[st.axis]
             st.warm_held.append(x_data)
+            st.warm_last = message
             buffered = self.settings.warm_start == WarmStart.BUFFERED
             need = max(1, int(round(self.settings.warm_start_duration * fs))) if buffered else 1
-            if sum(h.shape[0] for h in st.warm_held) < need:
+            if not release and sum(h.shape[0] for h in st.warm_held) < need:
                 empty = slice_along_axis(message.data, slice(0, 0), ax_idx)
                 return replace(message, data=empty, axes={**message.axes, st.axis: st.warm_axis})
             x_data = self._cat(st.warm_held, is_mlx, xp)
             message = replace(message, axes={**message.axes, st.axis: st.warm_axis})
             st.warm_held = None
             st.warm_axis = None
+            st.warm_last = None
             self._warm_start(x_data[:need] if buffered else x_data, fs, n_harm, is_mlx, xp)
 
         n = x_data.shape[0]
@@ -697,6 +705,24 @@ class AdaptiveLNCTransformer(
         if moved:
             y_out = xp.moveaxis(y_out, 0, ax_idx)
         return replace(message, data=y_out)
+
+    def flush(self, message: AxisArray | None = None) -> AxisArray | None:
+        """Process ``message`` if given, then release the input a warm start still holds.
+
+        If the stream breaks before ``warm_start_duration`` has arrived, the line is fit to
+        everything held (as FIRST_CHUNK would fit it, given the held input as one message; under
+        one line period it stays cold) and the held samples are cancelled and emitted in one
+        message stamped with the first held sample's time. Otherwise nothing is held and this
+        returns what ``message`` gave (None without one). The warm start is then over, so if the
+        same segment continues it is cancelled on from there.
+        """
+        out = None if message is None else self(message)
+        st = self._state
+        if not sum(h.shape[0] for h in st.warm_held or ()):
+            return out
+        last = st.warm_last
+        empty = slice_along_axis(last.data, slice(0, 0), last.get_axis_idx(st.axis))
+        return self._process(replace(last, data=empty), release=True)
 
 
 class AdaptiveLNC(

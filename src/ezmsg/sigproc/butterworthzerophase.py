@@ -94,6 +94,9 @@ class ButterworthBackwardFilterTransformer(FilterByDesignTransformer[Butterworth
     # Instance attributes (initialized in _reset_state)
     _tail: typing.Any | None  # trailing pad_length input samples, in the input's layout
     _tail_offset: float  # axis offset of the first sample in _tail
+    _template: AxisArray | None  # the input's layout with no data, taken at reset, to give the flushed tail its layout
+    _last_attrs: dict | None  # the last input's attrs and config_id, which can change without a reset
+    _last_config_id: int
     _coefs_cache: BACoeffs | SOSCoeffs | None
     _zi_tiled: typing.Any | None  # xp array in the namespace of the input data
     _sos_mx: typing.Any | None  # cached mlx.core.array of SOS coefs (SOS + MLX path)
@@ -198,6 +201,10 @@ class ButterworthBackwardFilterTransformer(FilterByDesignTransformer[Butterworth
         self._tail_offset = 0.0
         # Compute pad_length based on the message's sampling rate
         axis = resolve_configured_stream_dim(self, message, self.settings.axis)
+        # Copied empty, not viewed, so the input's buffer is not kept alive.
+        self._template = replace(
+            message, data=xp_copy(slice_along_axis(message.data, slice(0, 0), message.get_axis_idx(axis)))
+        )
         fs = 1 / message.axes[axis].gain
         self._pad_length = self._compute_pad_length(fs)
         self.state.needs_redesign = True
@@ -238,6 +245,39 @@ class ButterworthBackwardFilterTransformer(FilterByDesignTransformer[Butterworth
         first_sample = data[first_idx]
         return self._zi_tiled * first_sample
 
+    def _filter_backward(self, data, ax_idx: int, xp):
+        """Filter ``data`` backward in time, starting from steady state at its last sample."""
+        # Backward filter on reversed data — stay in the input's namespace.
+        data_rev = xp_flip(data, axis=ax_idx)
+        backward_zi = self._initialize_zi(data_rev, ax_idx, xp)
+
+        is_mlx = xp is not np and xp.__name__ == "mlx.core"
+        use_mlx_metal = (
+            self.settings.coef_type == "sos"
+            and is_mlx
+            and getattr(self.settings, "use_mlx_metal", True)
+            and _HAS_MLX_METAL
+        )
+
+        if use_mlx_metal:
+            if self._sos_mx is None:
+                self._sos_mx = _mx.array(np.asarray(self._coefs_cache).astype(np.float32))
+            y_bwd_rev, _ = _sosfilt_mlx_metal_xp(
+                self._sos_mx,
+                data_rev,
+                ax_idx,
+                backward_zi,
+                self.settings.mlx_metal_chunk_sizes,
+            )
+        elif self.settings.coef_type == "ba":
+            b, a = self._coefs_cache
+            y_bwd_rev, _ = scipy.signal.lfilter(b, a, data_rev, axis=ax_idx, zi=backward_zi)
+        else:  # sos via scipy (non-MLX, or use_mlx_metal disabled)
+            y_bwd_rev, _ = scipy.signal.sosfilt(self._coefs_cache, data_rev, axis=ax_idx, zi=backward_zi)
+
+        # Reverse back to get output in correct time order
+        return xp_flip(y_bwd_rev, axis=ax_idx)
+
     def _process(self, message: AxisArray) -> AxisArray:
         axis = resolve_configured_stream_dim(self, message, self.settings.axis)
         ax_idx = message.get_axis_idx(axis)
@@ -258,6 +298,8 @@ class ButterworthBackwardFilterTransformer(FilterByDesignTransformer[Butterworth
             return message
 
         xp = np if is_numpy_array(message.data) else get_namespace(message.data)
+        self._last_attrs = message.attrs
+        self._last_config_id = message.config_id
 
         # Prepend the carry-over from the previous chunk. Both are in the input's
         # layout, so this concatenation involves no transpose.
@@ -281,36 +323,7 @@ class ButterworthBackwardFilterTransformer(FilterByDesignTransformer[Butterworth
             empty_data = xp_empty(xp, tuple(new_shape), dtype=message.data.dtype)
             return replace(message, data=empty_data)
 
-        # Backward filter on reversed data — stay in the input's namespace.
-        combined_rev = xp_flip(combined, axis=ax_idx)
-        backward_zi = self._initialize_zi(combined_rev, ax_idx, xp)
-
-        is_mlx = xp is not np and xp.__name__ == "mlx.core"
-        use_mlx_metal = (
-            self.settings.coef_type == "sos"
-            and is_mlx
-            and getattr(self.settings, "use_mlx_metal", True)
-            and _HAS_MLX_METAL
-        )
-
-        if use_mlx_metal:
-            if self._sos_mx is None:
-                self._sos_mx = _mx.array(np.asarray(self._coefs_cache).astype(np.float32))
-            y_bwd_rev, _ = _sosfilt_mlx_metal_xp(
-                self._sos_mx,
-                combined_rev,
-                ax_idx,
-                backward_zi,
-                self.settings.mlx_metal_chunk_sizes,
-            )
-        elif self.settings.coef_type == "ba":
-            b, a = self._coefs_cache
-            y_bwd_rev, _ = scipy.signal.lfilter(b, a, combined_rev, axis=ax_idx, zi=backward_zi)
-        else:  # sos via scipy (non-MLX, or use_mlx_metal disabled)
-            y_bwd_rev, _ = scipy.signal.sosfilt(self._coefs_cache, combined_rev, axis=ax_idx, zi=backward_zi)
-
-        # Reverse back to get output in correct time order
-        y_bwd = xp_flip(y_bwd_rev, axis=ax_idx)
+        y_bwd = self._filter_backward(combined, ax_idx, xp)
 
         # Output the settled portion (first n_output samples)
         y = slice_along_axis(y_bwd, slice(0, n_output), ax_idx)
@@ -329,6 +342,29 @@ class ButterworthBackwardFilterTransformer(FilterByDesignTransformer[Butterworth
             data=y,
             axes={**message.axes, axis: out_axis},
         )
+
+    def flush(self, message: AxisArray | None = None) -> AxisArray | None:
+        """Process ``message`` if given, then emit the ``pad_length`` samples held back.
+
+        The held samples are backward-filtered from the last one, which is the real end
+        of the stream, exactly as an offline forward-backward pass would treat them. Paired
+        with the CONSTANT-start forward stage, a stream that ends with a flush matches
+        ``scipy.signal.sosfiltfilt(..., padtype=None)`` on these samples to rounding error.
+        """
+        out = None if message is None else self(message)
+        tail = getattr(self, "_tail", None)  # unset until the first message
+        if tail is None:
+            return out
+        self._tail = None
+        template = replace(self._template, attrs=self._last_attrs, config_id=self._last_config_id)
+        axis = resolve_configured_stream_dim(self, template, self.settings.axis)
+        ax_idx = template.get_axis_idx(axis)
+        xp = np if is_numpy_array(tail) else get_namespace(tail)
+        y = self._filter_backward(tail, ax_idx, xp)
+        if out is not None and out.data.shape[ax_idx] > 0:
+            return replace(out, data=xp.concatenate([out.data, y], axis=ax_idx))
+        out_axis = replace(template.axes[axis], offset=self._tail_offset)
+        return replace(template, data=y, axes={**template.axes, axis: out_axis})
 
 
 class ButterworthZeroPhaseTransformer(CompositeProcessor[ButterworthZeroPhaseSettings, AxisArray, AxisArray]):
