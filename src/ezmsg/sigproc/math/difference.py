@@ -21,8 +21,11 @@ from ..util.segment import ConfigJoin, SegmentJoin, next_pair
 
 
 class ConstDifferenceSettings(ez.Settings):
-    value: float = 0.0
-    """number to subtract or be subtracted from the input data"""
+    value: float | int = 0.0
+    """number to subtract or be subtracted from the input data
+
+    The output dtype follows the array library's promotion of the data dtype with the value's type:
+    pass an ``int`` to keep an integer stream integer, a ``float`` to get floats."""
 
     subtrahend: bool = True
     """If True (default) then value is subtracted from the input data. If False, the input data
@@ -43,7 +46,7 @@ class ConstDifference(BaseTransformerUnit[ConstDifferenceSettings, AxisArray, Ax
     SETTINGS = ConstDifferenceSettings
 
 
-def const_difference(value: float = 0.0, subtrahend: bool = True) -> ConstDifferenceTransformer:
+def const_difference(value: float | int = 0.0, subtrahend: bool = True) -> ConstDifferenceTransformer:
     """
     result = (in_data - value) if subtrahend else (value - in_data)
     https://en.wikipedia.org/wiki/Template:Arithmetic_operations
