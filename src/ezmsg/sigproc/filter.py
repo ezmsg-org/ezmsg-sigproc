@@ -1064,6 +1064,10 @@ class FilterByDesignTransformer(
 
         return super().__call__(message)
 
+    def _reset_segment(self, message: AxisArray) -> None:
+        # The design depends only on the config; the child filter sees the new segment and resets its own memory.
+        pass
+
     def _reset_state(self, message: AxisArray) -> None:
         axis = resolve_configured_stream_dim(self, message, self.settings.axis)
         fs = 1 / message.axes[axis].gain

@@ -466,6 +466,7 @@ GAP_REFERENCE = {
     # Rolling statistics are counted in samples, so a gap in time does not date them.
     "RollingScalerProcessor": _keeps_everything,
     "AdaptiveStandardScalerTransformer": _keeps_everything,
+    "RiverAdaptiveStandardScalerTransformer": _keeps_everything,
 }
 
 # Transforms each whole message along the stream axis: a zero-length one fails whether or not a gap precedes it.
@@ -523,6 +524,62 @@ def test_a_new_segment_leaves_config_only_state_alone(name):
         outs += drive(proc, [replace(m, segment=SEGMENT + 1) for m in msgs[1:]])
     assert all(getattr(proc.state, k) is v for k, v in before.items())
     _assert_same(outs, expected[:1] + [replace(o, segment=SEGMENT + 1) for o in expected[1:]])
+
+
+def _filter_coefs(proc):
+    return proc.state.filter.settings.coefs
+
+
+def _filterbank_kernels(proc):
+    return proc.state.filterbank.settings.kernels
+
+
+# Stages whose design depends only on the config, and where to find it. The filter memory still resets at a gap.
+DESIGNED = {
+    **dict.fromkeys(
+        [
+            "ButterworthFilterTransformer",
+            "ChebyshevFilterTransformer",
+            "ChebyForDecimateTransformer",
+            "CombFilterTransformer",
+            "FIRFilterTransformer",
+            "FIRHilbertFilterTransformer",
+            "GaussianSmoothingFilterTransformer",
+            "KaiserFilterTransformer",
+            "ParksMcClellanFIRTransformer",
+        ],
+        _filter_coefs,
+    ),
+    "ButterworthBackwardFilterTransformer": lambda proc: proc._coefs_cache,
+    "FilterbankDesignTransformer": _filterbank_kernels,
+    "AnalyticFilterbankTransformer": _filterbank_kernels,
+}
+
+
+def _at_double_rate(m):
+    ax = m.axes[m.stream_dim]
+    return replace(m, axes={**m.axes, m.stream_dim: replace(ax, gain=ax.gain / 2)})
+
+
+@pytest.mark.parametrize("name", sorted(DESIGNED))
+def test_a_new_segment_keeps_the_design_but_not_the_filter_memory(name):
+    factory, messages, drive = CASES[name]
+    design = DESIGNED[name]
+    post = _after_gap(messages)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        proc = factory()
+        drive(proc, _before_gap(messages))
+        coefs = design(proc)
+        uninterrupted = _keeps_everything(copy.deepcopy(proc), factory, post, drive)
+        outs = drive(proc, post)
+        assert design(proc) is coefs
+        _assert_same(outs, drive(factory(), post))
+        with pytest.raises(AssertionError):
+            _assert_same(outs, uninterrupted)
+        # A new sample rate is a new config, so the filter is designed again.
+        drive(proc, [_at_double_rate(m) for m in post])
+    assert design(proc) is not coefs
 
 
 def test_buffered_startup_releases_with_the_latest_attrs():

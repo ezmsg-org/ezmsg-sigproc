@@ -146,6 +146,10 @@ class AnalyticFilterbankTransformer(
         axis = resolve_configured_stream_dim(self, message, None)
         return hash((message.key, getattr(message.axes.get(axis), "gain", None)))
 
+    def _reset_segment(self, message: AxisArray) -> None:
+        # The kernels depend only on the config; the child filterbank sees the new segment and resets its own memory.
+        pass
+
     def _reset_state(self, message: AxisArray) -> None:
         self._state.axis = resolve_configured_stream_dim(self, message, None)
         fs = 1 / message.axes[self._state.axis].gain

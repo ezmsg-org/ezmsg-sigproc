@@ -192,6 +192,10 @@ class ButterworthBackwardFilterTransformer(FilterByDesignTransformer[Butterworth
 
         return pad_length
 
+    def _reset_segment(self, message: AxisArray) -> None:
+        # Unlike the other filter-by-design stages this one has no child: its memory is the carried-over tail.
+        self._tail = None
+
     def _reset_state(self, message: AxisArray) -> None:
         """Reset filter state when stream changes."""
         self._coefs_cache = None

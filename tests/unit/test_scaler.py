@@ -578,3 +578,32 @@ def test_scaler_bias_correction_survives_chunking():
         parts.append(chunked(mk(c, n)).data)
         n += c.shape[0]
     np.testing.assert_allclose(np.concatenate(parts, axis=0), single, atol=1e-10)
+
+
+@pytest.mark.skipif(importlib.util.find_spec("river") is None, reason="requires `river` package")
+@pytest.mark.parametrize("reset_on_resume", [False, True])
+def test_river_scaler_keeps_its_statistics_across_a_segment_unless_reset_on_resume(reset_on_resume):
+    def msg(i, segment=0, fs=100.0):
+        return AxisArray(
+            np.random.default_rng(i).normal(3.0, 2.0, (50, 2)),
+            dims=["time", "ch"],
+            axes=frozendict({"time": AxisArray.TimeAxis(fs=fs, offset=i)}),
+            stream_dim="time",
+            segment=segment,
+        )
+
+    def scaler(**kwargs):
+        return RiverAdaptiveStandardScalerTransformer(time_constant=0.1, **kwargs)
+
+    proc = scaler(reset_on_resume=reset_on_resume)
+    proc(msg(0))
+    out = proc(msg(1, segment=1))
+    if reset_on_resume:
+        expected = scaler()(msg(1, segment=1))
+    else:
+        continuous = scaler()
+        continuous(msg(0))
+        expected = continuous(msg(1, segment=1))
+    np.testing.assert_allclose(out.data, expected.data)
+    # A new sample rate is a new config: the statistics start again either way.
+    np.testing.assert_allclose(proc(msg(2, segment=1, fs=200.0)).data, scaler()(msg(2, segment=1, fs=200.0)).data)

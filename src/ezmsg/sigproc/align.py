@@ -162,7 +162,8 @@ class AlignAlongAxisProcessor(
 
     def _process(self, message: AxisArray) -> _AlignPair | None:
         """Process input A: detect shape changes, buffer, try align."""
-        # A new segment on A has already reset both buffers (`_reset_segment`); just count it.
+        # A new segment on A has already reset both buffers: the base `_reset_segment` is a full `_reset_state`,
+        # which takes the `_full_reset` branch because `_hash` is set by A's first message. Just count it.
         self._segments.update(a=message.segment)
         shape_sig = (message.config_id, self._non_align_shape(message, self._state.align_axis))
         if self._state.a_shape_sig is not None and shape_sig != self._state.a_shape_sig:
