@@ -204,10 +204,10 @@ class SpectrumTransformer(BaseStatefulTransformer[SpectrumSettings, AxisArray, A
             # If input is not complex and desired output is SpectralOutput.POSITIVE, we can save some computation
             #  by using rfft and rfftfreq.
             self.state.fftfun = _make_fft_closure(xp.fft.rfft)
-            freqs = np.fft.rfftfreq(nfft, d=ax_info.gain * targ_len / nfft)
+            freqs = np.fft.rfftfreq(nfft, d=ax_info.gain)
         else:
             self.state.fftfun = _make_fft_closure(xp.fft.fft)
-            freqs = np.fft.fftfreq(nfft, d=ax_info.gain * targ_len / nfft)
+            freqs = np.fft.fftfreq(nfft, d=ax_info.gain)
             if self.settings.output == SpectralOutput.POSITIVE:
                 self.state.f_sl = slice(None, nfft // 2 + 1 - (nfft % 2))
             elif self.settings.output == SpectralOutput.NEGATIVE:
@@ -224,9 +224,7 @@ class SpectrumTransformer(BaseStatefulTransformer[SpectrumSettings, AxisArray, A
             self.state.fftshift = partial(xp.fft.fftshift, axes=(ax_idx,))
 
         freqs = freqs.tolist()  # To please type checking
-        # A single bin has no neighbour to measure the spacing from: it is fs / nfft.
-        gain = freqs[1] - freqs[0] if len(freqs) > 1 else 1.0 / (ax_info.gain * nfft)
-        self.state.freq_axis = AxisArray.LinearAxis(unit="Hz", gain=gain, offset=freqs[0])
+        self.state.freq_axis = AxisArray.LinearAxis(unit="Hz", gain=1.0 / (ax_info.gain * nfft), offset=freqs[0])
         self.state.new_dims = (
             message.dims[:ax_idx]
             + [
