@@ -96,7 +96,16 @@ def hold_for_startup(held: list[AxisArray], message: AxisArray, axis: str, n: in
     ax_idx = message.get_axis_idx(axis)
     if sum(m.data.shape[ax_idx] for m in held) < n:
         return None
-    data = get_namespace(message.data).concat([m.data for m in held], axis=ax_idx)
-    released = replace(held[0], data=data, attrs=message.attrs, segment=message.segment, config_id=message.config_id)
+    return release_held(held, axis)
+
+
+def release_held(held: list[AxisArray], axis: str) -> AxisArray:
+    """Empty a non-empty ``held`` and return its messages as one, as :func:`hold_for_startup` releases them.
+
+    A processor's ``flush`` calls this to emit a start-up buffer that never filled.
+    """
+    last = held[-1]
+    data = get_namespace(last.data).concat([m.data for m in held], axis=last.get_axis_idx(axis))
+    released = replace(held[0], data=data, attrs=last.attrs, segment=last.segment, config_id=last.config_id)
     held.clear()
     return released

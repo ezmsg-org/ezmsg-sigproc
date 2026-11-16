@@ -165,11 +165,22 @@ class Downsample(BaseTransformerUnit[DownsampleSettings, AxisArray, AxisArray, D
         shipping an empty AxisArray across SHM/socket every input chunk.
         Only emptiness along the downsampled axis is suppressed: a message
         that is empty along other axes (e.g. all channels sliced away
-        upstream) still flows so downstream consumers keep its cadence.
+        upstream) still flows so downstream consumers keep its cadence. Nor is
+        an empty message that starts a new segment suppressed: downstream units
+        flush and reset on the segment change (a source signals end-of-file that
+        way).
         """
+        segment = getattr(message, "segment", None)
+        new_segment = self._segment is not BaseTransformerUnit._segment and segment != self._segment
+        if new_segment:
+            # Release what the processor holds before the new segment resets it.
+            tail = await self.processor.aflush()
+            if tail is not None:
+                yield self.OUTPUT_SIGNAL, tail
+        self._segment = segment
         result = await self.processor.__acall__(message)
         # The processor is the one that worked out which dimension that is.
-        if result is not None and not is_empty_along(result, (self.processor.state.axis,)):
+        if result is not None and (new_segment or not is_empty_along(result, (self.processor.state.axis,))):
             yield self.OUTPUT_SIGNAL, result
 
 

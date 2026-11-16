@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 import scipy.signal as sps
 from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.util import replace
 
 from ezmsg.sigproc.butterworthfilter import ButterworthFilterSettings, ButterworthFilterTransformer
 from ezmsg.sigproc.butterworthzerophase import (
@@ -27,6 +28,7 @@ from ezmsg.sigproc.fir_pmc import ParksMcClellanFIRSettings, ParksMcClellanFIRTr
 from ezmsg.sigproc.firfilter import FIRFilterSettings, FIRFilterTransformer
 from ezmsg.sigproc.gaussiansmoothing import GaussianSmoothingFilterTransformer, GaussianSmoothingSettings
 from ezmsg.sigproc.kaiser import KaiserFilterSettings, KaiserFilterTransformer
+from ezmsg.sigproc.multibandpow import AnalyticFilterbankTransformer, MultiBandEnvelopePowerSettings
 from ezmsg.sigproc.util.minphase import MinPhaseMode
 from ezmsg.sigproc.util.startup import StartupMode
 
@@ -359,6 +361,82 @@ def test_reset_reprimes():
     fir.update_settings(order=21)
     out = fir(_msg(x_b[:10]))
     assert out.data.shape == (0, 2) and fir.state.filter.state.startup_n_pad == 20
+
+
+# --- flush: a stream that breaks before the start-up pad has arrived ---------------------------
+
+
+def test_flush_releases_unfilled_buffer_primed_from_what_is_held():
+    """The held samples come out at their own times, primed by reflecting all of them (the pad is
+    cut to what is held), matching an offline sosfilt run on the same reflection to rounding."""
+    x = np.random.default_rng(8).standard_normal((300, 2))
+    proc = _bandpass_iir(BUFFERED)
+    assert proc.flush() is None  # nothing held before the first message
+    outs = _feed(proc, x, 50)
+    assert all(o.data.shape == (0, 2) for o in outs)  # 300 < the pad of 500, so all held
+    assert proc.state.filter.state.startup_n_pad >= len(x)
+    tail = proc.flush()
+    sos = proc.state.filter.settings.coefs
+    pad = 2 * x[:1] - x[:0:-1]
+    zi = sps.sosfilt_zi(sos)[:, :, None] * pad[0]
+    ref, zf = sps.sosfilt(sos, np.concatenate([pad, x]), axis=0, zi=zi)
+    y, t = _cat([tail])
+    np.testing.assert_allclose(y, ref[len(pad) :], rtol=1e-9, atol=1e-12)
+    np.testing.assert_allclose(t, T0 + np.arange(len(x)) / FS, rtol=0, atol=1e-12)
+    assert proc.flush() is None  # nothing left
+
+    # The same segment continuing is filtered on from the released state: nothing repeated.
+    x2 = np.random.default_rng(9).standard_normal((40, 2))
+    nxt = proc(_msg(x2, offset=T0 + len(x) / FS))
+    np.testing.assert_allclose(nxt.data, sps.sosfilt(sos, x2, axis=0, zi=zf)[0], rtol=1e-9, atol=1e-12)
+    assert proc.flush() is None  # started: nothing extra held
+    # A new segment resets and holds again.
+    assert proc(replace(_msg(x2), segment=1)).data.shape == (0, 2)
+
+
+def test_flush_with_final_message():
+    x = np.random.default_rng(10).standard_normal((300, 2))
+    proc = _bandpass_iir(BUFFERED)
+    _feed(proc, x[:250], 50)
+    y, t = _cat([proc.flush(_msg(x[250:], offset=T0 + 250 / FS))])
+    proc_ref = _bandpass_iir(BUFFERED)
+    _feed(proc_ref, x, 50)
+    y_ref, t_ref = _cat([proc_ref.flush()])
+    np.testing.assert_array_equal(y, y_ref)
+    np.testing.assert_array_equal(t, t_ref)
+    # A final message that completes the start-up comes out whole on its own.
+    proc = _bandpass_iir(BUFFERED)
+    big = np.random.default_rng(11).standard_normal((600, 2))
+    np.testing.assert_array_equal(proc.flush(_msg(big)).data, _bandpass_iir(BUFFERED)(_msg(big)).data)
+
+
+FLUSH_FILTERBANKS = {
+    "filterbank": lambda s: FilterbankTransformer(FilterbankSettings(kernels=KERNELS, startup=s)),
+    "design": lambda s: FilterbankDesignTransformer(
+        FilterbankDesignSettings(
+            filters=[KaiserFilterSettings(cutoff=[15.0, 25.0], ripple=40.0, width=5.0, pass_zero=False)], startup=s
+        )
+    ),
+    "analytic": lambda s: AnalyticFilterbankTransformer(
+        MultiBandEnvelopePowerSettings(bands=[(13.0, 30.0)], startup=s)
+    ),
+}
+
+
+@pytest.mark.parametrize("name", FLUSH_FILTERBANKS)
+def test_filterbank_flush_releases_unfilled_buffer(name):
+    """Flushing an unfilled buffer gives what FIRST_CHUNK gives for the held samples as one message."""
+    make = FLUSH_FILTERBANKS[name]
+    x = np.random.default_rng(12).standard_normal((60, 2))
+    proc = make(BUFFERED)
+    assert proc.flush() is None
+    outs = _feed(proc, x, 20)
+    assert all(o.data.shape[o.get_axis_idx("time")] == 0 for o in outs)
+    tail = proc.flush()
+    ref = make(FIRST_CHUNK)(_msg(x))
+    assert tail.dims == ref.dims and tail.axes["time"] == ref.axes["time"]
+    np.testing.assert_allclose(tail.data, ref.data, rtol=1e-12, atol=1e-12)
+    assert proc.flush() is None
 
 
 # --- Backends ---------------------------------------------------------------------------------

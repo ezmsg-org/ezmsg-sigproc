@@ -23,7 +23,13 @@ from ezmsg.sigproc.filter import (
     FilterByDesignTransformer,
 )
 from ezmsg.sigproc.util.minphase import MinPhaseMode
-from ezmsg.sigproc.util.startup import StartupMode, hold_for_startup, prime_with_reflection, startup_n_pad
+from ezmsg.sigproc.util.startup import (
+    StartupMode,
+    hold_for_startup,
+    prime_with_reflection,
+    release_held,
+    startup_n_pad,
+)
 
 
 class FIRHilbertFilterSettings(FilterBaseSettings):
@@ -212,6 +218,10 @@ class FIRHilbertEnvelopeState:
     dly: int | None = None
     startup_pending: bool = False
     startup_held: list | None = None
+    template: AxisArray | None = None  # the input's layout, taken at reset; `flush` stamps its tail from it
+    next_offset: float | None = None  # stream-axis offset just past the last input sample; None until one arrives
+    last_attrs: dict | None = None  # the last input's attrs and config_id, which can change without a reset
+    last_config_id: int = 0
 
 
 class FIRHilbertEnvelopeTransformer(
@@ -276,6 +286,10 @@ class FIRHilbertEnvelopeTransformer(
         self._state.filter = FIRHilbertFilterTransformer(settings=inner_settings)
         self._state.delay_buf = None
         self._state.dly = None
+        # Copied empty, not viewed, so the input's buffer is not kept alive.
+        axis_idx = message.get_axis_idx(resolve_configured_stream_dim(self, message, self.settings.axis))
+        self._state.template = replace(message, data=slice_along_axis(message.data, slice(0, 0), axis_idx).copy())
+        self._state.next_offset = None
         self._state.startup_held = []
         self._state.startup_pending = self.settings.startup != StartupMode.CONSTANT
 
@@ -328,6 +342,11 @@ class FIRHilbertEnvelopeTransformer(
         y_real = x_delayed_full[..., -x.shape[-1] :]
 
         self._state.delay_buf = x_cat[..., -self._state.dly :].copy()
+        if x.shape[-1]:
+            ax = message.axes[axis_name]
+            self._state.next_offset = ax.offset + x.shape[-1] * ax.gain
+            self._state.last_attrs = message.attrs
+            self._state.last_config_id = message.config_id
 
         analytic = y_real.astype(np.complex64) + 1j * y_imag.astype(np.complex64)
         out = np.abs(analytic)
@@ -338,6 +357,51 @@ class FIRHilbertEnvelopeTransformer(
         # The inner filter's axes carry its delay correction (compensate_delay), which also
         # covers the real part: it is delayed by the same (taps - 1) // 2 samples above.
         return replace(message, data=out, axes=y_imag_msg.axes)
+
+    def flush(self, message: AxisArray | None = None) -> AxisArray | None:
+        """Process ``message`` if given, then emit every sample still held.
+
+        That is the last ``(taps - 1) // 2`` samples, which the filter delay keeps back, preceded,
+        if BUFFERED start-up never completed, by everything it withheld (primed from the reflection
+        of as many held samples as there are, as FIRST_CHUNK would prime them as one message).
+
+        The delayed samples are pushed out by padding the input with zeros. The real part of the
+        tail is the true input; the imaginary part is what the FIR gives with zeros in place of the
+        samples that never came. Zeros give the most accurate tail for zero-mean input, which a
+        band-passed envelope input is; an input with a DC offset gets a step at the break and a less
+        accurate tail. Returns None if nothing is held.
+
+        The padding now sits in the filter state, so the next message starts the filter afresh
+        even if it continues the same segment.
+        """
+        out = None if message is None else self(message)
+        st = self._state
+        if st.startup_held:
+            axis = resolve_configured_stream_dim(self, st.startup_held[-1], self.settings.axis)
+            released = release_held(st.startup_held, axis)
+            st.startup_pending = False
+            n_pad = startup_n_pad(st.filter.get_taps() - 1, released, axis, self.settings.startup_max_dur)
+            prime_with_reflection(self._envelope, released, axis, n_pad)
+            out = self._envelope(released)
+        if st.next_offset is None:
+            return out
+        axis_name = resolve_configured_stream_dim(self, st.template, self.settings.axis)
+        axis_idx = st.template.get_axis_idx(axis_name)
+        ax = st.template.axes[axis_name]
+        held = replace(
+            st.template,
+            # The delay buffer has the input's dtype and lead shape, with dly samples on the last axis.
+            data=np.moveaxis(np.zeros_like(st.delay_buf), -1, axis_idx),
+            axes={**st.template.axes, axis_name: replace(ax, offset=st.next_offset)},
+            attrs=st.last_attrs,
+            config_id=st.last_config_id,
+        )
+        tail = self._envelope(held)
+        st.next_offset = None
+        self._request_reset()
+        if out is None or out.data.shape[axis_idx] == 0:
+            return tail
+        return replace(out, data=np.concatenate([out.data, tail.data], axis=axis_idx))
 
 
 class FIRHilbertEnvelopeUnit(

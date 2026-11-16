@@ -4,12 +4,13 @@ import logging
 
 import numpy as np
 import pytest
-from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.axisarray import AxisArray, replace
 from ezmsg.util.messages.modify import ModifyAxisSettings, ModifyAxisTransformer
 from frozendict import frozendict
 
 from ezmsg.sigproc.aggregate import AggregateSettings, AggregateTransformer, AggregationFunction
 from ezmsg.sigproc.binned_aggregate import (
+    _MEAN_LIKE,
     BinnedAggregate,
     BinnedAggregateSettings,
     BinnedAggregateTransformer,
@@ -581,3 +582,179 @@ def test_toggling_restores_the_metric_axis():
     out = proc(_sig_msgs(np.zeros((40, 2)), fs, 40)[0])
     assert out.data.shape == (2, 2, 2)
     assert list(out.axes["metric"].data) == ["min", "max"]
+
+
+# ---- flush (the open partial bin) -------------------------------------------
+
+
+def test_every_operation_is_classified_for_flush():
+    """A new AggregationFunction must say whether a short final bin is comparable."""
+    assert set(_MEAN_LIKE) == set(AggregationFunction)
+
+
+@pytest.mark.parametrize("block_size", [7, 1000])
+@pytest.mark.parametrize("fs", [1000.0, 30012.0])
+def test_flush_emits_the_mean_of_the_leftover_samples(block_size: int, fs: float):
+    """The partial bin is the mean of the samples after the last full bin, and it
+    sits on the grid right after the bins already emitted."""
+    bin_dur = 0.02
+    spb = bin_dur * fs  # fractional at 30012 Hz
+    n = int(5.5 * spb)
+    sig = np.random.default_rng(3).standard_normal((n, 2))
+    proc = BinnedAggregateTransformer(axis="time", bin_duration=bin_dur)
+    out = _run(proc, _sig_msgs(sig, fs, block_size))
+    tail = proc.flush()
+
+    assert tail.data.shape == (1, 2)
+    np.testing.assert_allclose(tail.data[0], sig[int(5 * spb) :].mean(axis=0))
+    bins_before = 0
+    for m in out + [tail]:
+        assert m.axes["time"].offset == pytest.approx(bins_before * bin_dur)
+        assert m.axes["time"].gain == pytest.approx(bin_dur)
+        bins_before += m.data.shape[0]
+    assert bins_before == 6
+
+
+def test_flush_tuple_of_mean_like_operations_emits():
+    fs = 1000.0
+    ops = (AggregationFunction.MIN, AggregationFunction.MAX, AggregationFunction.ARGMAX)
+    sig = np.random.default_rng(4).standard_normal((50, 2))
+    proc = BinnedAggregateTransformer(axis="time", bin_duration=0.02, operation=ops)
+    proc(_sig_msgs(sig, fs, 50)[0])
+    tail = proc.flush()
+
+    left = sig[40:]
+    assert tail.data.shape == (1, 2, 3)
+    np.testing.assert_allclose(tail.data[0, :, 0], left.min(axis=0))
+    np.testing.assert_allclose(tail.data[0, :, 1], left.max(axis=0))
+    np.testing.assert_allclose(tail.data[0, :, 2], (40 + left.argmax(axis=0)) / fs)
+    assert list(tail.axes["metric"].data) == ["min", "max", "argmax"]
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [AggregationFunction.SUM, (AggregationFunction.MEAN, AggregationFunction.SUM)],
+    ids=["sum", "tuple_with_sum"],
+)
+def test_flush_emits_no_partial_bin_for_a_count_scaling_operation(operation):
+    """A short sum is not comparable with full ones. The open bin is kept, so a
+    stream that continues after all completes it exactly as without the flush."""
+    fs = 1000.0
+    msgs = _sig_msgs(np.random.default_rng(5).standard_normal((100, 2)), fs, 50)
+    proc = BinnedAggregateTransformer(axis="time", bin_duration=0.02, operation=operation)
+    ref = BinnedAggregateTransformer(axis="time", bin_duration=0.02, operation=operation)
+    proc(msgs[0])
+    ref(msgs[0])
+
+    assert proc.flush() is None
+    np.testing.assert_array_equal(proc(msgs[1]).data, ref(msgs[1]).data)
+
+
+def test_flush_without_an_open_bin_returns_none():
+    proc = BinnedAggregateTransformer(axis="time", bin_duration=0.02)
+    assert proc.flush() is None  # never called
+    proc(_sig_msgs(np.ones((40, 2)), 1000.0, 40)[0])  # exactly 2 bins, nothing carried
+    assert proc.flush() is None
+
+
+def test_second_flush_returns_none():
+    proc = BinnedAggregateTransformer(axis="time", bin_duration=0.02)
+    proc(_sig_msgs(np.ones((50, 2)), 1000.0, 50)[0])
+    assert proc.flush() is not None
+    assert proc.flush() is None
+
+
+def test_flush_with_a_final_chunk_returns_its_bins_then_the_partial_one():
+    fs = 1000.0
+    msgs = _sig_msgs(np.random.default_rng(6).standard_normal((110, 2)), fs, 55)
+    proc = BinnedAggregateTransformer(axis="time", bin_duration=0.02)
+    ref = BinnedAggregateTransformer(axis="time", bin_duration=0.02)
+    proc(msgs[0])
+    ref(msgs[0])
+
+    out = proc.flush(msgs[1])
+    bins, tail = ref(msgs[1]), ref.flush()
+    assert out.data.shape == (bins.data.shape[0] + 1, 2)
+    np.testing.assert_allclose(out.data, np.concatenate([bins.data, tail.data]))
+    assert out.axes["time"].offset == pytest.approx(bins.axes["time"].offset)
+
+
+def test_flush_in_passthrough_forwards_the_message():
+    proc = BinnedAggregateTransformer(axis="time", bin_duration=0.02, passthrough=True)
+    msg = _sig_msgs(np.ones((50, 2)), 1000.0, 50)[0]
+    assert proc.flush(msg) is msg
+    assert proc.flush() is None
+
+
+def test_flushed_bin_carries_the_old_segment_and_config():
+    fs = 1000.0
+    msg = replace(_sig_msgs(np.ones((50, 2)), fs, 50)[0], segment=3, config_id=1234)
+    proc = BinnedAggregateTransformer(axis="time", bin_duration=0.02)
+    out = proc(msg)
+    tail = proc.flush()
+    # Binned output has its own config_id, derived from the input's; the tail shares it.
+    assert out.config_id not in (0, 1234)
+    assert (tail.segment, tail.config_id, tail.key) == (3, out.config_id, msg.key)
+
+
+def test_unit_publishes_the_partial_bin_before_the_new_segment():
+    fs = 1000.0
+    unit = BinnedAggregate(BinnedAggregateSettings(axis="time", bin_duration=0.02))
+    unit.create_processor()
+
+    async def drive(msg):
+        return [m async for m in unit.on_signal(msg)]
+
+    asyncio.run(drive(_sig_msgs(np.full((50, 1), 2.0), fs, 50)[0]))
+    published = asyncio.run(drive(replace(_sig_msgs(np.zeros((40, 1)), fs, 40)[0], segment=1)))
+    tail, first = (m for _, m in published)
+    assert (tail.segment, tail.data.shape, tail.axes["time"].offset) == (0, (1, 1), pytest.approx(0.04))
+    assert tail.data[0, 0] == pytest.approx(2.0)
+    assert first.segment == 1 and first.data.max() == pytest.approx(0.0)
+
+
+def test_same_segment_after_a_flush_starts_a_fresh_grid():
+    """The emitted samples are not counted again: the next message opens a new grid
+    at its own offset, as after a gap."""
+    fs = 1000.0
+    msgs = _sig_msgs(np.concatenate([np.full((50, 1), 9.0), np.zeros((40, 1))]), fs, 50)
+    proc = BinnedAggregateTransformer(axis="time", bin_duration=0.02)
+    proc(msgs[0])
+    proc.flush()
+    out = proc(msgs[1])  # 40 samples starting at 0.05 s
+    assert out.data.shape[0] == 2
+    assert out.data.max() == pytest.approx(0.0)
+    assert out.axes["time"].offset == pytest.approx(0.05)
+
+
+def test_unit_end_of_stream_marker_flushes_nothing_more():
+    """A source ends segment A with an empty message in B (`end_of_stream`); data then resumes in C.
+
+    The flush before C has nothing to release: the empty message must not open a bin of its own,
+    which would be published as a NaN (a mean over no samples).
+    """
+    from ezmsg.baseproc import end_of_stream
+
+    fs = 1000.0
+    unit = BinnedAggregate(BinnedAggregateSettings(bin_duration=0.02))
+    unit.create_processor()
+
+    async def drive(msg):
+        return [m for _, m in [o async for o in unit.on_signal(msg)]]
+
+    a = replace(_sig_msgs(np.full((50, 1), 2.0), fs, 50)[0], segment=1)
+    marker = replace(end_of_stream(a), segment=2)
+    c = _sig_msgs(np.zeros((40, 1)), fs, 40)[0]
+    c = replace(c, segment=3, axes={**c.axes, "time": replace(c.axes["time"], offset=10.0)})
+
+    (full,) = asyncio.run(drive(a))
+    tail, at_marker = asyncio.run(drive(marker))
+    published = asyncio.run(drive(c))
+
+    assert full.data.shape == (2, 1) and full.segment == 1
+    assert (tail.segment, tail.data.shape, tail.axes["time"].offset) == (1, (1, 1), pytest.approx(0.04))
+    assert at_marker.segment == 2 and at_marker.data.shape[0] == 0
+    (first,) = published  # nothing flushed for the marker's segment
+    assert (first.segment, first.data.shape, first.axes["time"].offset) == (3, (2, 1), pytest.approx(10.0))
+    np.testing.assert_array_equal(first.data, 0.0)
+    assert unit.processor.flush() is None

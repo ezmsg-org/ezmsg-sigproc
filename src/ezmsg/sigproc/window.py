@@ -539,17 +539,32 @@ class Window(BaseTransformerUnit[WindowSettings, AxisArray, AxisArray, WindowTra
         # below checks a different dim than the one that was windowed. Resolved
         # from the *input*, since the output has `win` prepended.
         axis = resolve_configured_stream_dim(self.processor, message, self.SETTINGS.axis)
+        segment = getattr(message, "segment", None)
+        new_segment = self._segment is not BaseTransformerUnit._segment and segment != self._segment
+        if new_segment:
+            # Release what the processor holds before the new segment resets it.
+            tail = await self.processor.aflush()
+            if tail is not None:
+                yield self.OUTPUT_SIGNAL, tail
+        self._segment = segment
         try:
             ret = self.processor(message)
             # Swallow only when no complete windows (or, in pass-through mode, no
             # samples) came out; emptiness along other axes (e.g. all channels
-            # sliced away upstream) still flows to preserve stream cadence.
-            if not is_empty_along(ret, (self.SETTINGS.newaxis or "win", axis)):
+            # sliced away upstream) still flows to preserve stream cadence. An
+            # empty message that starts a new segment flows too: downstream units
+            # flush and reset on the segment change.
+            if new_segment or not is_empty_along(ret, (self.SETTINGS.newaxis or "win", axis)):
                 if self.SETTINGS.newaxis is not None or self.SETTINGS.window_dur is None or "win" not in ret.dims:
                     # Multi-win mode, pass-through mode, or batcher mode -- the
                     # last of which already tiled its windows onto the target
                     # axis, so there is nothing to split.
                     yield self.OUTPUT_SIGNAL, ret
+                elif ret.data.shape[ret.get_axis_idx("win")] == 0:
+                    # No window to split out; publish an empty message in the unbundled layout.
+                    ax_idx = message.get_axis_idx(axis)
+                    empty = slice_along_axis(message.data, slice(0, 0), ax_idx)
+                    yield self.OUTPUT_SIGNAL, replace(message, data=empty, stream_dim=axis)
                 else:
                     # We need to split out_msg into multiple yields, dropping newaxis.
                     axis_idx = ret.get_axis_idx("win")

@@ -636,6 +636,41 @@ def test_warm_start_buffered_holds_then_releases():
             assert m.axes["time"].offset == pytest.approx(s / FS)
 
 
+def test_warm_start_flush_releases_what_is_held():
+    """A stream that breaks before the warm-start window fills: flush fits the line to everything
+    held and emits it, exactly as first_chunk does given those samples as one message."""
+    n = 2000  # under WARM_N
+    x = _line_signal(n + 500, 3, 2.0 * np.pi * 60.4 / FS, amp=200.0, seed=36)
+    proc = adaptive_lnc(warm_start="buffered")
+    assert proc.flush() is None  # nothing held before the first message
+    assert all(m.data.shape == (0, 3) for m in _messages(proc, x[:n], [500] * 4))
+    tail = proc.flush()
+    ref = adaptive_lnc(warm_start="first_chunk")
+    expect = ref(_make_axisarray(x[:n]))
+    assert tail.data.shape == (n, 3) and tail.axes["time"].offset == 0.0
+    np.testing.assert_allclose(tail.data, expect.data, rtol=1e-12, atol=1e-9)
+    assert _line_amp(tail.data, 2.0 * np.pi * 60.4 / FS, n // 2, n) < 0.05 * 200.0  # cancelled from the fit
+    assert proc.flush() is None  # nothing left
+
+    # The warm start is over: the same segment continuing is cancelled on, as first_chunk would.
+    nxt = _make_axisarray(x[n:], offset=n / FS)
+    np.testing.assert_allclose(proc(nxt).data, ref(nxt).data, rtol=1e-12, atol=1e-9)
+    assert proc.flush() is None  # started: nothing extra held
+    # A new segment holds again.
+    assert proc(replace(nxt, segment=1)).data.shape == (0, 3)
+
+
+def test_warm_start_flush_with_final_message():
+    n = 2000
+    x = _line_signal(n, 3, 2.0 * np.pi * LINE_FREQ / FS, amp=200.0, seed=37)
+    proc = adaptive_lnc(warm_start="buffered")
+    _messages(proc, x[:1500], [500] * 3)
+    tail = proc.flush(_make_axisarray(x[1500:], offset=1500 / FS))
+    expect = adaptive_lnc(warm_start="first_chunk")(_make_axisarray(x))
+    assert tail.axes["time"].offset == 0.0
+    np.testing.assert_allclose(tail.data, expect.data, rtol=1e-12, atol=1e-9)
+
+
 def test_keep_frequency_on_reset_reconverges_faster():
     """After a gap (reset), keeping the tracked off-nominal frequency cancels
     better than restarting from line_freq; with warm start too, the fit uses

@@ -52,6 +52,17 @@ def test_upstream_change_and_gap_together_count_once():
     assert segments(proc, [chunk(0.0, segment=0), chunk(9.0, segment=1)]) == [0, 1]
 
 
+@pytest.mark.parametrize("resume", [0.1, 9.0], ids=["continuing", "after-a-gap"])
+def test_an_end_of_stream_marker_and_the_data_after_it_stay_apart(resume):
+    """Upstream ends segment 0 with a marker in 1 and resumes in 2: three segments, each counted once."""
+    from ezmsg.baseproc import end_of_stream
+
+    proc = StreamStampTransformer(tolerance=0.002)
+    first = chunk(0.0)
+    msgs = [first, end_of_stream(first), chunk(resume, segment=2), chunk(resume + 0.1, segment=2)]
+    assert segments(proc, msgs) == [0, 1, 2, 2]
+
+
 def test_sample_rate_change_is_a_new_segment():
     proc = StreamStampTransformer(tolerance=0.002)
     # Offsets continue exactly, so only the layout change can account for the new segment.

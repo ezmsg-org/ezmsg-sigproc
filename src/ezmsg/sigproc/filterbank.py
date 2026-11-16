@@ -26,7 +26,7 @@ from .util.deprecation import warn_axis_deprecated
 from .util.message import with_fingerprint
 from .util.minphase import MinPhaseMode, is_linear_phase, kernel_delay, min_phase_kernel
 from .util.segment import ConfigChain
-from .util.startup import StartupMode, hold_for_startup, prime_with_reflection, startup_n_pad
+from .util.startup import StartupMode, hold_for_startup, prime_with_reflection, release_held, startup_n_pad
 from .window import WindowTransformer
 
 
@@ -370,6 +370,21 @@ class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArra
         # FFT output starts at the first buffered window, not at this message.
         offset = win_msg.axes["win"].offset if self._state.mode == FilterbankMode.FFT else None
         return self._output(res, message, axis, offset)
+
+    def flush(self, message: AxisArray | None = None) -> AxisArray | None:
+        """Process ``message`` if given, then release what BUFFERED start-up still holds.
+
+        As :meth:`ezmsg.sigproc.filter.FilterTransformer.flush`: an unfilled start-up buffer is primed
+        from the reflection of as many held samples as there are and emitted; otherwise nothing extra.
+        """
+        out = None if message is None else self(message)
+        if not self._state.startup_held:
+            return out
+        axis = resolve_configured_stream_dim(self, self._state.startup_held[-1], self.settings.axis)
+        released = release_held(self._state.startup_held, axis)
+        self._state.startup_pending = False
+        prime_with_reflection(self._prime, released, axis, self._state.startup_n_pad)
+        return self._process(released)
 
     def _seed_constant(self, message: AxisArray) -> None:
         """Set the overlap-add tail as if ``message``'s first sample had been held before it."""
