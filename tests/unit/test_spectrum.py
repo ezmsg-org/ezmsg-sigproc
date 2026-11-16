@@ -259,6 +259,15 @@ def test_spectrum_empty_along_stream_dim():
     assert_messages_equal([proc(normal)], [expected])
 
 
+def test_spectrum_single_bin():
+    """A transformed axis of length 1 gives one bin, spaced fs / nfft."""
+    from tests.helpers.empty_time import make_msg
+
+    result = SpectrumTransformer(SpectrumSettings(axis="time"))(make_msg(n_time=1))
+    assert result.data.shape == (1, N_CH)
+    assert result.axes["freq"] == AxisArray.LinearAxis(unit="Hz", gain=FS, offset=0.0)
+
+
 @requires_mlx
 @pytest.mark.parametrize("transform", [SpectralTransform.REL_DB, SpectralTransform.REL_POWER])
 @pytest.mark.parametrize("output", [SpectralOutput.POSITIVE, SpectralOutput.NEGATIVE, SpectralOutput.FULL])

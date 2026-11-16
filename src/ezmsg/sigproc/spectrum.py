@@ -224,7 +224,9 @@ class SpectrumTransformer(BaseStatefulTransformer[SpectrumSettings, AxisArray, A
             self.state.fftshift = partial(xp.fft.fftshift, axes=(ax_idx,))
 
         freqs = freqs.tolist()  # To please type checking
-        self.state.freq_axis = AxisArray.LinearAxis(unit="Hz", gain=freqs[1] - freqs[0], offset=freqs[0])
+        # A single bin has no neighbour to measure the spacing from: it is fs / nfft.
+        gain = freqs[1] - freqs[0] if len(freqs) > 1 else 1.0 / (ax_info.gain * nfft)
+        self.state.freq_axis = AxisArray.LinearAxis(unit="Hz", gain=gain, offset=freqs[0])
         self.state.new_dims = (
             message.dims[:ax_idx]
             + [
