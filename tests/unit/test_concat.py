@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+from ezmsg.baseproc import end_of_stream
 from ezmsg.util.messages.axisarray import AxisArray, CoordinateAxis
 from ezmsg.util.messages.util import replace
 from frozendict import frozendict
@@ -1095,3 +1096,31 @@ class TestConfigId:
         proc = ConcatProcessor(ConcatSettings(axis="ch"))
         ids = [self._run(proc, 1, 2, attrs_b={"gain": g}) for g in (1.0, 1.0, 2.0)]
         assert ids[0] == ids[1] != ids[2]
+
+
+@pytest.mark.parametrize("side", ["a", "b"])
+def test_end_of_stream_on_one_input_gives_one_empty_output(side):
+    """An empty new-segment message on one input is not paired with the other input's data."""
+    import asyncio
+
+    proc = ConcatProcessor(ConcatSettings(axis="ch"))
+
+    def msg(value, segment, labels):
+        return replace(_make_msg(np.full((3, 2), value), ch_labels=labels), segment=segment, config_id=7)
+
+    a0, b0 = msg(1.0, 0, ["A0", "A1"]), msg(2.0, 0, ["B0", "B1"])
+    proc.push_a(a0)
+    proc.push_b(b0)
+    getattr(proc, f"push_{side}")(end_of_stream(a0 if side == "a" else b0))
+    proc.push_a(msg(3.0, 2 if side == "a" else 0, ["A0", "A1"]))
+    proc.push_b(msg(4.0, 2 if side == "b" else 0, ["B0", "B1"]))
+
+    async def run():
+        return [await proc.__acall__() for _ in range(3)]
+
+    out = asyncio.run(run())
+    assert [o.segment for o in out] == [0, 1, 2]
+    assert out[1].data.shape == (0, 4)
+    assert list(out[1].axes["ch"].data) == list(out[0].axes["ch"].data)
+    assert out[1].config_id == out[0].config_id != 0
+    np.testing.assert_array_equal(out[2].data, np.repeat([[3.0, 3.0, 4.0, 4.0]], 3, axis=0))

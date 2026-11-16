@@ -17,7 +17,7 @@ from ezmsg.baseproc.util.asio import run_coroutine_sync
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
-from ..util.segment import ConfigJoin, SegmentJoin
+from ..util.segment import ConfigJoin, SegmentJoin, next_pair
 
 
 class ConstDifferenceSettings(ez.Settings):
@@ -69,6 +69,9 @@ class DifferenceState:
     queue_b: "asyncio.Queue[AxisArray]" = field(default_factory=asyncio.Queue)
     segments: SegmentJoin = field(default_factory=SegmentJoin)
     configs: ConfigJoin = field(default_factory=ConfigJoin)
+    held_a: AxisArray | None = None
+    last_a: AxisArray | None = None
+    last_b: AxisArray | None = None
 
 
 class DifferenceProcessor:
@@ -101,8 +104,7 @@ class DifferenceProcessor:
 
     async def __acall__(self) -> AxisArray:
         """Await and subtract the next messages (A - B)."""
-        a = await self._state.queue_a.get()
-        b = await self._state.queue_b.get()
+        a, b = await next_pair(self._state)
         self._state.segments.update(a=a.segment, b=b.segment)
         return replace(
             a,

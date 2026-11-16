@@ -4,6 +4,8 @@ import asyncio
 import copy
 
 import numpy as np
+import pytest
+from ezmsg.baseproc import end_of_stream
 from ezmsg.util.messages.axisarray import AxisArray, chain_config_id
 from frozendict import frozendict
 
@@ -299,3 +301,32 @@ class TestDifferenceConfigId:
         ids = [run(a, b) for a, b in [(1, 2), (1, 2), (3, 2), (3, 4), (0, 4), (3, 0)]]
         assert ids[:4] == [chain_config_id(1, 2)] * 2 + [chain_config_id(3, 2), chain_config_id(3, 4)]
         assert ids[4:] == [0, 0]  # an undeclared input makes the output undeclared
+
+
+def _seg_msg(value: float, segment: int, config_id: int) -> AxisArray:
+    return AxisArray(
+        np.full((2, 2), value),
+        dims=["time", "ch"],
+        axes=frozendict({"time": AxisArray.TimeAxis(fs=100.0)}),
+        segment=segment,
+        config_id=config_id,
+    )
+
+
+@pytest.mark.parametrize("side", ["a", "b"])
+def test_end_of_stream_on_one_input_gives_one_empty_output(side):
+    """An empty new-segment message on one input is not paired with the other input's data."""
+    processor = DifferenceProcessor()
+    a0, b0 = _seg_msg(1.0, 0, 1), _seg_msg(10.0, 0, 2)
+    processor.push_a(a0)
+    processor.push_b(b0)
+    getattr(processor, f"push_{side}")(end_of_stream(a0 if side == "a" else b0))
+    processor.push_a(_seg_msg(2.0, 2 if side == "a" else 0, 1))
+    processor.push_b(_seg_msg(20.0, 2 if side == "b" else 0, 2))
+
+    out = [processor() for _ in range(3)]
+    assert [o.segment for o in out] == [0, 1, 2]
+    assert out[1].data.shape == (0, 2)
+    assert out[1].config_id == out[0].config_id == chain_config_id(1, 2)
+    np.testing.assert_array_equal(out[0].data, np.full((2, 2), -9.0))
+    np.testing.assert_array_equal(out[2].data, np.full((2, 2), -18.0))

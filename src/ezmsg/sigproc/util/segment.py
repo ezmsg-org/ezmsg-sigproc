@@ -1,6 +1,8 @@
 """Segment numbering and ``config_id`` for an output fed by more than one input, or reshaped by its stage."""
 
-from ezmsg.util.messages.axisarray import chain_config_id
+from ezmsg.baseproc import end_of_stream, resolve_stream_dim
+from ezmsg.util.messages.axisarray import AxisArray, chain_config_id
+from ezmsg.util.messages.util import replace
 
 
 class SegmentJoin:
@@ -22,6 +24,45 @@ class SegmentJoin:
         self._inputs.update(segments)
         self.segment += changed
         return changed
+
+
+async def next_pair(state) -> tuple[AxisArray, AxisArray]:
+    """The next ``(a, b)`` for a two-input unit to combine, taken from ``state.queue_a`` and ``state.queue_b``.
+
+    Messages pair in arrival order, except one with no samples (an end-of-stream message): that is
+    paired with a zero-length copy of the other input's previous message instead, so the unit emits
+    one empty output in the new segment. Before the other input has sent anything there is nothing
+    to base that output on, and the message only updates ``state.segments``. ``state`` also needs
+    ``held_a``, ``last_a`` and ``last_b``, all initially None.
+    """
+    while True:
+        a, state.held_a = state.held_a, None
+        if a is None:
+            a = await state.queue_a.get()
+        if _no_samples(a):
+            state.last_a = a
+            if state.last_b is not None:
+                return a, _zero_length(state.last_b)
+            state.segments.update(a=a.segment)
+            continue
+        b = await state.queue_b.get()
+        if _no_samples(b):
+            state.held_a, state.last_b = a, b  # a waits for B's next message
+            if state.last_a is not None:
+                return _zero_length(state.last_a), b
+            state.segments.update(b=b.segment)
+            continue
+        state.last_a, state.last_b = a, b
+        return a, b
+
+
+def _no_samples(msg: AxisArray) -> bool:
+    return bool(msg.dims) and msg.data.shape[msg.get_axis_idx(resolve_stream_dim(msg))] == 0
+
+
+def _zero_length(msg: AxisArray) -> AxisArray:
+    """``msg`` with no samples, still in its own segment."""
+    return replace(end_of_stream(msg), segment=msg.segment)
 
 
 class ConfigJoin:

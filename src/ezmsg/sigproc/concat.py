@@ -17,7 +17,7 @@ from ezmsg.util.messages.util import replace
 from ezmsg.sigproc.util.channels import AxisFingerprintMemo
 
 from .util.message import with_fingerprint
-from .util.segment import ConfigJoin, SegmentJoin
+from .util.segment import ConfigJoin, SegmentJoin, next_pair
 
 logger = logging.getLogger(__name__)
 
@@ -537,6 +537,9 @@ class ConcatState:
     memo_b: _FingerprintMemo = field(default_factory=_FingerprintMemo)
     segments: SegmentJoin = field(default_factory=SegmentJoin)
     configs: ConfigJoin = field(default_factory=ConfigJoin)
+    held_a: AxisArray | None = None
+    last_a: AxisArray | None = None
+    last_b: AxisArray | None = None
 
 
 class ConcatProcessor:
@@ -566,9 +569,7 @@ class ConcatProcessor:
         self._state.queue_b.put_nowait(msg)
 
     async def __acall__(self) -> AxisArray:
-        a = await self._state.queue_a.get()
-        b = await self._state.queue_b.get()
-        return self._concat(a, b)
+        return self._concat(*await next_pair(self._state))
 
     def _concat(self, a: AxisArray, b: AxisArray) -> AxisArray:
         """Concatenate *a* and *b* along the configured axis."""
