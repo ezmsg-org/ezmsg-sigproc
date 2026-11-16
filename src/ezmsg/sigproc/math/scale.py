@@ -15,8 +15,11 @@ from ..util.segment import SettingsConfigChain
 
 
 class ScaleSettings(ez.Settings):
-    scale: float = 1.0
-    """Factor by which to scale the data magnitude."""
+    scale: float | int = 1.0
+    """Factor by which to scale the data magnitude.
+
+    The output dtype follows the array library's promotion of the data dtype with the value's type:
+    pass an ``int`` to keep an integer stream integer, a ``float`` to get floats."""
 
 
 class ScaleTransformer(SettingsConfigChain, BaseTransformer[ScaleSettings, AxisArray, AxisArray]):
@@ -34,7 +37,7 @@ class Scale(BaseTransformerUnit[ScaleSettings, AxisArray, AxisArray, ScaleTransf
     SETTINGS = ScaleSettings
 
 
-def scale(scale: float = 1.0) -> ScaleTransformer:
+def scale(scale: float | int = 1.0) -> ScaleTransformer:
     """
     Scale the data by a constant factor.
 

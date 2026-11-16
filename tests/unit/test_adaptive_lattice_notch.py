@@ -175,3 +175,29 @@ def test_aln_empty_first():
     result = proc(empty)
     check_empty_result(result)
     check_state_not_corrupted(proc, normal)
+
+
+def test_aln_time_not_first_axis():
+    """A (ch, time) input gives the transpose of the (time, ch) result, in the input's layout."""
+    rng = np.random.default_rng(0)
+    data = rng.standard_normal((1000, 3))
+    fs = 100.0
+
+    def run(time_first: bool):
+        proc = AdaptiveLatticeNotchFilterTransformer(init_notch_freq=10.0)
+        out = []
+        for ix in range(2):
+            chunk = data[ix * 500 : (ix + 1) * 500]
+            msg = AxisArray(
+                chunk if time_first else chunk.T.copy(),
+                dims=["time", "ch"] if time_first else ["ch", "time"],
+                axes={"time": AxisArray.TimeAxis(fs=fs, offset=ix * 500 / fs)},
+            )
+            out.append(proc(msg))
+        return out
+
+    for tf, ct in zip(run(True), run(False)):
+        assert ct.dims == ["ch", "time"]
+        assert ct.data.shape == (3, 500)
+        assert np.allclose(ct.data, tf.data.T)
+        assert np.allclose(ct.axes["freq"].data, tf.axes["freq"].data)

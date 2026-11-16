@@ -3,6 +3,7 @@ import pytest
 from ezmsg.util.messages.axisarray import AxisArray
 
 from ezmsg.sigproc.math.abs import AbsTransformer
+from ezmsg.sigproc.math.add import ConstAddSettings, ConstAddTransformer
 from ezmsg.sigproc.math.anscombe import (
     _D_MIN,
     AnscombeTransformer,
@@ -201,6 +202,23 @@ def test_pow(exponent: float):
 
     assert msg_out.data.shape == (n_times, n_chans)
     assert np.allclose(msg_out.data, in_dat**exponent)
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda v: ConstAddTransformer(ConstAddSettings(value=v)),
+        lambda v: ConstDifferenceTransformer(ConstDifferenceSettings(value=v)),
+        lambda v: PowTransformer(PowSettings(exponent=v)),
+        lambda v: ScaleTransformer(ScaleSettings(scale=v)),
+    ],
+    ids=["add", "difference", "pow", "scale"],
+)
+def test_const_value_type_sets_output_dtype(make):
+    """The output dtype follows the data dtype promoted with the value's type: int keeps int16, float gives floats."""
+    msg = AxisArray(np.arange(6, dtype=np.int16).reshape(3, 2), dims=["time", "ch"])
+    assert make(2)(msg).data.dtype == np.int16
+    assert np.issubdtype(make(2.0)(msg).data.dtype, np.floating)
 
 
 def test_abs_empty_time():

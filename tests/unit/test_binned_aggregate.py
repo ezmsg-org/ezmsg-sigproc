@@ -463,13 +463,15 @@ def test_argmin_matches_ranged_aggregate_semantics():
         axis="time", bin_duration=0.02, operation=AggregationFunction.ARGMIN, fractional=False
     )(copy.deepcopy(msg))
     # Same two groups, expressed as coordinate bands: [0, 0.019] and [0.02, 0.039].
+    # RangedAggregate refuses the stream dim, so give it the same samples on a fixed "x" axis.
+    fixed = AxisArray(msg.data, dims=["x", "ch"], axes={"x": msg.axes["time"]}, key=msg.key)
     ranged = RangedAggregateTransformer(
         RangedAggregateSettings(
-            axis="time",
+            axis="x",
             bands=[(0.0, 0.0195), (0.02, 0.0395)],
             operation=AggregationFunction.ARGMIN,
         )
-    )(copy.deepcopy(msg))
+    )(fixed)
 
     np.testing.assert_allclose(binned.data, ranged.data)
 

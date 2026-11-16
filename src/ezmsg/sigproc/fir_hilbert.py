@@ -333,6 +333,9 @@ class FIRHilbertEnvelopeTransformer(
             self._state.dly = (taps - 1) // 2
 
         x = message.data
+        if self._state.delay_buf is None and x.shape[axis_idx] == 0:
+            # No first sample to start the delay buffer from yet; the inner FIR waits for one too.
+            return replace(message, data=y_imag_msg.data.astype(np.float32), axes=y_imag_msg.axes)
 
         move_axis = False
         if axis_idx != x.ndim - 1:
@@ -341,11 +344,8 @@ class FIRHilbertEnvelopeTransformer(
             move_axis = True
 
         if self._state.delay_buf is None:
-            lead_shape = x.shape[:-1]
-            self._state.delay_buf = np.zeros(lead_shape + (self._state.dly,), dtype=x.dtype)
-            if self.settings.startup != StartupMode.CONSTANT:
-                # Assume the constant pre-history the inner FIR starts from, so the two stay aligned.
-                self._state.delay_buf += x[..., :1]
+            # Assume the constant pre-history the inner FIR starts from, so the two stay aligned.
+            self._state.delay_buf = np.repeat(x[..., :1], self._state.dly, axis=-1)
 
         x_cat = np.concatenate([self._state.delay_buf, x], axis=-1)
         x_delayed_full = x_cat[..., : -self._state.dly]

@@ -16,8 +16,11 @@ from ..util.segment import ConfigJoin, SegmentJoin, next_pair
 
 
 class ConstAddSettings(ez.Settings):
-    value: float = 0.0
-    """Number to add to the input data."""
+    value: float | int = 0.0
+    """Number to add to the input data.
+
+    The output dtype follows the array library's promotion of the data dtype with the value's type:
+    pass an ``int`` to keep an integer stream integer, a ``float`` to get floats."""
 
 
 class ConstAddTransformer(BaseTransformer[ConstAddSettings, AxisArray, AxisArray]):
