@@ -556,3 +556,17 @@ def test_two_input_processors_number_their_own_segments(name):
                 assert out.axes["time"].value(0) >= msg(phase * N_MSGS).axes["time"].offset - 1e-9
     for phase, outs in phases.items():
         _assert_carries(outs, ATTRS, segment=phase)
+
+
+def test_window_anchor_moves_the_within_window_axis_without_a_reset():
+    from ezmsg.sigproc.window import Anchor, WindowTransformer
+
+    switched, kept = (WindowTransformer(window_dur=0.5, window_shift=0.25) for _ in range(2))
+    run(switched, stream())
+    run(kept, stream())
+    switched.update_settings(replace(switched.settings, anchor=Anchor.END))
+    after = run(switched, stream(start=N_MSGS))[-1]
+    ref = run(kept, stream(start=N_MSGS))[-1]
+    assert after.axes["time"].offset == -0.5
+    # Each window's first sample keeps its absolute time: the window axis moves by as much as the samples' offset.
+    assert after.axes["win"].offset + after.axes["time"].offset == pytest.approx(ref.axes["win"].offset)
