@@ -279,6 +279,9 @@ class AffineTransformTransformer(
         n_elem = math.prod(message.data.shape)
         self._state.n_samples = max(n_elem // n_in, 1) if n_in else 1
         self._state.dispatched = _is_dispatched(xp)
+        # n_out = 0 tells set_weights this is a (re)build, not a runtime update it must hold to the current shape.
+        self._state.n_out = 0
+        self._state.new_axis = None
         self.set_weights(weights, recalc_structure=True)
 
         # --- Axis label handling (for non-square transforms) ---
@@ -351,7 +354,23 @@ class AffineTransformTransformer(
                 appropriate for an adaptive filter whose sparsity pattern is
                 fixed. Note that re-deriving reads the whole matrix on the host,
                 so avoid it on a hot path with device-resident weights.
+
+        Raises:
+            ValueError: If the transformer has already processed a message and
+                *weights* does not have the current weight matrix's shape. A
+                different shape changes the output size or the expected input
+                size, which needs new output axis labels: change
+                the ``weights`` setting with ``update_settings`` instead.
         """
+        if self._state.n_out:
+            # Blocks are only planned when the matrix has exactly n_in rows (no [A|B] offset row).
+            rows = self._state.n_in if self._state.weights is None else self._state.weights.shape[0]
+            if tuple(weights.shape) != (rows, self._state.n_out):
+                raise ValueError(
+                    f"set_weights expected weights of shape {(rows, self._state.n_out)} (canonical orientation), "
+                    f"got {tuple(weights.shape)}. To change the output or input size, change the `weights` "
+                    "setting with update_settings instead."
+                )
         if recalc_structure:
             w_np = np.ascontiguousarray(weights)
             n_in, n_out = w_np.shape

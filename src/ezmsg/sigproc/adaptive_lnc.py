@@ -617,8 +617,9 @@ class AdaptiveLNCTransformer(
         fs = 1.0 / message.axes[self._state.axis].gain
         n_harm = max(1, int(self.settings.num_harmonics))
 
-        if st.warm_held is not None:
-            # Warm start pending: hold input until the fit window is complete.
+        if st.warm_held is not None and x_data.shape[0]:
+            # Warm start pending: hold input until the fit window is complete. A message with no
+            # samples (e.g. an end-of-stream marker) is not held: it would date the fit to its offset.
             if st.warm_axis is None:
                 st.warm_axis = message.axes[st.axis]
             st.warm_held.append(x_data)

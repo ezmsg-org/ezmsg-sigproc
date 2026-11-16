@@ -273,7 +273,8 @@ class ButterworthBackwardFilterTransformer(FilterByDesignTransformer[Butterworth
 
         # If we don't have enough data yet, hold everything and return empty.
         if n_output <= 0:
-            self._tail = combined
+            # Copy when it is still the input itself: holding a view would pin its (shared-memory) buffer.
+            self._tail = xp_copy(combined) if combined is message.data else combined
             self._tail_offset = combined_offset
             new_shape = list(message.data.shape)
             new_shape[ax_idx] = 0

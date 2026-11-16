@@ -212,8 +212,11 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
             )
             in_ax = message.axes[self.state.axis]
             out_gain = 1 / self.settings.resample_rate
-            t0 = in_ax.data[0] if hasattr(in_ax, "data") else in_ax.value(0)
-            self.state.last_ref_ax_val = t0 - out_gain
+            n = message.data.shape[message.get_axis_idx(self.state.axis)]
+            t0 = self._axis_first_step(in_ax)[0] if n else getattr(in_ax, "offset", 0.0)
+            # The grid starts at the first sample; a message without one (e.g. an end-of-stream
+            # marker) leaves that to the next message that has one, in `_process`.
+            self.state.last_ref_ax_val = t0 - out_gain if n else None
             # Initialised now, so `__next__` has an axis to show even if this message brought no samples.
             self.state.ref_axis_buffer.write(LinearAxis(unit="s", gain=out_gain, offset=t0), n_samples=0)
         self.state.last_write_time = -np.inf
@@ -252,8 +255,7 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
                 update_strategy=self.settings.buffer_update_strategy,
                 overflow_strategy="grow",
             )
-            first, step = self._axis_first_step(ax)
-            self.state.last_ref_ax_val = first - step
+            self.state.last_ref_ax_val = None  # seeded below, by the first message with a sample
             if self.settings.output_reference:
                 # Sister buffer for the reference *data*, kept in lockstep with the axis
                 # buffer above so a shared index addresses the same sample in both.
@@ -263,6 +265,10 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
                     update_strategy=self.settings.buffer_update_strategy,
                     overflow_strategy="grow",
                 )
+
+        if self.state.last_ref_ax_val is None and n > 0:
+            first, step = self._axis_first_step(ax)
+            self.state.last_ref_ax_val = first - step
 
         # --- Detect a sustained backward clock jump (reset) ---
         # A whole message arriving at/below the high-water mark is abnormal; a run of them
@@ -306,6 +312,8 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
             in_ax = message.axes[self.state.axis]
             in_t_end = in_ax.data[-1] if hasattr(in_ax, "data") else in_ax.value(message.data.shape[ax_idx] - 1)
             out_gain = 1 / self.settings.resample_rate
+            if self.state.last_ref_ax_val is None:
+                self.state.last_ref_ax_val = self._axis_first_step(in_ax)[0] - out_gain
             prev_t_end = self.state.last_ref_ax_val
             n_synth = math.ceil((in_t_end - prev_t_end) * self.settings.resample_rate)
             synth_ref_axis = LinearAxis(unit="s", gain=out_gain, offset=prev_t_end + out_gain)

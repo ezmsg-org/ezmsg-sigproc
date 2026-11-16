@@ -266,3 +266,28 @@ def test_resample_reset_disabled_can_stall(reset_after):
         resample(_linear_msg(fs, i * chunk / fs, chunk, 2, "sig"))
         counts.append(next(resample).data.shape[0])
     assert sum(counts[12:]) == 0, "Expected output to stall when recovery is disabled."
+
+
+@pytest.mark.parametrize("coord", [False, True], ids=["linear", "coordinate"])
+def test_resample_empty_first_message_on_either_input(coord):
+    """An empty message first on an input (e.g. a source's end-of-stream marker) neither raises nor
+    places the output grid: the output is what the same data gives without it."""
+    fs, chunk = 100.0, 30
+
+    def run(empty_first: bool) -> list[AxisArray]:
+        resample = ResampleProcessor(resample_rate=None, buffer_duration=4.0)
+        if empty_first:
+            resample.push_reference(_linear_msg(fs, -50.0, 0, 1, "ref", coord=coord))
+            resample(_linear_msg(fs, -50.0, 0, 2, "sig", coord=coord))
+            assert next(resample).data.size == 0
+        outs = []
+        for i in range(8):
+            resample.push_reference(_linear_msg(fs, i * chunk / fs, chunk, 1, "ref", coord=coord))
+            resample(_linear_msg(fs, i * chunk / fs, chunk, 2, "sig", coord=coord))
+            outs.append(next(resample))
+        return outs
+
+    for out, ref in zip(run(True), run(False), strict=True):
+        np.testing.assert_array_equal(out.data, ref.data)
+        if ref.data.size:
+            assert out.axes["time"] == ref.axes["time"]

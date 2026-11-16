@@ -128,12 +128,15 @@ class WindowState:
     shift_deficit: int = 0
     """ Number of incoming samples to ignore. Only relevant when shift > window."""
 
+    pad_pending: bool = False
+    """The reset's message had no samples to size input-relative zero-padding by; reset again on the next."""
+
     newaxis_warned: bool = False
 
     out_newaxis: AxisArray.LinearAxis | None = None
 
     out_axis: AxisArray.LinearAxis | None = None
-    """Target axis re-anchored per ``anchor``; constant for the life of the state."""
+    """Target axis re-anchored per ``anchor``; rebuilt only at reset and when ``anchor`` changes."""
 
     out_dims: list[str] | None = None
     out_stream_dim: str | None = None
@@ -168,8 +171,8 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
     what makes concatenation lossless.
     """
 
-    # `anchor` only affects offset math in `_process`; every other field
-    # sizes the buffer or drives the output axes in `_reset_state`.
+    # `anchor` only moves the target axis, which `update_settings` re-anchors; every
+    # other field sizes the buffer or drives the output axes in `_reset_state`.
     NONRESET_SETTINGS_FIELDS = frozenset({"anchor"})
 
     def __init__(self, *args, **kwargs) -> None:
@@ -288,7 +291,10 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
             req_samples = self._state.window_shift_samples
         else:  # i.e. zero_pad_until == "input"
             req_samples = message.data.shape[axis_idx]
-        n_zero = max(0, self._state.window_samples - req_samples)
+        # Padding sized by a message with no samples (e.g. an end-of-stream marker) would be a whole
+        # window of zeros, emitted as if it were data: pad nothing, and size it from the next message.
+        self._state.pad_pending = req_samples == 0
+        n_zero = 0 if self._state.pad_pending else max(0, self._state.window_samples - req_samples)
         # Capacity has to cover a full window plus whatever a single message can
         # add on top of it; "grow" absorbs anything larger (e.g. an offline chunk
         # spanning many windows).
@@ -310,6 +316,7 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
             if n_zero:
                 self._state.buffer.write(xp.zeros(zero_shape, dtype=message.data.dtype))
         self._state.buffer_len = n_zero
+        self._state.shift_deficit = 0
 
         # Prepare reusable parts of output. Rebuilt unconditionally: a reset means
         # the sample shape, sample rate or key changed, and every cached value
@@ -335,6 +342,25 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
             # spares every downstream consumer from having to guess, and gets
             # the guess right where a "time" convention would not.
             self._state.out_stream_dim = _newaxis
+            self._anchor_out_axis(axis_info)
+
+    def _anchor_out_axis(self, axis_info: AxisArray.LinearAxis) -> None:
+        """Re-anchor the target axis per ``anchor``."""
+        anchor = Anchor(self.settings.anchor)
+        if anchor == Anchor.BEGINNING:
+            anchored_offset = 0.0
+        elif anchor == Anchor.END:
+            anchored_offset = -self.settings.window_dur
+        else:  # Anchor.MIDDLE
+            anchored_offset = -self.settings.window_dur / 2
+        self._state.out_axis = replace(axis_info, offset=anchored_offset)
+
+    def update_settings(self, new_settings: WindowSettings) -> None:
+        # `anchor` changes without a reset, so the axis it moves is re-anchored here rather than checked per message.
+        anchor_changed = new_settings.anchor != self.settings.anchor
+        super().update_settings(new_settings)
+        if anchor_changed and self._state.out_axis is not None:
+            self._anchor_out_axis(self._state.out_axis)
 
     def __call__(self, message: AxisArray) -> AxisArray:
         if self.settings.window_dur is None:
@@ -379,6 +405,8 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
         axis = resolve_configured_stream_dim(self, message, self.settings.axis)
         axis_idx = message.get_axis_idx(axis)
         axis_info = message.get_axis(axis)
+        if self._state.pad_pending:
+            self._request_reset()
 
         # Timestamp of the oldest buffered sample, computed before the new data
         # lands so `buffer_len` still describes the backlog it follows.
@@ -426,21 +454,11 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
                 stream_dim=self._state.out_stream_dim,
             )
 
-        # Update targeted (windowed) axis so that its offset is relative to the new axis.
-        # The result depends only on the axis gain and the settings, both fixed for
-        # the life of the state, so build it once rather than on every message.
-        if self._state.out_axis is None:
-            if self.settings.anchor == Anchor.BEGINNING:
-                anchored_offset = 0.0
-            elif self.settings.anchor == Anchor.END:
-                anchored_offset = -self.settings.window_dur
-            else:  # Anchor.MIDDLE
-                anchored_offset = -self.settings.window_dur / 2
-            self._state.out_axis = replace(axis_info, offset=anchored_offset)
+        # Targeted (windowed) axis, its offset relative to the new axis; built in `_anchor_out_axis`.
         out_axes[axis] = self._state.out_axis
 
         # How we update .data and .axes[newaxis] depends on the windowing mode.
-        if self.settings.window_shift is None:
+        if self.settings.window_shift is None and not self._state.pad_pending:
             # one-to-one mode -- Each send yields exactly one window containing only the most recent samples.
             if self._state.buffer_len > self._state.window_samples:
                 self._drop_front(self._state.buffer_len - self._state.window_samples, axis_idx)
@@ -478,10 +496,8 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
             # out_newaxis will have first timestamp in input... but mostly meaningless because output is size-zero.
             win_offset = axis_info.offset
 
-        if self.settings.anchor == Anchor.END:
-            win_offset += self.settings.window_dur
-        elif self.settings.anchor == Anchor.MIDDLE:
-            win_offset += self.settings.window_dur / 2
+        # Shift by as much as the anchor moved the target axis, so each sample keeps its absolute time.
+        win_offset -= self._state.out_axis.offset
         self._state.out_newaxis = replace(self._state.out_newaxis, offset=win_offset)
 
         msg_out = replace(
