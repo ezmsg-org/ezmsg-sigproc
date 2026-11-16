@@ -133,6 +133,15 @@ def test_template_axes_cached_and_owned():
     assert all(output.axes["ch"] is not message.axes["ch"] for output, message in zip(outputs, messages))
 
 
+def test_filterbank_declares_stream_dim():
+    """The output keeps the input's stream_dim, so stages after the new kernel axis need not guess it."""
+    msg = AxisArray(
+        np.zeros((20, 2)), dims=["time", "ch"], axes={"time": AxisArray.TimeAxis(fs=100.0)}, stream_dim="time"
+    )
+    out = FilterbankTransformer(kernels=[np.array([0.5, 0.5])], mode=FilterbankMode.CONV)(msg)
+    assert out.dims == ["ch", "kernel", "time"] and out.stream_dim == "time"
+
+
 @pytest.mark.parametrize("mode", [FilterbankMode.CONV, FilterbankMode.FFT])
 def test_filterbank_complex_min_phase_chunk_invariant(mode):
     """Complex (analytic) kernels can be min-phased; one buffer and many small chunks agree."""

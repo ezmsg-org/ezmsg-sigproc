@@ -202,11 +202,15 @@ class AdaptiveLNCSettings(ez.Settings):
     latency at start-up). Should span at least a few line periods."""
 
     keep_frequency_on_reset: bool = False
-    """On reset, keep the FLL-tracked frequency instead of reseeding from
-    ``line_freq``, provided the sample rate is unchanged and the kept value is
-    within the new ``max_freq_deviation`` bounds. Phase, filter memory and
-    accumulators are still reset. Useful when restarting after a gap: the mains
-    frequency survives it, the phase does not."""
+    """On a configuration reset (a new ``config_id`` or a settings change), keep
+    the FLL-tracked frequency instead of reseeding from ``line_freq``, provided
+    the sample rate is unchanged and the kept value is within the new
+    ``max_freq_deviation`` bounds. Phase, filter memory and accumulators are
+    still reset.
+
+    A new ``segment`` always keeps the tracked frequency, whatever this is set
+    to: a gap only means samples were lost, and the mains frequency survives it.
+    The phase does not, so it is still reset."""
 
     axis: str | None = None
     """.. deprecated:: 3.8

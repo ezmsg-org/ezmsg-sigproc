@@ -152,6 +152,11 @@ def _check_attr_type(key: str, value: typing.Any) -> None:
 
 
 def _attrs_values_equal(a: typing.Any, b: typing.Any) -> bool:
+    # `==` on arrays, or on dicts holding them, gives an array or raises, not a bool.
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(_attrs_values_equal(a[k], b[k]) for k in a)
+    if isinstance(a, np.ndarray) or isinstance(b, np.ndarray):
+        return np.array_equal(a, b)
     try:
         return bool(a == b)
     except Exception:
@@ -174,7 +179,7 @@ def _classify_attrs(a_attrs: dict, b_attrs: dict) -> tuple[dict, dict, dict]:
     for k in set(a_attrs) | set(b_attrs):
         a_has, b_has = k in a_attrs, k in b_attrs
         if a_has and b_has and _attrs_values_equal(a_attrs[k], b_attrs[k]):
-            _check_attr_type(k, a_attrs[k])
+            # Kept as is, neither merged nor promoted, so any type will do.
             equal[k] = a_attrs[k]
             continue
         if a_has:
@@ -520,7 +525,7 @@ class _FingerprintMemo:
 
     axes: AxisFingerprintMemo = field(default_factory=lambda: AxisFingerprintMemo(label="ConcatProcessor"))
     attrs_obj: object = None
-    attrs_fp: frozenset | None = None
+    attrs_fp: frozenset | object | None = None
 
 
 @dataclass
@@ -661,17 +666,19 @@ class ConcatProcessor:
         if memo is not None and attrs is memo.attrs_obj:
             attrs_fp = memo.attrs_fp
         else:
-            # _check_attr_type restricts merged attrs to str/int/float/bool, all
-            # hashable, so the value goes in as itself -- repr() would be both
-            # slower and, for anything numpy summarizes past 1000 elements,
-            # unable to tell two different values apart. But this runs *before*
-            # that validation, so an unsupported value must not raise here or it
-            # would mask _check_attr_type's much clearer error.
+            # Scalar attrs are hashable, so the value goes in as itself -- repr()
+            # would be both slower and, for anything numpy rounds or summarizes,
+            # unable to tell two different values apart. An unhashable value (an
+            # array or dict kept because both inputs hold an equal one) cannot be
+            # compared that way, so its fingerprint matches nothing but itself and
+            # the cache is rebuilt whenever a new attrs dict arrives.
+            # ponytail: rebuilds per message if a source sends fresh array attrs each time;
+            # key them by content if that ever shows up in a profile.
             items = (attrs or {}).items()
             try:
                 attrs_fp = frozenset((k, type(v).__name__, v) for k, v in items)
             except TypeError:
-                attrs_fp = frozenset((k, type(v).__name__, repr(v)) for k, v in items)
+                attrs_fp = object()
             if memo is not None:
                 memo.attrs_obj, memo.attrs_fp = attrs, attrs_fp
 

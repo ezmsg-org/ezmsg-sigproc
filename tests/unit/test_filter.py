@@ -105,3 +105,24 @@ def test_chebyshev_empty_first():
     result = proc(empty)
     check_empty_result(result)
     check_state_not_corrupted(proc, normal)
+
+
+def test_filter_by_design_update_settings_does_not_warn_about_axis():
+    """No axis warning from an unchanged update, a chunk-size-only one, or the redesign after a real change."""
+    import warnings
+
+    from ezmsg.sigproc.butterworthfilter import ButterworthFilterTransformer
+
+    proc = ButterworthFilterTransformer(order=2, cutoff=10.0)
+    proc(make_msg())
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        proc.update_settings(proc.settings)
+        proc.update_settings(mlx_metal_chunk_sizes=(32, 256))
+    assert proc.state.filter.settings.mlx_metal_chunk_sizes == (32, 256)
+    assert not proc.state.needs_redesign
+    proc.update_settings(cutoff=20.0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        proc(make_msg())
+    assert not proc.state.needs_redesign

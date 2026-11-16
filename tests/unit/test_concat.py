@@ -743,7 +743,7 @@ class TestClassifyAttrs:
 
     def test_unsupported_attr_type_raises(self):
         with pytest.raises(TypeError, match="unsupported value type"):
-            _classify_attrs({"bands": [1, 2, 3]}, {"bands": [1, 2, 3]})
+            _classify_attrs({"bands": [1, 2, 3]}, {"bands": [4, 5, 6]})
 
 
 class TestAttrsMerge:
@@ -850,6 +850,25 @@ class TestAttrsMerge:
                 {"bands": [1, 2, 3]},
                 {"bands": [4, 5, 6]},
             )
+
+    def test_equal_non_scalar_attrs_pass_through(self):
+        """Equal arrays and dicts are kept as they are; only promoting a non-scalar raises (#231)."""
+        proc = ConcatProcessor(ConcatSettings(axis="ch"))
+
+        def concat(gain_a, gain_b):
+            attrs_a = {"gain": gain_a, "meta": {"gain": gain_a, "unit": "uV"}}
+            attrs_b = {"gain": gain_b, "meta": {"gain": gain_b, "unit": "uV"}}
+            a = _msg_with_attrs(np.ones((5, 2)), ch_labels=["A0", "A1"], attrs=attrs_a)
+            b = _msg_with_attrs(np.ones((5, 2)), ch_labels=["B0", "B1"], attrs=attrs_b)
+            return proc._concat(a, b)
+
+        gain = np.array([0.25, 0.50])
+        assert concat(gain, gain.copy()).attrs["gain"] is gain
+        # A value that changes on both sides, by less than repr() shows, is not served from the cache.
+        new_gain = gain + 1e-12
+        assert concat(new_gain, new_gain.copy()).attrs["meta"]["gain"] is new_gain
+        with pytest.raises(TypeError, match="unsupported value type"):
+            concat(gain, gain * 2)
 
     def test_new_axis_promotion(self):
         """Promotion across a new axis: each input contributes 1 element."""

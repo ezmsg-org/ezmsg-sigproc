@@ -469,9 +469,6 @@ GAP_REFERENCE = {
     "RiverAdaptiveStandardScalerTransformer": _keeps_everything,
 }
 
-# Transforms each whole message along the stream axis: a zero-length one fails whether or not a gap precedes it.
-EMPTY_UNSUPPORTED = {"SpectrumTransformer": ZeroDivisionError}
-
 
 @pytest.mark.parametrize("empty_first", [False, True], ids=["", "empty-first"])
 @pytest.mark.parametrize("name", sorted(CASES))
@@ -483,10 +480,6 @@ def test_new_segment_matches_a_fresh_processor(name, empty_first):
         post = [_head(post[0], 0)] + post
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        if empty_first and name in EMPTY_UNSUPPORTED:
-            with pytest.raises(EMPTY_UNSUPPORTED[name]):
-                drive(factory(), post)
-            return
         proc = factory()
         drive(proc, _before_gap(messages))
         at_gap = copy.deepcopy(proc) if name in GAP_REFERENCE else None
@@ -1205,10 +1198,6 @@ def test_an_empty_first_message_changes_nothing(name):
     empty = replace(empty, axes={**empty.axes, empty.stream_dim: replace(ax, offset=ax.offset - GAP)})
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        if name in EMPTY_UNSUPPORTED:
-            with pytest.raises(EMPTY_UNSUPPORTED[name]):
-                factory()(empty)
-            return
         proc = factory()
         first = _one(drive)(proc, [empty])
         outs = drive(proc, data)
@@ -1250,10 +1239,6 @@ def test_an_end_of_stream_marker_changes_nothing(name, third, short):
         proc = factory()
         drive(proc, pre)
         held = proc.flush()
-        if name in EMPTY_UNSUPPORTED:
-            with pytest.raises(EMPTY_UNSUPPORTED[name]):
-                proc(marker)
-            return
         at_marker = _one(drive)(proc, [marker])
         # S4: the stream may end here; flushing again holds nothing either.
         gap_tails = [proc.flush(), proc.flush()] if third else []

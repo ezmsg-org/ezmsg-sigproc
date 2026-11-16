@@ -242,6 +242,53 @@ def test_spectrum_empty_first():
     assert np.all(np.isfinite(result2.data))
 
 
+def test_spectrum_empty_along_stream_dim():
+    """No samples along the transformed stream dim: an empty spectrum, and the state is left alone."""
+    from ezmsg.util.messages.util import replace
+
+    from tests.helpers.empty_time import make_empty_msg, make_msg
+
+    normal, empty = replace(make_msg(), stream_dim="time"), replace(make_empty_msg(), stream_dim="time")
+    proc = SpectrumTransformer(SpectrumSettings(axis="time"))
+    expected = proc(normal)
+    configs = proc.state.configs
+    result = proc(empty)
+    assert result.dims == ["freq", "ch"] and result.data.shape == (0, N_CH)
+    assert result.stream_dim is None and result.axes["freq"].unit == "Hz"
+    assert proc.state.configs is configs
+    assert_messages_equal([proc(normal)], [expected])
+
+
+def test_spectrum_single_bin():
+    """A transformed axis of length 1 gives one bin, spaced fs / nfft."""
+    from tests.helpers.empty_time import make_msg
+
+    result = SpectrumTransformer(SpectrumSettings(axis="time"))(make_msg(n_time=1))
+    assert result.data.shape == (1, N_CH)
+    assert result.axes["freq"] == AxisArray.LinearAxis(unit="Hz", gain=FS, offset=0.0)
+
+
+@pytest.mark.parametrize("b_complex", [False, True])
+@pytest.mark.parametrize("nfft", [200, None, 30])
+def test_spectrum_nfft_freq_axis(nfft: int | None, b_complex: bool):
+    """Bins are spaced fs / nfft, whether nfft pads or truncates the input."""
+    fs, n_samp, f_sig = 100.0, 50, 10.0
+    t = np.arange(n_samp) / fs
+    data = np.exp(2j * np.pi * f_sig * t) if b_complex else np.sin(2 * np.pi * f_sig * t)
+    msg = AxisArray(data[:, None], dims=["time", "ch"], axes={"time": AxisArray.TimeAxis(fs=fs)})
+    proc = SpectrumTransformer(
+        SpectrumSettings(axis="time", window=WindowFunction.NONE, output=SpectralOutput.POSITIVE, nfft=nfft)
+    )
+    result = proc(msg)
+    fax = result.axes["freq"]
+    df = fs / (nfft or n_samp)
+    assert fax.gain == pytest.approx(df)
+    peak_freq = fax.value(np.argmax(result.data[:, 0]))
+    assert abs(peak_freq - f_sig) <= df
+    top_freq = fax.value(result.data.shape[0] - 1)
+    assert fs / 2 - df < top_freq <= fs / 2
+
+
 @requires_mlx
 @pytest.mark.parametrize("transform", [SpectralTransform.REL_DB, SpectralTransform.REL_POWER])
 @pytest.mark.parametrize("output", [SpectralOutput.POSITIVE, SpectralOutput.NEGATIVE, SpectralOutput.FULL])

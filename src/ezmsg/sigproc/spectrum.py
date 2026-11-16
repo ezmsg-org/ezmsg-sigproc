@@ -154,6 +154,10 @@ class SpectrumTransformer(BaseStatefulTransformer[SpectrumSettings, AxisArray, A
         ax_idx = message.get_axis_idx(axis)
         ax_info = message.axes[axis]
         targ_len = message.data.shape[ax_idx]
+        if targ_len == 0:
+            # Nothing to size the FFT by; the next message with samples builds the state.
+            self.state.targ_len = 0
+            return
         nfft = self.settings.nfft or targ_len
         xp = get_namespace(message.data)
 
@@ -200,10 +204,10 @@ class SpectrumTransformer(BaseStatefulTransformer[SpectrumSettings, AxisArray, A
             # If input is not complex and desired output is SpectralOutput.POSITIVE, we can save some computation
             #  by using rfft and rfftfreq.
             self.state.fftfun = _make_fft_closure(xp.fft.rfft)
-            freqs = np.fft.rfftfreq(nfft, d=ax_info.gain * targ_len / nfft)
+            freqs = np.fft.rfftfreq(nfft, d=ax_info.gain)
         else:
             self.state.fftfun = _make_fft_closure(xp.fft.fft)
-            freqs = np.fft.fftfreq(nfft, d=ax_info.gain * targ_len / nfft)
+            freqs = np.fft.fftfreq(nfft, d=ax_info.gain)
             if self.settings.output == SpectralOutput.POSITIVE:
                 self.state.f_sl = slice(None, nfft // 2 + 1 - (nfft % 2))
             elif self.settings.output == SpectralOutput.NEGATIVE:
@@ -220,7 +224,7 @@ class SpectrumTransformer(BaseStatefulTransformer[SpectrumSettings, AxisArray, A
             self.state.fftshift = partial(xp.fft.fftshift, axes=(ax_idx,))
 
         freqs = freqs.tolist()  # To please type checking
-        self.state.freq_axis = AxisArray.LinearAxis(unit="Hz", gain=freqs[1] - freqs[0], offset=freqs[0])
+        self.state.freq_axis = AxisArray.LinearAxis(unit="Hz", gain=1.0 / (ax_info.gain * nfft), offset=freqs[0])
         self.state.new_dims = (
             message.dims[:ax_idx]
             + [
@@ -261,6 +265,27 @@ class SpectrumTransformer(BaseStatefulTransformer[SpectrumSettings, AxisArray, A
     def _process(self, message: AxisArray) -> AxisArray:
         axis = self.settings.axis or resolve_transform_dim(message, self.STREAMING_DIMS)
         ax_idx = message.get_axis_idx(axis)
+        # The transformed axis is consumed: `time` becomes `freq`. If that was
+        # the dimension successive messages appended along, the output has none
+        # -- each message is one spectrum, and they stack rather than
+        # concatenate. Windowed input keeps its `win` dimension and so keeps
+        # appending along it.
+        out_stream_dim = None if message.stream_dim == axis else message.stream_dim
+        if message.data.shape[ax_idx] == 0:
+            # No samples, no spectrum: the output is empty too, with no frequency bins, and the state is left alone.
+            out_axis = self.settings.out_axis or axis
+            dims = message.dims[:ax_idx] + [out_axis] + message.dims[ax_idx + 1 :]
+            axes = {k: v for k, v in message.axes.items() if k not in [self.settings.out_axis, axis]}
+            fax = AxisArray.LinearAxis(unit="Hz")
+            complex_out = self.settings.transform == SpectralTransform.RAW_COMPLEX
+            configs = ConfigChain(tuple(dims), fax.gain, fax.offset, 0, complex_out)
+            return replace(
+                message,
+                dims=dims,
+                axes={**axes, out_axis: fax},
+                stream_dim=out_stream_dim,
+                config_id=configs.update(message.config_id),
+            )
         if message.data.shape[ax_idx] != self.state.targ_len:
             # The FFT is sized by this length, which config_id and the default layout hash both leave out
             # when it is the stream dimension, as it usually is.
@@ -278,13 +303,6 @@ class SpectrumTransformer(BaseStatefulTransformer[SpectrumSettings, AxisArray, A
             spec = self.state.fftshift(spec)
         spec = self.state.f_transform(spec)
         spec = slice_along_axis(spec, self.state.f_sl, ax_idx)
-
-        # The transformed axis is consumed: `time` becomes `freq`. If that was
-        # the dimension successive messages appended along, the output has none
-        # -- each message is one spectrum, and they stack rather than
-        # concatenate. Windowed input keeps its `win` dimension and so keeps
-        # appending along it.
-        out_stream_dim = None if message.stream_dim == axis else message.stream_dim
         msg_out = replace(
             message,
             data=spec,
