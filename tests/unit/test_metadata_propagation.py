@@ -294,8 +294,8 @@ EXEMPT = {
     "FilterByDesignTransformer",
     # Producer: has no input message to take attrs from.
     "TriggerProducer",
-    # Numbers segments itself rather than passing them through: covered by test_gapdetect.py.
-    "GapDetectTransformer",
+    # Numbers segments and stamps config_id itself rather than passing them through: covered by test_streamstamp.py.
+    "StreamStampTransformer",
     # Optional dependency (river) absent: covered above when it is installed.
     "RiverAdaptiveStandardScalerTransformer",
     # Two-input processors: covered by test_two_input_processors_number_their_own_segments.
