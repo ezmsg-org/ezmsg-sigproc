@@ -130,9 +130,8 @@ class AdaptiveLatticeNotchFilterTransformer(
         axis = self._state.axis
         ax_idx = message.get_axis_idx(axis)
 
-        # TODO: Time should be moved to -1th axis, not the 0th axis
-        if message.dims[0] != axis:
-            x_data = np.moveaxis(x_data, ax_idx, 0)
+        # The filter loops run time-first; the output is moved back to the input's layout below.
+        x_data = np.moveaxis(x_data, ax_idx, 0)
 
         # Access settings once
         gamma = self.settings.gamma
@@ -228,7 +227,7 @@ class AdaptiveLatticeNotchFilterTransformer(
 
         return replace(
             message,
-            data=y_out,
+            data=np.moveaxis(y_out, 0, ax_idx),
             axes={
                 **message.axes,
                 "freq": replace(self._state.freq_template, data=freq_out),
