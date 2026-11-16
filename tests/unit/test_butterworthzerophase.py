@@ -985,3 +985,12 @@ def test_edge_scaling_makes_output_dc_invariant():
     y_dc = _run_zerophase_streaming(noise + 5000.0, fs)
     # Adding a DC offset should not change the band-passed output.
     assert np.max(np.abs(y_zero - y_dc)) < 0.05 * float(y_zero.std())
+
+
+def test_short_first_chunk_is_held_as_a_copy():
+    """A held chunk must not be a view of the input, which may be a shared-memory buffer."""
+    backward = ButterworthBackwardFilterTransformer(ButterworthZeroPhaseSettings(order=4, cutoff=30.0, coef_type="sos"))
+    msg = make_msg(n_time=2, fs=1000.0)
+    backward(msg)
+    assert backward._tail is not None
+    assert not np.shares_memory(backward._tail, msg.data)
