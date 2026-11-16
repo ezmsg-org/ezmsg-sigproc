@@ -495,6 +495,36 @@ def test_new_segment_matches_a_fresh_processor(name, empty_first):
     _assert_same(outs, expected)
 
 
+# State derived only from the stream configuration and settings: a gap has nothing in it to invalidate.
+CONFIG_ONLY = [
+    "AffineTransformTransformer",
+    "CommonRereferenceTransformer",
+    "DenormalizeTransformer",
+    "FlattenTransformer",
+    "LinearTransformTransformer",
+    "RangedAggregateTransformer",
+    "SignalInjectorTransformer",
+    "SlicerTransformer",
+    "SpectrumTransformer",
+    "TransposeTransformer",
+]
+
+
+@pytest.mark.parametrize("name", CONFIG_ONLY)
+def test_a_new_segment_leaves_config_only_state_alone(name):
+    factory, messages, drive = CASES[name]
+    msgs = messages()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        expected = drive(factory(), msgs)
+        proc = factory()
+        outs = drive(proc, msgs[:1])
+        before = dict(vars(proc.state))
+        outs += drive(proc, [replace(m, segment=SEGMENT + 1) for m in msgs[1:]])
+    assert all(getattr(proc.state, k) is v for k, v in before.items())
+    _assert_same(outs, expected[:1] + [replace(o, segment=SEGMENT + 1) for o in expected[1:]])
+
+
 def test_buffered_startup_releases_with_the_latest_attrs():
     from ezmsg.sigproc.butterworthfilter import ButterworthFilterTransformer
     from ezmsg.sigproc.util.startup import StartupMode

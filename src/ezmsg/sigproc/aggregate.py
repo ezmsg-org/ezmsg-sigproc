@@ -263,6 +263,10 @@ class RangedAggregateTransformer(
             return message
         return await super().__acall__(message)
 
+    def _reset_segment(self, message: AxisArray) -> None:
+        # No memory between samples: the state depends only on the config.
+        pass
+
     def _reset_state(self, message: AxisArray) -> None:
         axis = self.settings.axis or resolve_feature_dim(message, 0)
         target_axis = message.get_axis(axis)

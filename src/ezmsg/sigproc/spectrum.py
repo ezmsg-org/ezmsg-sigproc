@@ -145,6 +145,10 @@ class SpectrumState:
 
 
 class SpectrumTransformer(BaseStatefulTransformer[SpectrumSettings, AxisArray, AxisArray, SpectrumState]):
+    def _reset_segment(self, message: AxisArray) -> None:
+        # No memory between samples: the state depends only on the config.
+        pass
+
     def _reset_state(self, message: AxisArray) -> None:
         axis = self.settings.axis or resolve_transform_dim(message, self.STREAMING_DIMS)
         ax_idx = message.get_axis_idx(axis)

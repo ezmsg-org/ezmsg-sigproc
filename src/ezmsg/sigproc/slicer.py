@@ -240,6 +240,10 @@ class SlicerTransformer(BaseStatefulTransformer[SlicerSettings, AxisArray, AxisA
             )
         return in_axis_order
 
+    def _reset_segment(self, message: AxisArray) -> None:
+        # No memory between samples: the state depends only on the config.
+        pass
+
     def _reset_state(self, message: AxisArray) -> None:
         if self.settings.on_empty not in ("raise", "warn"):
             raise ValueError(f"on_empty must be 'raise' or 'warn', got {self.settings.on_empty!r}")

@@ -243,6 +243,10 @@ class AffineTransformTransformer(
             return message
         return super().__call__(message)
 
+    def _reset_segment(self, message: AxisArray) -> None:
+        # No memory between samples: the state depends only on the config, and a reset would undo `set_weights`.
+        pass
+
     def _reset_state(self, message: AxisArray) -> None:
         if self.settings.kernel not in KERNELS:
             raise ValueError(f"kernel must be one of {KERNELS}, got {self.settings.kernel!r}")
@@ -611,6 +615,10 @@ class CommonRereferenceTransformer(
     earlier version promoted float32 to float64, doubling the bandwidth of every
     downstream stage.)
     """
+
+    def _reset_segment(self, message: AxisArray) -> None:
+        # No memory between samples: the state depends only on the config.
+        pass
 
     def _reset_state(self, message: AxisArray) -> None:
         xp = get_namespace(message.data)
