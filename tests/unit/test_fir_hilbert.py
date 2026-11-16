@@ -320,6 +320,15 @@ def test_hilbert_envelope_rejects_zero_startup():
         FIRHilbertEnvelopeTransformer(order=20, f_lo=5.0, f_hi=15.0, startup=StartupMode.ZERO)(make_msg())
 
 
+def test_hilbert_envelope_constant_startup_flat_on_dc():
+    """CONSTANT start-up holds the first sample before the start for both halves of the analytic
+    signal, so a constant input gives a constant envelope from the first sample."""
+    proc = FIRHilbertEnvelopeTransformer(order=20, f_lo=5.0, f_hi=15.0)
+    x = np.full((200, 2), 5.0)
+    y = np.concatenate([proc(axisarray(x[s : s + 50], 100.0, t0=s / 100.0)).data for s in range(0, 200, 50)])
+    np.testing.assert_allclose(y, 5.0, rtol=1e-6)
+
+
 # --- flush: the samples the filter delay holds back ------------------------------------------
 
 FLUSH_FS = 500.0
@@ -352,11 +361,11 @@ def _flush_signal(n: int = 1000) -> np.ndarray:
 
 
 def _offline_envelope(x: np.ndarray, b: np.ndarray, end: np.ndarray) -> np.ndarray:
-    """CONSTANT start-up (inner FIR from the held first sample, real part from zeros), ``end`` past the end."""
+    """CONSTANT start-up (both halves from the held first sample), ``end`` past the end."""
     d = len(end)
     padded = np.concatenate([np.repeat(x[:1], 2 * d, axis=0), x, end])
     imag = np.stack([np.convolve(padded[:, c], b, mode="valid") for c in range(x.shape[1])], axis=1)
-    real = np.concatenate([np.zeros((d, x.shape[1])), x])
+    real = padded[d:-d]
     return np.abs(real + 1j * imag)
 
 
