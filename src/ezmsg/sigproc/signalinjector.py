@@ -32,6 +32,10 @@ class SignalInjectorState:
 class SignalInjectorTransformer(
     BaseAsyncTransformer[SignalInjectorSettings, AxisArray, AxisArray, SignalInjectorState]
 ):
+    def _reset_segment(self, message: AxisArray) -> None:
+        # No memory between samples: the state depends only on the config (and an unseeded reset re-rolls it).
+        pass
+
     def _reset_state(self, message: AxisArray) -> None:
         if self._state.cur_frequency is None:
             self._state.cur_frequency = self.settings.frequency

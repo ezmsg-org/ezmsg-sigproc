@@ -37,6 +37,12 @@ class RiverAdaptiveStandardScalerSettings(ez.Settings):
     def __post_init__(self) -> None:
         warn_axis_deprecated(self)
 
+    reset_on_resume: bool = False
+    """Whether a gap in the stream, reported by a change of
+    :attr:`~ezmsg.util.messages.axisarray.AxisArray.segment`, discards the running statistics.
+    False (the default) keeps them, as :obj:`AdaptiveStandardScalerTransformer` does; see
+    :attr:`~ezmsg.sigproc.ewma.EWMASettings.reset_on_resume`."""
+
 
 @processor_state
 class RiverAdaptiveStandardScalerState:
@@ -61,6 +67,14 @@ class RiverAdaptiveStandardScalerTransformer(
     implementation. For a vectorized EWMA-based alternative, see
     :class:`AdaptiveStandardScalerTransformer`.
     """
+
+    # `reset_on_resume` is read live in `_reset_segment`.
+    NONRESET_SETTINGS_FIELDS = frozenset({"reset_on_resume"})
+
+    def _reset_segment(self, message: AxisArray) -> None:
+        # A gap is not evidence the signal's statistics changed; see `reset_on_resume`.
+        if self.settings.reset_on_resume:
+            self._reset_state(message)
 
     def _reset_state(self, message: AxisArray) -> None:
         from river import preprocessing

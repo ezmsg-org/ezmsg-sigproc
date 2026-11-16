@@ -251,6 +251,10 @@ def _build_merged_axis(
 
 
 class FlattenTransformer(BaseStatefulTransformer[FlattenSettings, AxisArray, AxisArray, FlattenState]):
+    def _reset_segment(self, message: AxisArray) -> None:
+        # No memory between samples: the state depends only on the config.
+        pass
+
     def _reset_state(self, message: AxisArray) -> None:
         preserve_axis = self.settings.preserve_axis or resolve_stream_dim(message, self.STREAMING_DIMS)
         if preserve_axis not in message.dims:

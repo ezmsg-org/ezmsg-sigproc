@@ -777,6 +777,25 @@ def test_set_weights_offset_row_same_shape(recalc_structure):
     assert np.allclose(xformer(msg_in).data, in_dat @ updated[:-1] + updated[-1])
 
 
+@pytest.mark.parametrize("kernel", ["dense", "blocks"])
+def test_set_weights_survives_a_new_segment_but_not_a_new_config(kernel):
+    """A gap leaves nothing for an affine transform to forget; a layout change rebuilds from the settings."""
+    rng = np.random.default_rng(11)
+    weights = _make_block_diagonal_weights([4, 4], rng=rng)
+    in_dat = rng.standard_normal((10, 8))
+    msg_in = replace(AxisArray(data=in_dat, dims=["time", "ch"]), config_id=7, segment=1)
+    xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch", kernel=kernel))
+    xformer(msg_in)
+    updated = _make_block_diagonal_weights([4, 4], rng=rng)
+    xformer.set_weights(updated)
+
+    out = xformer(replace(msg_in, segment=2))
+    assert out.segment == 2
+    assert np.allclose(out.data, in_dat @ updated)
+
+    assert np.allclose(xformer(replace(msg_in, config_id=8, segment=2)).data, in_dat @ weights)
+
+
 def test_shape_change_through_settings_relabels_and_rederives_config_id():
     msg_in = replace(
         AxisArray(

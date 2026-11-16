@@ -56,6 +56,10 @@ class TransposeTransformer(BaseStatefulTransformer[TransposeSettings, AxisArray,
     # `axes` drives the cached permutation in `_reset_state`.
     NONRESET_SETTINGS_FIELDS = frozenset({"order"})
 
+    def _reset_segment(self, message: AxisArray) -> None:
+        # No memory between samples: the state depends only on the config.
+        pass
+
     def _reset_state(self, message: AxisArray) -> None:
         if self.settings.axes is None:
             self._state.axes_ints = None

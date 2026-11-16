@@ -466,6 +466,7 @@ GAP_REFERENCE = {
     # Rolling statistics are counted in samples, so a gap in time does not date them.
     "RollingScalerProcessor": _keeps_everything,
     "AdaptiveStandardScalerTransformer": _keeps_everything,
+    "RiverAdaptiveStandardScalerTransformer": _keeps_everything,
 }
 
 # Transforms each whole message along the stream axis: a zero-length one fails whether or not a gap precedes it.
@@ -493,6 +494,145 @@ def test_new_segment_matches_a_fresh_processor(name, empty_first):
         expected = GAP_REFERENCE.get(name, _fresh)(at_gap, factory, post, drive)
     assert all(o.segment == SEGMENT + 1 for o in outs)
     _assert_same(outs, expected)
+
+
+# State derived only from the stream configuration and settings: a gap has nothing in it to invalidate.
+CONFIG_ONLY = [
+    "AffineTransformTransformer",
+    "CommonRereferenceTransformer",
+    "DenormalizeTransformer",
+    "FlattenTransformer",
+    "LinearTransformTransformer",
+    "RangedAggregateTransformer",
+    "SignalInjectorTransformer",
+    "SlicerTransformer",
+    "SpectrumTransformer",
+    "TransposeTransformer",
+]
+
+
+@pytest.mark.parametrize("name", CONFIG_ONLY)
+def test_a_new_segment_leaves_config_only_state_alone(name):
+    factory, messages, drive = CASES[name]
+    msgs = messages()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        expected = drive(factory(), msgs)
+        proc = factory()
+        outs = drive(proc, msgs[:1])
+        before = dict(vars(proc.state))
+        outs += drive(proc, [replace(m, segment=SEGMENT + 1) for m in msgs[1:]])
+    assert all(getattr(proc.state, k) is v for k, v in before.items())
+    _assert_same(outs, expected[:1] + [replace(o, segment=SEGMENT + 1) for o in expected[1:]])
+
+
+def _filter_coefs(proc):
+    return proc.state.filter.settings.coefs
+
+
+def _filterbank_kernels(proc):
+    return proc.state.filterbank.settings.kernels
+
+
+# Stages whose design depends only on the config, and where to find it. The filter memory still resets at a gap.
+DESIGNED = {
+    **dict.fromkeys(
+        [
+            "ButterworthFilterTransformer",
+            "ChebyshevFilterTransformer",
+            "ChebyForDecimateTransformer",
+            "CombFilterTransformer",
+            "FIRFilterTransformer",
+            "FIRHilbertFilterTransformer",
+            "GaussianSmoothingFilterTransformer",
+            "KaiserFilterTransformer",
+            "ParksMcClellanFIRTransformer",
+        ],
+        _filter_coefs,
+    ),
+    "ButterworthBackwardFilterTransformer": lambda proc: proc._coefs_cache,
+    "FilterbankDesignTransformer": _filterbank_kernels,
+    "AnalyticFilterbankTransformer": _filterbank_kernels,
+}
+
+
+def short_chunks(start=0, attrs=ATTRS, segment=SEGMENT):
+    """20-sample messages, shorter than a 50-tap kernel."""
+    return [msg(i, n_time=20, attrs=attrs, segment=segment) for i in range(5 * start, 5 * (start + N_MSGS))]
+
+
+def _designed_variants():
+    from ezmsg.sigproc import filterbank, fir_hilbert, wavelets
+    from ezmsg.sigproc.filterbank import FilterbankMode as FM
+    from ezmsg.sigproc.util.minphase import MinPhaseMode
+    from ezmsg.sigproc.util.startup import StartupMode as SM
+
+    variants = {}
+    for messages, kernels, tag in (
+        (stream, [np.ones(5) / 5, np.ones(9) / 9], ""),
+        (short_chunks, [np.ones(50) / 50, np.ones(30) / 30], "-short"),
+    ):
+        for mode in FM:
+            for startup in SM:
+                if mode == FM.FFT and startup in (SM.FIRST_CHUNK, SM.BUFFERED):
+                    continue  # unsupported: raises
+                variants[f"FilterbankTransformer{tag}-{mode.name}-{startup.name}"] = (
+                    lambda k=kernels, m=mode, s=startup: filterbank.FilterbankTransformer(kernels=k, mode=m, startup=s),
+                    messages,
+                    run,
+                    lambda proc: proc.state.prep_kerns,
+                )
+    for startup in (SM.CONSTANT, SM.FIRST_CHUNK, SM.BUFFERED):
+        variants[f"FIRHilbertEnvelopeTransformer-{startup.name}"] = (
+            lambda s=startup: fir_hilbert.FIRHilbertEnvelopeTransformer(startup=s),
+            stream,
+            run,
+            lambda proc: _filter_coefs(proc.state.filter),
+        )
+    # A new CWT design would bring a new child filterbank, and with it new kernels.
+    for wavelet, min_phase, messages, tag in (
+        *(("morl", mp, stream, mp.name) for mp in MinPhaseMode),
+        ("cmor1.5-1.0", MinPhaseMode.NONE, stream, "complex"),
+        ("morl", MinPhaseMode.NONE, short_chunks, "short"),
+    ):
+        variants[f"CWTTransformer-{tag}"] = (
+            lambda w=wavelet, mp=min_phase: wavelets.CWTTransformer(frequencies=[10.0, 20.0], wavelet=w, min_phase=mp),
+            messages,
+            run,
+            lambda proc: proc.state.fbgen.state.prep_kerns,
+        )
+    return variants
+
+
+DESIGNED_CASES = {**{k: (*CASES[k], v) for k, v in DESIGNED.items()}, **_designed_variants()}
+
+
+def _at_double_rate(m):
+    ax = m.axes[m.stream_dim]
+    return replace(m, axes={**m.axes, m.stream_dim: replace(ax, gain=ax.gain / 2)})
+
+
+@pytest.mark.parametrize("name", sorted(DESIGNED_CASES))
+def test_a_new_segment_keeps_the_design_but_not_the_filter_memory(name):
+    factory, messages, drive, design = DESIGNED_CASES[name]
+    post = _after_gap(messages)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        proc = factory()
+        drive(proc, _before_gap(messages))
+        coefs = design(proc)
+        # A twin rather than a deepcopy: FFT-mode filterbank state holds scipy.fft callables, which do not copy.
+        twin = factory()
+        drive(twin, _before_gap(messages))
+        uninterrupted = _keeps_everything(twin, factory, post, drive)
+        outs = drive(proc, post)
+        assert design(proc) is coefs
+        _assert_same(outs, drive(factory(), post))
+        with pytest.raises(AssertionError):
+            _assert_same(outs, uninterrupted)
+        # A new sample rate is a new config, so the filter is designed again.
+        drive(proc, [_at_double_rate(m) for m in post])
+    assert design(proc) is not coefs
 
 
 def test_buffered_startup_releases_with_the_latest_attrs():

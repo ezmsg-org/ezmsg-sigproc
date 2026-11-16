@@ -62,6 +62,10 @@ class LinearTransformTransformer(
         ... ))
     """
 
+    def _reset_segment(self, message: AxisArray) -> None:
+        # No memory between samples: the state depends only on the config.
+        pass
+
     def _reset_state(self, message: AxisArray) -> None:
         """Prepare scale/offset arrays with proper broadcast shapes."""
         xp = get_namespace(message.data)

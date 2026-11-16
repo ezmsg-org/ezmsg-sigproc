@@ -43,6 +43,10 @@ class DenormalizeTransformer(BaseStatefulTransformer[DenormalizeSettings, AxisAr
     This is useful for simulating realistic firing rates from normalized data.
     """
 
+    def _reset_segment(self, message: AxisArray) -> None:
+        # No memory between samples: the state depends only on the config (and an unseeded reset re-rolls it).
+        pass
+
     def _reset_state(self, message: AxisArray) -> None:
         ax_ix = message.get_axis_idx("ch")
         nch = message.data.shape[ax_ix]
