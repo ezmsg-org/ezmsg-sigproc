@@ -29,6 +29,7 @@ class ExtractAxisData(SettingsConfigChain, BaseTransformer[ExtractAxisSettings, 
                 data=targ_ax.data,
                 dims=targ_ax.dims,
                 axes={k: v for k, v in message.axes.items() if k in targ_ax.dims},
+                stream_dim=message.stream_dim if message.stream_dim in targ_ax.dims else None,
                 config_id=self._chained_config_id(message),
             )
             # Note: So far we don't have any transformers where the coordinate axis has its own axes,
@@ -43,6 +44,7 @@ class ExtractAxisData(SettingsConfigChain, BaseTransformer[ExtractAxisSettings, 
                 data=targ_ax.value(np.arange(n)),
                 dims=[self.settings.reference],
                 axes={self.settings.reference: message.axes[self.settings.reference]},
+                stream_dim=message.stream_dim if message.stream_dim == self.settings.reference else None,
                 config_id=self._chained_config_id(message),
             )
 

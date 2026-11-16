@@ -64,6 +64,21 @@ class TestExtractAxisData:
         assert np.shares_memory(result.data, message.axes["freq"].data)
 
 
+def test_extract_coordinate_axis_drops_stream_dim():
+    """The output declares the input's stream_dim only if that dim survives."""
+    msg = AxisArray(
+        data=np.zeros((5, N_CH)),
+        dims=["time", "ch"],
+        axes={
+            "time": AxisArray.TimeAxis(fs=FS),
+            "ch": AxisArray.CoordinateAxis(data=np.arange(N_CH).astype(str), dims=["ch"]),
+        },
+        stream_dim="time",
+    )
+    result = ExtractAxisData(axis="ch")(msg)
+    assert result.dims == ["ch"] and result.stream_dim is None
+
+
 def test_extract_linear_axis_empty_time():
     from ezmsg.sigproc.extract_axis import ExtractAxisData, ExtractAxisSettings
 
