@@ -221,3 +221,12 @@ def test_template_axes_cached_and_owned():
 
     assert all(output.axes["ch"] is outputs[0].axes["ch"] for output in outputs)
     assert all(output.axes["ch"] is not message.axes["ch"] for output, message in zip(outputs, messages))
+
+
+def test_cwt_declares_stream_dim():
+    """The output keeps the input's stream_dim, so stages after the new freq axis need not guess it."""
+    msg = AxisArray(
+        np.zeros((32, 2)), dims=["time", "ch"], axes={"time": AxisArray.TimeAxis(fs=200.0)}, stream_dim="time"
+    )
+    out = CWTTransformer(CWTSettings(frequencies=[10.0, 20.0], wavelet="morl"))(msg)
+    assert out.dims == ["ch", "freq", "time"] and out.stream_dim == "time"

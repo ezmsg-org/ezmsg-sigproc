@@ -135,6 +135,7 @@ class CWTTransformer(BaseStatefulTransformer[CWTSettings, AxisArray, AxisArray, 
                 "freq": with_fingerprint(AxisArray.CoordinateAxis(unit="Hz", data=freqs, dims=["freq"])),
             },
             key=message.key,
+            stream_dim=message.stream_dim,
         )
         self._reset_memory()
         template = self._state.template

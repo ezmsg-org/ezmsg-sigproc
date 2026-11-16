@@ -160,6 +160,7 @@ class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArra
             dims=message.dims[:targ_ax_ix] + message.dims[targ_ax_ix + 1 :] + [self.settings.new_axis, axis],
             axes={k: deepcopy(v) for k, v in message.axes.items()},
             key=message.key,
+            stream_dim=message.stream_dim,
         )
         if self.settings.bands is not None:
             if len(self.settings.bands) != len(kernels):
