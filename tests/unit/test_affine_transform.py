@@ -745,6 +745,60 @@ def test_set_weights_keeps_structure():
     assert xformer._state.blocks is None
 
 
+@pytest.mark.parametrize("recalc_structure", [False, True])
+@pytest.mark.parametrize("kernel", ["dense", "blocks"])
+@pytest.mark.parametrize("new_shape", [(8, 7), (8, 9), (7, 8), (9, 8)])
+def test_set_weights_rejects_a_shape_change(kernel, recalc_structure, new_shape):
+    """A new output or input size must go through the settings, which rebuild the labels."""
+    rng = np.random.default_rng(3)
+    weights = _make_block_diagonal_weights([4, 4], rng=rng)
+    in_dat = rng.standard_normal((10, 8))
+    msg_in = AxisArray(data=in_dat, dims=["time", "ch"])
+    xformer = AffineTransformTransformer(AffineTransformSettings(weights=weights, axis="ch", kernel=kernel))
+    xformer(msg_in)
+
+    with pytest.raises(ValueError, match=r"expected weights of shape \(8, 8\).*update_settings"):
+        xformer.set_weights(np.ones(new_shape), recalc_structure=recalc_structure)
+    assert np.allclose(xformer(msg_in).data, in_dat @ weights)
+
+
+@pytest.mark.parametrize("recalc_structure", [False, True])
+def test_set_weights_offset_row_same_shape(recalc_structure):
+    """[A|B] weights have one more row than the message has channels; same-shape updates still apply."""
+    rng = np.random.default_rng(5)
+    in_dat = rng.standard_normal((10, 4))
+    msg_in = AxisArray(data=in_dat, dims=["time", "ch"])
+    xformer = AffineTransformTransformer(AffineTransformSettings(weights=rng.standard_normal((5, 3)), axis="ch"))
+    xformer(msg_in)
+
+    updated = rng.standard_normal((5, 3))
+    xformer.set_weights(updated, recalc_structure=recalc_structure)
+    assert np.allclose(xformer(msg_in).data, in_dat @ updated[:-1] + updated[-1])
+
+
+def test_shape_change_through_settings_relabels():
+    msg_in = AxisArray(
+        np.ones((4, 3)),
+        dims=["time", "ch"],
+        axes={"ch": AxisArray.CoordinateAxis(data=np.array(["A", "B", "C"]), dims=["ch"])},
+    )
+    xformer = AffineTransformTransformer(
+        AffineTransformSettings(weights=[[1.0, 0.0], [0.0, 1.0], [0.0, 0.0]], axis="ch")
+    )
+    before = xformer(msg_in)
+    assert [str(x) for x in before.axes["ch"].data] == ["A", "B"]
+
+    xformer.update_settings(AffineTransformSettings(weights=[[1.0], [0.0], [0.0]], axis="ch"))
+    after = xformer(msg_in)
+    assert after.data.shape == (4, 1)
+    assert [str(x) for x in after.axes["ch"].data] == ["A"]
+
+    # Back to square: no output axis is derived, so the input's labels pass through.
+    xformer.update_settings(AffineTransformSettings(weights=np.eye(3).tolist(), axis="ch"))
+    square = xformer(msg_in)
+    assert [str(x) for x in square.axes["ch"].data] == ["A", "B", "C"]
+
+
 # --- Non-square block-diagonal tests ---
 
 
