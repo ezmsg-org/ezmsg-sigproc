@@ -1013,12 +1013,13 @@ class FilterByDesignTransformer(
 
         changed = _changed_settings_fields(old_settings, self.settings)
 
-        if self.state.filter is not None:
-            if changed <= {"mlx_metal_chunk_sizes"}:
-                self.state.filter.settings = replace(
-                    self.state.filter.settings,
-                    mlx_metal_chunk_sizes=self.settings.mlx_metal_chunk_sizes,
-                )
+        if changed and self.state.filter is not None:
+            if changed == {"mlx_metal_chunk_sizes"}:
+                with suppress_axis_deprecation():  # the child's axis is ours, not the user's
+                    self.state.filter.settings = replace(
+                        self.state.filter.settings,
+                        mlx_metal_chunk_sizes=self.settings.mlx_metal_chunk_sizes,
+                    )
             else:
                 self.state.needs_redesign = True
 
@@ -1059,7 +1060,7 @@ class FilterByDesignTransformer(
             coefs = self._design_coefs(fs)
             with suppress_axis_deprecation():  # the child's axis is ours, not the user's
                 self.state.filter.settings = replace(self.state.filter.settings, **self._forwarded_settings())
-            self.state.filter.update_coefficients(coefs, coef_type=self.settings.coef_type)
+                self.state.filter.update_coefficients(coefs, coef_type=self.settings.coef_type)
             self.state.needs_redesign = False
 
         return super().__call__(message)
