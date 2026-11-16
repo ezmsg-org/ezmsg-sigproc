@@ -145,25 +145,6 @@ class SpectrumState:
 
 
 class SpectrumTransformer(BaseStatefulTransformer[SpectrumSettings, AxisArray, AxisArray, SpectrumState]):
-    def _hash_message(self, message: AxisArray) -> int:
-        """Extend the default with the two things it cannot know about.
-
-        The FFT is sized by the length of the axis being transformed, which is
-        normally the stream dimension -- the one length the default deliberately
-        ignores because it changes with every message. Spectrum is the exception:
-        a different transform length is a different plan, so it has to be folded
-        back in. The dtype matters because a complex input takes a different
-        branch and produces a different frequency axis.
-        """
-        axis = self.settings.axis or resolve_transform_dim(message, self.STREAMING_DIMS)
-        return self._message_hash(
-            message,
-            extra=(
-                message.data.shape[message.get_axis_idx(axis)],
-                is_complex_dtype(message.data.dtype),
-            ),
-        )
-
     def _reset_state(self, message: AxisArray) -> None:
         axis = self.settings.axis or resolve_transform_dim(message, self.STREAMING_DIMS)
         ax_idx = message.get_axis_idx(axis)
@@ -277,8 +258,8 @@ class SpectrumTransformer(BaseStatefulTransformer[SpectrumSettings, AxisArray, A
         axis = self.settings.axis or resolve_transform_dim(message, self.STREAMING_DIMS)
         ax_idx = message.get_axis_idx(axis)
         if message.data.shape[ax_idx] != self.state.targ_len:
-            # `_hash_message` keys on this length, but it is skipped while config_id is declared and unchanged,
-            # and config_id leaves out the length of the stream dimension, which this axis usually is.
+            # The FFT is sized by this length, which config_id and the default layout hash both leave out
+            # when it is the stream dimension, as it usually is.
             self._reset_state(message)
 
         new_axes = {k: v for k, v in message.axes.items() if k not in [self.settings.out_axis, axis]}

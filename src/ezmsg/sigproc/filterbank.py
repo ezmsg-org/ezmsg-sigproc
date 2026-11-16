@@ -132,15 +132,6 @@ class FilterbankState:
 
 
 class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArray, AxisArray, FilterbankState]):
-    def _hash_message(self, message: AxisArray) -> int:
-        """Extend the default with the input dtype.
-
-        The kernels are cast to the message's dtype at reset, so a real input
-        followed by a complex one needs a rebuild even though nothing about the
-        stream's shape or channels changed. The default cannot see dtype.
-        """
-        return self._message_hash(message, extra=(message.data.dtype.kind,))
-
     def _reset_state(self, message: AxisArray) -> None:
         axis = resolve_configured_stream_dim(self, message, self.settings.axis)
         gain = message.axes[axis].gain if axis in message.axes else 1.0

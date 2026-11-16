@@ -59,10 +59,6 @@ class CWTState:
 
 
 class CWTTransformer(BaseStatefulTransformer[CWTSettings, AxisArray, AxisArray, CWTState]):
-    def _hash_message(self, message: AxisArray) -> int:
-        """Extend the default with the input dtype, which sizes the output buffer."""
-        return self._message_hash(message, extra=(message.data.dtype.kind,))
-
     def _reset_state(self, message: AxisArray) -> None:
         self._state.axis = resolve_configured_stream_dim(self, message, self.settings.axis, legacy_default="time")
         if "freq" in message.dims:
