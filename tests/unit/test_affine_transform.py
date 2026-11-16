@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.util import replace
 
 from ezmsg.sigproc.affinetransform import (
     AffineTransformSettings,
@@ -749,7 +750,7 @@ def test_set_weights_keeps_structure():
 @pytest.mark.parametrize("kernel", ["dense", "blocks"])
 @pytest.mark.parametrize("new_shape", [(8, 7), (8, 9), (7, 8), (9, 8)])
 def test_set_weights_rejects_a_shape_change(kernel, recalc_structure, new_shape):
-    """A new output or input size must go through the settings, which rebuild the labels."""
+    """A new output or input size must go through the settings, which rebuild the labels and config_id."""
     rng = np.random.default_rng(3)
     weights = _make_block_diagonal_weights([4, 4], rng=rng)
     in_dat = rng.standard_normal((10, 8))
@@ -776,11 +777,14 @@ def test_set_weights_offset_row_same_shape(recalc_structure):
     assert np.allclose(xformer(msg_in).data, in_dat @ updated[:-1] + updated[-1])
 
 
-def test_shape_change_through_settings_relabels():
-    msg_in = AxisArray(
-        np.ones((4, 3)),
-        dims=["time", "ch"],
-        axes={"ch": AxisArray.CoordinateAxis(data=np.array(["A", "B", "C"]), dims=["ch"])},
+def test_shape_change_through_settings_relabels_and_rederives_config_id():
+    msg_in = replace(
+        AxisArray(
+            np.ones((4, 3)),
+            dims=["time", "ch"],
+            axes={"ch": AxisArray.CoordinateAxis(data=np.array(["A", "B", "C"]), dims=["ch"])},
+        ),
+        config_id=123,
     )
     xformer = AffineTransformTransformer(
         AffineTransformSettings(weights=[[1.0, 0.0], [0.0, 1.0], [0.0, 0.0]], axis="ch")
@@ -792,11 +796,13 @@ def test_shape_change_through_settings_relabels():
     after = xformer(msg_in)
     assert after.data.shape == (4, 1)
     assert [str(x) for x in after.axes["ch"].data] == ["A"]
+    assert after.config_id not in (0, before.config_id)
 
     # Back to square: no output axis is derived, so the input's labels pass through.
     xformer.update_settings(AffineTransformSettings(weights=np.eye(3).tolist(), axis="ch"))
     square = xformer(msg_in)
     assert [str(x) for x in square.axes["ch"].data] == ["A", "B", "C"]
+    assert square.config_id not in (0, before.config_id, after.config_id)
 
 
 # --- Non-square block-diagonal tests ---

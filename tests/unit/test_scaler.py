@@ -136,7 +136,7 @@ def test_scaler_mlx_matches_numpy_and_stays_mlx():
 
 
 @requires_mlx
-def test_scaler_mlx_accepts_numpy_initialized_state():
+def test_scaler_numpy_to_mlx_switch_resets_state():
     mx = pytest.importorskip("mlx.core")
 
     fs = 30_000.0
@@ -146,14 +146,13 @@ def test_scaler_mlx_accepts_numpy_initialized_state():
     data2 = rng.normal(size=(257, 4)).astype(np.float32)
 
     msg1_np = AxisArray(data=data1, dims=["time", "ch"], axes={"time": AxisArray.TimeAxis(fs=fs)})
-    msg2_np = AxisArray(data=data2, dims=["time", "ch"], axes={"time": AxisArray.TimeAxis(fs=fs)})
     msg2_mx = AxisArray(data=mx.array(data2), dims=["time", "ch"], axes={"time": AxisArray.TimeAxis(fs=fs)})
 
+    # A backend switch is a configuration change: the mlx chunk starts from scratch.
     ref = AdaptiveStandardScalerTransformer(settings=AdaptiveStandardScalerSettings(time_constant=tau, axis="time"))
     proc = AdaptiveStandardScalerTransformer(settings=AdaptiveStandardScalerSettings(time_constant=tau, axis="time"))
 
-    _ = ref(msg1_np)
-    expected = ref(msg2_np)
+    expected = ref(msg2_mx)
 
     _ = proc(msg1_np)
     assert isinstance(proc._state.samps_ewma._state.zi, np.ndarray)
@@ -162,7 +161,7 @@ def test_scaler_mlx_accepts_numpy_initialized_state():
     assert isinstance(actual.data, mx.array)
     assert isinstance(proc._state.samps_ewma._state.zi, mx.array)
     assert isinstance(proc._state.vars_sq_ewma._state.zi, mx.array)
-    np.testing.assert_allclose(np.asarray(actual.data), expected.data, rtol=2e-4, atol=2e-4)
+    np.testing.assert_allclose(np.asarray(actual.data), np.asarray(expected.data), rtol=2e-4, atol=2e-4)
 
 
 def _make_scaler_test_msg(data: np.ndarray, fs: float = 1000.0) -> AxisArray:

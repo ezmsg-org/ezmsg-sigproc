@@ -47,9 +47,9 @@ class AlignAlongAxisState:
     aligned: bool = False
     buf_a: HybridAxisArrayBuffer | None = None
     buf_b: HybridAxisArrayBuffer | None = None
-    # Per-input non-alignment shape for reset detection.
-    a_shape_sig: tuple[int, ...] | None = None
-    b_shape_sig: tuple[int, ...] | None = None
+    # Per-input (config_id, non-alignment shape) for reset detection.
+    a_shape_sig: tuple | None = None
+    b_shape_sig: tuple | None = None
 
 
 _AlignPair = tuple[AxisArray, AxisArray]
@@ -69,6 +69,10 @@ class AlignAlongAxisProcessor(
     hash-based reset.  Input B flows through :meth:`push_b`.
 
     Returns ``(aligned_a, aligned_b)`` when alignment succeeds, else ``None``.
+
+    Each output keeps its own input's ``config_id``: the other input decides which samples
+    are emitted, not the layout. A change of an input's ``config_id`` restarts that input's
+    buffer, so the output never pairs the new id with the old layout.
     """
 
     def __init__(self, *args, **kwargs) -> None:
@@ -160,7 +164,7 @@ class AlignAlongAxisProcessor(
         """Process input A: detect shape changes, buffer, try align."""
         # A new segment on A has already reset both buffers (`_reset_segment`); just count it.
         self._segments.update(a=message.segment)
-        shape_sig = self._non_align_shape(message, self._state.align_axis)
+        shape_sig = (message.config_id, self._non_align_shape(message, self._state.align_axis))
         if self._state.a_shape_sig is not None and shape_sig != self._state.a_shape_sig:
             self._reset_a_state()
             self._state.aligned = False
@@ -198,7 +202,7 @@ class AlignAlongAxisProcessor(
                 self._state.align_axis = align_axis
             self._state.buf_b = HybridAxisArrayBuffer(duration=self.settings.buffer_dur, axis=align_axis)
 
-        shape_sig = self._non_align_shape(message, align_axis)
+        shape_sig = (message.config_id, self._non_align_shape(message, align_axis))
         if self._state.b_shape_sig is not None and shape_sig != self._state.b_shape_sig:
             self._reset_b_state()
             self._state.aligned = False

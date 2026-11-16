@@ -9,6 +9,8 @@ from ezmsg.baseproc import BaseTransformer, BaseTransformerUnit
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
+from .util.segment import SettingsConfigChain
+
 
 class DigitizeDType(str, enum.Enum):
     """Supported output dtypes for :obj:`DigitizeTransformer`."""
@@ -53,7 +55,11 @@ def _resolve_dtype(dtype: str | DigitizeDType) -> DigitizeDType:
         raise ValueError(f"Unrecognized digitize dtype {dtype!r}. Must be one of {DigitizeDType.options()}") from exc
 
 
-class DigitizeTransformer(BaseTransformer[DigitizeSettings, AxisArray, AxisArray]):
+class DigitizeTransformer(SettingsConfigChain, BaseTransformer[DigitizeSettings, AxisArray, AxisArray]):
+    def _config_own(self, message: AxisArray) -> tuple:
+        # The output dtype; `min_val` and `max_val` reach only the attrs.
+        return (_resolve_dtype(self.settings.dtype).value,)
+
     def _process(
         self,
         message: AxisArray,
@@ -103,7 +109,7 @@ class DigitizeTransformer(BaseTransformer[DigitizeSettings, AxisArray, AxisArray
         attrs = dict(message.attrs)
         attrs["conversion"] = conversion
         attrs["offset"] = offset
-        return replace(message, data=data, attrs=attrs)
+        return replace(message, data=data, attrs=attrs, config_id=self._chained_config_id(message))
 
 
 class Digitize(BaseTransformerUnit[DigitizeSettings, AxisArray, AxisArray, DigitizeTransformer]):

@@ -16,6 +16,7 @@ from ezmsg.util.messages.axisarray import (
 )
 
 from .util.message import is_empty_along
+from .util.segment import ConfigChain
 
 
 class DownsampleSettings(ez.Settings):
@@ -41,6 +42,10 @@ class DownsampleState:
 
     axis: str = ""
     """The dimension being downsampled: the message's declared ``stream_dim``."""
+
+    configs: ConfigChain | None = None
+    """Derives the output's config_id from the input's and the axis and factor:
+    see :class:`~ezmsg.sigproc.util.segment.ConfigChain`."""
 
 
 class DownsampleTransformer(BaseStatefulTransformer[DownsampleSettings, AxisArray, AxisArray, DownsampleState]):
@@ -103,6 +108,7 @@ class DownsampleTransformer(BaseStatefulTransformer[DownsampleSettings, AxisArra
             q = 1
         self._state.q = q
         self._state.s_idx = 0
+        self._state.configs = ConfigChain(self._state.axis, q)
 
     def _process(self, message: AxisArray) -> AxisArray:
         axis = self._state.axis
@@ -140,6 +146,7 @@ class DownsampleTransformer(BaseStatefulTransformer[DownsampleSettings, AxisArra
                     offset=axis_info.offset + axis_info.gain * n_step,
                 ),
             },
+            config_id=self._state.configs.update(message.config_id),
         )
         return msg_out
 

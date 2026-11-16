@@ -9,6 +9,10 @@ made at reset time have to take them from the *current* message.
 A change of ``segment`` must also reset every stateful stage: after a gap, a
 processor's output must be what a fresh one makes of the post-gap messages.
 
+``config_id`` is passed on too, or derived: a declared input gives declared
+outputs, and the output's id changes whenever the input's does, or whenever a
+settings change alters the output layout.
+
 The inventory is pinned: every concrete processor class in the package must be
 either covered by a case below or listed, with a reason, in ``EXEMPT``.
 """
@@ -83,6 +87,11 @@ def spectral(start=0, attrs=ATTRS, segment=SEGMENT):
         )
         for i in range(start, start + N_MSGS)
     ]
+
+
+def int_stream(start=0, attrs=ATTRS, segment=SEGMENT):
+    """int16 samples, whose dtype a stage may or may not keep."""
+    return [replace(m, data=(100 * m.data).astype(np.int16)) for m in stream(start, attrs, segment)]
 
 
 def run(proc, msgs):
@@ -294,11 +303,12 @@ EXEMPT = {
     "FilterByDesignTransformer",
     # Producer: has no input message to take attrs from.
     "TriggerProducer",
-    # Numbers segments itself rather than passing them through: covered by test_gapdetect.py.
-    "GapDetectTransformer",
+    # Numbers segments and stamps config_id itself rather than passing them through: covered by test_streamstamp.py.
+    "StreamStampTransformer",
     # Optional dependency (river) absent: covered above when it is installed.
     "RiverAdaptiveStandardScalerTransformer",
-    # Two-input processors: covered by test_two_input_processors_number_their_own_segments.
+    # Two-input processors: covered by test_two_input_processors_number_their_own_segments
+    # and test_two_input_processors_join_config_ids.
     "AlignAlongAxisProcessor",
     "ConcatProcessor",
     "MergeProcessor",
@@ -558,18 +568,372 @@ def test_two_input_processors_number_their_own_segments(name):
         _assert_carries(outs, ATTRS, segment=phase)
 
 
+# ---------------------------------------------------------------------------
+# config_id: declared in, declared out; a change of the input's or of the layout reaches the output.
+# ---------------------------------------------------------------------------
+
+ID_A, ID_B = 101, 202
+
+
+def _declared(messages, config_id, start=0):
+    return [replace(m, config_id=config_id) for m in messages(start=start)]
+
+
+def _forget_config_warnings(monkeypatch):
+    """Forget which classes baseproc has already warned about, so each test sees its own warnings.
+
+    baseproc warns once per class about a missing config_id, or about an output layout that changed
+    under an unchanged config_id, so a silent run shows every stage on the way declares its ids.
+    """
+    from ezmsg.baseproc import stateful
+
+    monkeypatch.setattr(stateful, "_warned_undeclared", set())
+    monkeypatch.setattr(stateful, "_warned_unannounced", set())
+
+
+def _config_warnings(caplog):
+    return [r.getMessage() for r in caplog.records if r.name == "ezmsg.baseproc.stateful"]
+
+
+@pytest.mark.parametrize("name", sorted(CASES))
+def test_config_id_follows_the_input(name, monkeypatch, caplog):
+    """A declared input gives declared outputs, and a new input config_id gives new output ones.
+
+    The layout is the same in both runs, so a stateful stage does not reset: the new id has to
+    reach the output anyway. Nothing on the way may warn about a missing or stale config_id.
+    """
+    factory, messages, drive = CASES[name]
+    _forget_config_warnings(monkeypatch)
+    with warnings.catch_warnings(), caplog.at_level("WARNING", logger="ezmsg.baseproc.stateful"):
+        warnings.simplefilter("ignore")
+        proc = factory()
+        ids_a = {o.config_id for o in drive(proc, _declared(messages, ID_A))}
+        ids_b = {o.config_id for o in drive(proc, _declared(messages, ID_B, start=N_MSGS))}
+    assert ids_a and ids_b
+    assert 0 not in ids_a | ids_b
+    assert not ids_a & ids_b
+    assert _config_warnings(caplog) == []
+
+
+@pytest.mark.parametrize("name", sorted(_two_input_cases()))
+def test_two_input_processors_join_config_ids(name):
+    """The output's config_id changes whenever either input's does; Align keeps each input's own."""
+    factory, feed = _two_input_cases()[name]
+    n_ch_b = 3 if name in ("AddProcessor", "DifferenceProcessor") else 2
+    proc = factory()
+    phases = []
+    for phase, (id_a, id_b) in enumerate([(11, 21), (12, 21), (12, 22)]):
+        outs = []
+        for i in range(phase * N_MSGS, (phase + 1) * N_MSGS):
+            a = replace(msg(i), config_id=id_a)
+            b = replace(msg(i, n_ch=n_ch_b), config_id=id_b)
+            outs += feed(proc, a, b)
+        phases.append({o.config_id for o in outs if o.data.size})
+    if name == "AlignAlongAxisProcessor":
+        assert phases == [{11, 21}, {12, 21}, {12, 22}]
+    else:
+        assert all(len(ids) == 1 and 0 not in ids for ids in phases)
+        assert len(set.union(*phases)) == 3
+
+
+def _b_cases():
+    """Stages whose output layout depends on their settings: (factory, messages, layout change, other change, driver).
+
+    The first settings change alters the output layout and must change the output's config_id; the second
+    (None where the class has none) leaves the layout alone and must not.
+    """
+    from ezmsg.sigproc import (
+        activation,
+        affinetransform,
+        aggregate,
+        asarray,
+        binned_aggregate,
+        coordinatespaces,
+        digitize,
+        downsample,
+        extract_axis,
+        filterbank,
+        filterbankdesign,
+        flatten,
+        kaiser,
+        multibandpow,
+        quantize,
+        resample,
+        slicer,
+        spectrum,
+        transpose,
+        wavelets,
+        window,
+    )
+    from ezmsg.sigproc.math import scale
+
+    k = kaiser.KaiserFilterSettings
+    band = k(cutoff=[10.0, 20.0], ripple=40.0, width=5.0, pass_zero=False)
+    return {
+        "AffineTransformTransformer": (
+            lambda: affinetransform.AffineTransformTransformer(weights=np.eye(3).tolist()),
+            stream,
+            {"weights": np.ones((3, 2)).tolist()},
+            {"weights": (2 * np.eye(3)).tolist()},
+            run,
+        ),
+        "RangedAggregateTransformer": (
+            lambda: aggregate.RangedAggregateTransformer(axis="freq", bands=[(10.0, 20.0)]),
+            spectral,
+            {"bands": [(10.0, 20.0), (20.0, 30.0)]},
+            {"operation": aggregate.AggregationFunction.MAX},
+            run,
+        ),
+        "BinnedAggregateTransformer": (
+            lambda: binned_aggregate.BinnedAggregateTransformer(),
+            stream,
+            {"bin_duration": 0.05},
+            {"operation": aggregate.AggregationFunction.MAX},
+            run,
+        ),
+        "DownsampleTransformer": (
+            lambda: downsample.DownsampleTransformer(factor=2),
+            stream,
+            {"factor": 5},
+            {"factor": None, "target_rate": FS / 2},
+            run,
+        ),
+        "FilterbankTransformer": (
+            lambda: filterbank.FilterbankTransformer(kernels=[[0.2] * 5, [0.1] * 10]),
+            stream,
+            {"kernels": [[0.2] * 5, [0.1] * 10, [0.5] * 2]},
+            {"kernels": [[0.25] * 4, [0.125] * 8]},
+            run,
+        ),
+        "FilterbankDesignTransformer": (
+            lambda: filterbankdesign.FilterbankDesignTransformer(filters=[band]),
+            stream,
+            {"filters": [band, k(cutoff=[30.0, 40.0], ripple=40.0, width=5.0, pass_zero=False)]},
+            {"filters": [k(cutoff=[10.0, 20.0], ripple=60.0, width=5.0, pass_zero=False)]},
+            run,
+        ),
+        "AnalyticFilterbankTransformer": (
+            lambda: multibandpow.AnalyticFilterbankTransformer(bands=[(10.0, 20.0)]),
+            stream,
+            {"bands": [(10.0, 20.0), (30.0, 40.0)]},
+            {"transition_ratio": 0.4},
+            run,
+        ),
+        "FlattenTransformer": (
+            lambda: flatten.FlattenTransformer(),
+            stream,
+            {"sample_axis": "sample"},
+            # One axis is flattened, so there is nothing to separate.
+            {"label_separator": "_"},
+            run,
+        ),
+        "SlicerTransformer": (
+            lambda: slicer.SlicerTransformer(selection="0:2", axis="ch"),
+            stream,
+            {"selection": "1:3"},
+            {"on_empty": "raise"},
+            run,
+        ),
+        "SpectrumTransformer": (
+            lambda: spectrum.SpectrumTransformer(),
+            stream,
+            {"output": spectrum.SpectralOutput.FULL},
+            {"window": spectrum.WindowFunction.HANNING},
+            run,
+        ),
+        "TransposeTransformer": (
+            lambda: transpose.TransposeTransformer(axes=("ch", "time")),
+            stream,
+            {"axes": ("time", "ch")},
+            {"order": "C"},
+            run,
+        ),
+        "CWTTransformer": (
+            lambda: wavelets.CWTTransformer(frequencies=[10.0, 20.0], wavelet="morl"),
+            stream,
+            {"frequencies": [10.0, 20.0, 30.0]},
+            None,
+            run,
+        ),
+        "WindowTransformer": (
+            lambda: window.WindowTransformer(window_dur=0.5, window_shift=0.25),
+            stream,
+            {"window_dur": 0.4},
+            {"buffer_update_strategy": "on_demand"},
+            run,
+        ),
+        "WindowTransformer-anchor": (
+            lambda: window.WindowTransformer(window_dur=0.5, window_shift=0.25),
+            stream,
+            # Read live, without a reset, and moves the within-window axis.
+            {"anchor": window.Anchor.END},
+            None,
+            run,
+        ),
+        "ResampleProcessor": (
+            lambda: resample.ResampleProcessor(resample_rate=250.0),
+            stream,
+            {"resample_rate": 200.0},
+            {"fill_value": "last"},
+            _resample,
+        ),
+        # Stateless stages.
+        "AggregateTransformer": (
+            lambda: aggregate.AggregateTransformer(axis="ch"),
+            stream,
+            {"axis": "time"},
+            None,
+            run,
+        ),
+        "ExtractAxisData": (
+            lambda: extract_axis.ExtractAxisData(axis="ch", reference="time"),
+            # Undeclared stream_dim: extracting `ch` leaves no `time` dimension to declare.
+            lambda start=0: [replace(m, stream_dim=None) for m in stream(start)],
+            {"axis": "time", "reference": "time"},
+            # Read only for a linear axis.
+            {"reference": "ch"},
+            run,
+        ),
+        "CoordinateSpacesTransformer": (
+            lambda: coordinatespaces.CoordinateSpacesTransformer(axis="ch"),
+            lambda start=0: stream(start, n_ch=2),
+            {"mode": coordinatespaces.CoordinateMode.POL2CART},
+            None,
+            run,
+        ),
+        "AsArrayTransformer": (
+            lambda: asarray.AsArrayTransformer(),
+            stream,
+            {"dtype": "float32"},
+            {"mlx_cache_limit_mb": 256.0},
+            run,
+        ),
+        "DigitizeTransformer": (
+            lambda: digitize.DigitizeTransformer(min_val=-5.0, max_val=5.0),
+            stream,
+            {"dtype": "int32"},
+            # Reaches only the attrs.
+            {"max_val": 4.0},
+            run,
+        ),
+        "QuantizeTransformer": (
+            lambda: quantize.QuantizeTransformer(max_val=5.0),
+            stream,
+            {"bits": 16},
+            # Still uint8.
+            {"bits": 7},
+            run,
+        ),
+        "ActivationTransformer": (
+            lambda: activation.ActivationTransformer(function=activation.ActivationFunction.SIGMOID),
+            int_stream,
+            {"function": activation.ActivationFunction.NONE},
+            # The same function.
+            {"function": "expit"},
+            run,
+        ),
+        "ScaleTransformer": (
+            lambda: scale.ScaleTransformer(scale=2.0),
+            int_stream,
+            {"scale": 1.0},
+            {"scale": 3.0},
+            run,
+        ),
+    }
+
+
+B_CASES = _b_cases()
+
+
+@pytest.mark.parametrize("name", sorted(B_CASES))
+def test_a_settings_change_reaches_config_id_only_if_it_changes_the_layout(name, monkeypatch, caplog):
+    factory, messages, layout_change, other_change, drive = B_CASES[name]
+    _forget_config_warnings(monkeypatch)
+    start = 0
+
+    def out_ids(proc):
+        nonlocal start
+        outs = drive(proc, _declared(messages, ID_A, start=start))
+        start += N_MSGS
+        assert outs
+        return {o.config_id for o in outs}
+
+    with warnings.catch_warnings(), caplog.at_level("WARNING", logger="ezmsg.baseproc.stateful"):
+        warnings.simplefilter("ignore")
+        proc = factory()
+        before = out_ids(proc)
+        assert len(before) == 1 and 0 not in before
+        if other_change is not None:
+            proc.update_settings(replace(proc.settings, **other_change))
+            assert out_ids(proc) == before
+        proc.update_settings(replace(proc.settings, **layout_change))
+        after = out_ids(proc)
+    assert len(after) == 1 and 0 not in after and after != before
+    assert _config_warnings(caplog) == []
+
+
+def test_binned_aggregate_passthrough_carries_the_input_config_id():
+    """``passthrough`` changes the layout without a reset: pass-through output has the input's id, binned output not."""
+    from ezmsg.sigproc.binned_aggregate import BinnedAggregateTransformer
+
+    proc = BinnedAggregateTransformer()
+    binned = {o.config_id for o in run(proc, _declared(stream, ID_A))}
+    proc.update_settings(replace(proc.settings, passthrough=True))
+    passed = {o.config_id for o in run(proc, _declared(stream, ID_A, start=N_MSGS))}
+    proc.update_settings(replace(proc.settings, passthrough=False))
+    rebinned = {o.config_id for o in run(proc, _declared(stream, ID_A, start=2 * N_MSGS))}
+    assert passed == {ID_A}
+    assert binned == rebinned and ID_A not in binned
+
+
 def test_window_anchor_moves_the_within_window_axis_without_a_reset():
     from ezmsg.sigproc.window import Anchor, WindowTransformer
 
     switched, kept = (WindowTransformer(window_dur=0.5, window_shift=0.25) for _ in range(2))
-    run(switched, stream())
-    run(kept, stream())
+    run(switched, _declared(stream, ID_A))
+    run(kept, _declared(stream, ID_A))
     switched.update_settings(replace(switched.settings, anchor=Anchor.END))
-    after = run(switched, stream(start=N_MSGS))[-1]
-    ref = run(kept, stream(start=N_MSGS))[-1]
+    after = run(switched, _declared(stream, ID_A, start=N_MSGS))[-1]
+    ref = run(kept, _declared(stream, ID_A, start=N_MSGS))[-1]
     assert after.axes["time"].offset == -0.5
     # Each window's first sample keeps its absolute time: the window axis moves by as much as the samples' offset.
     assert after.axes["win"].offset + after.axes["time"].offset == pytest.approx(ref.axes["win"].offset)
+
+
+def test_spectrum_follows_the_stream_length_under_one_config_id():
+    """Transforming along the stream dimension, whose length config_id leaves out: a new length is a new layout."""
+    from ezmsg.sigproc.spectrum import SpectrumTransformer
+
+    proc = SpectrumTransformer()
+    outs = [proc(replace(msg(i, n_time=n), config_id=ID_A)) for i, n in enumerate((250, 250, 100, 100))]
+    assert [o.data.shape[0] for o in outs] == [126, 126, 51, 51]
+    ids = [o.config_id for o in outs]
+    assert ids[0] == ids[1] != ids[2] == ids[3]
+
+
+@pytest.mark.parametrize("name", sorted(B_CASES))
+def test_a_steady_stream_derives_its_config_id_once(name, monkeypatch):
+    """The output's id is derived when the input's changes, not per message; an undeclared input gives 0."""
+    from ezmsg.sigproc.util import segment
+
+    factory, messages, _, _, drive = B_CASES[name]
+    calls = []
+
+    def counted(*args):
+        calls.append(args)
+        return chain_config_id(*args)
+
+    chain_config_id = segment.chain_config_id
+    monkeypatch.setattr(segment, "chain_config_id", counted)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        proc = factory()
+        drive(proc, _declared(messages, ID_A))
+        n_calls = len(calls)
+        steady = drive(proc, _declared(messages, ID_A, start=N_MSGS))
+        undeclared = drive(factory(), messages())
+    assert steady and len(calls) == n_calls
+    assert {o.config_id for o in undeclared} == {0}
 
 
 # ---------------------------------------------------------------------------

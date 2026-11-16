@@ -19,6 +19,7 @@ from ezmsg.util.messages.axisarray import (
 )
 
 from .util.message import with_fingerprint
+from .util.segment import ConfigChain
 
 """
 Slicer:Select a subset of data along a particular axis.
@@ -191,6 +192,9 @@ class SlicerState:
     slice_: slice | int | npt.NDArray | None = None
     new_axis: AxisBase | None = None
     b_change_dims: bool = False
+    configs: ConfigChain | None = None
+    """Derives the output's config_id from the input's and the axis and selected indices:
+    see :class:`~ezmsg.sigproc.util.segment.ConfigChain`."""
 
 
 class SlicerTransformer(BaseStatefulTransformer[SlicerSettings, AxisArray, AxisArray, SlicerState]):
@@ -296,6 +300,9 @@ class SlicerTransformer(BaseStatefulTransformer[SlicerSettings, AxisArray, AxisA
                 out_data = in_data[self._state.slice_]
             self._state.new_axis = with_fingerprint(replace(message.axes[axis], data=out_data))
 
+        sl = self._state.slice_
+        self._state.configs = ConfigChain(axis, tuple(sl.tolist()) if isinstance(sl, np.ndarray) else sl)
+
     def _process(self, message: AxisArray) -> AxisArray:
         axis = self.settings.axis or resolve_feature_dim(message)
         axis_idx = message.get_axis_idx(axis)
@@ -310,6 +317,7 @@ class SlicerTransformer(BaseStatefulTransformer[SlicerSettings, AxisArray, AxisA
         return replace(
             message,
             data=slice_along_axis(message.data, self._state.slice_, axis_idx),
+            config_id=self._state.configs.update(message.config_id),
             **replace_kwargs,
         )
 

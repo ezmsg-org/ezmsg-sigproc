@@ -21,6 +21,7 @@ from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
 from ezmsg.sigproc.util.array import xp_asarray
+from ezmsg.sigproc.util.segment import SettingsConfigChain
 
 
 def _build_backend_members():
@@ -157,7 +158,11 @@ class AsArraySettings(ez.Settings):
     ``None``."""
 
 
-class AsArrayTransformer(BaseTransformer[AsArraySettings, AxisArray, AxisArray]):
+class AsArrayTransformer(SettingsConfigChain, BaseTransformer[AsArraySettings, AxisArray, AxisArray]):
+    def _config_own(self, message: AxisArray) -> tuple:
+        # Both decide the output dtype.
+        return str(self.settings.backend), self.settings.dtype
+
     def _process(self, message: AxisArray) -> AxisArray:
         target_backend = str(self.settings.backend)
         if target_backend == "mlx" and self.settings.mlx_cache_limit_mb is not None:
@@ -181,12 +186,12 @@ class AsArrayTransformer(BaseTransformer[AsArraySettings, AxisArray, AxisArray])
         # Same backend, dtype change only.
         if current_backend == target_backend:
             new_data = xp_asarray(target_xp, data, dtype=resolved_dtype)
-            return replace(message, data=new_data)
+            return replace(message, data=new_data, config_id=self._chained_config_id(message))
 
         # Cross-backend: go through numpy as an intermediate.
         np_data = np.asarray(data)
         new_data = xp_asarray(target_xp, np_data, dtype=resolved_dtype)
-        return replace(message, data=new_data)
+        return replace(message, data=new_data, config_id=self._chained_config_id(message))
 
 
 class AsArray(BaseTransformerUnit[AsArraySettings, AxisArray, AxisArray, AsArrayTransformer]):

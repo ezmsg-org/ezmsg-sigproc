@@ -40,6 +40,7 @@ from ezmsg.sigproc.util.channels import ChannelGroupSpec, resolve_channel_groups
 from ezmsg.sigproc.util.rereference import RereferenceKind, rereference_matrix
 
 from .util.message import with_fingerprint
+from .util.segment import ConfigChain
 
 KERNELS = ("auto", "dense", "blocks")
 """Valid values for :attr:`AffineTransformSettings.kernel`."""
@@ -214,6 +215,8 @@ class AffineTransformState:
     n_samples: int = 1
     """Representative samples per message, for the kernel cost model."""
     dispatched: bool = False
+    configs: ConfigChain | None = None
+    """Derives the output's config_id from the input's (see :class:`~ezmsg.sigproc.util.segment.ConfigChain`)."""
 
 
 class AffineTransformTransformer(
@@ -309,6 +312,8 @@ class AffineTransformTransformer(
                     new_labels = np.array(in_labels)[b_used_inputs]
 
             self._state.new_axis = with_fingerprint(replace(message.axes[axis], data=np.array(new_labels)))
+        new_axis = self._state.new_axis
+        self._state.configs = ConfigChain(axis, n_out, None if new_axis is None else new_axis.fingerprint)
 
         # Convert to match message.data namespace and device for _process.
         # Weights are numpy float64 up to here; some devices (e.g. MPS) don't
@@ -359,7 +364,7 @@ class AffineTransformTransformer(
             ValueError: If the transformer has already processed a message and
                 *weights* does not have the current weight matrix's shape. A
                 different shape changes the output size or the expected input
-                size, which needs new output axis labels: change
+                size, which needs new output axis labels and a new config_id: change
                 the ``weights`` setting with ``update_settings`` instead.
         """
         if self._state.n_out:
@@ -497,9 +502,10 @@ class AffineTransformTransformer(
                 inv_perm.insert(axis_idx, inv_perm.pop(-1))
                 data = xp.permute_dims(data, inv_perm)
 
-        replace_kwargs = {"data": data}
-        if self._state.new_axis is not None:
-            replace_kwargs["axes"] = {**message.axes, axis: self._state.new_axis}
+        new_axis = self._state.new_axis
+        replace_kwargs = {"data": data, "config_id": self._state.configs.update(message.config_id)}
+        if new_axis is not None:
+            replace_kwargs["axes"] = {**message.axes, axis: new_axis}
 
         return replace(message, **replace_kwargs)
 

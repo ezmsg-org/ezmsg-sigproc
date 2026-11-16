@@ -10,7 +10,7 @@ from ezmsg.baseproc.util.asio import run_coroutine_sync
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
-from ..util.segment import SegmentJoin
+from ..util.segment import ConfigJoin, SegmentJoin
 
 # --- Constant Addition (single input) ---
 
@@ -43,6 +43,7 @@ class AddState:
     queue_a: "asyncio.Queue[AxisArray]" = field(default_factory=asyncio.Queue)
     queue_b: "asyncio.Queue[AxisArray]" = field(default_factory=asyncio.Queue)
     segments: SegmentJoin = field(default_factory=SegmentJoin)
+    configs: ConfigJoin = field(default_factory=ConfigJoin)
 
 
 class AddProcessor:
@@ -82,7 +83,12 @@ class AddProcessor:
         a = await self._state.queue_a.get()
         b = await self._state.queue_b.get()
         self._state.segments.update(a=a.segment, b=b.segment)
-        return replace(a, data=a.data + b.data, segment=self._state.segments.segment)
+        return replace(
+            a,
+            data=a.data + b.data,
+            segment=self._state.segments.segment,
+            config_id=self._state.configs.update(a.config_id, b.config_id),
+        )
 
     def __call__(self) -> AxisArray:
         """Synchronously get and add the next messages from both queues."""

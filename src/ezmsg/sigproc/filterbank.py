@@ -25,6 +25,7 @@ from .spectrum import OptionsEnum
 from .util.deprecation import warn_axis_deprecated
 from .util.message import with_fingerprint
 from .util.minphase import MinPhaseMode, is_linear_phase, kernel_delay, min_phase_kernel
+from .util.segment import ConfigChain
 from .util.startup import StartupMode, hold_for_startup, prime_with_reflection, startup_n_pad
 from .window import WindowTransformer
 
@@ -125,18 +126,12 @@ class FilterbankState:
     startup_held: list | None = None
     startup_n_pad: int = 0
     const_tail: npt.NDArray | None = None
+    configs: ConfigChain | None = None
+    """Derives the output's config_id from the input's and the kernel axis, its length and labels, the dtype kind:
+    see :class:`~ezmsg.sigproc.util.segment.ConfigChain`."""
 
 
 class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArray, AxisArray, FilterbankState]):
-    def _hash_message(self, message: AxisArray) -> int:
-        """Extend the default with the input dtype.
-
-        The kernels are cast to the message's dtype at reset, so a real input
-        followed by a complex one needs a rebuild even though nothing about the
-        stream's shape or channels changed. The default cannot see dtype.
-        """
-        return self._message_hash(message, extra=(message.data.dtype.kind,))
-
     def _reset_state(self, message: AxisArray) -> None:
         axis = resolve_configured_stream_dim(self, message, self.settings.axis)
         gain = message.axes[axis].gain if axis in message.axes else 1.0
@@ -176,6 +171,14 @@ class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArra
                     unit="Hz",
                 )
             )
+        band_axis = self._state.template.axes[self.settings.new_axis] if self.settings.bands is not None else None
+        self._state.configs = ConfigChain(
+            axis,
+            self.settings.new_axis,
+            len(kernels),
+            None if band_axis is None else band_axis.fingerprint,
+            self._state.template.data.dtype.kind,
+        )
 
         # Determine optimal mode. Assumes 100 msec chunks.
         self._state.mode = self.settings.mode
@@ -392,6 +395,7 @@ class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArra
             axes={**self._state.template.axes, axis: out_ax},
             attrs=message.attrs,
             segment=message.segment,
+            config_id=self._state.configs.update(message.config_id),
         )
 
 

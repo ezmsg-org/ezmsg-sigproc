@@ -10,12 +10,14 @@ default depends on.
 
 import numpy as np
 import pytest
-from ezmsg.util.messages.axisarray import AxisArray, CoordinateAxis
+from ezmsg.util.messages.axisarray import AxisArray, CoordinateAxis, compute_config_id
 
 from ezmsg.sigproc.aggregate import AggregateSettings, AggregateTransformer, AggregationFunction
 from ezmsg.sigproc.butterworthfilter import ButterworthFilterSettings, ButterworthFilterTransformer
+from ezmsg.sigproc.filterbank import FilterbankSettings, FilterbankTransformer
 from ezmsg.sigproc.flatten import FlattenSettings, FlattenTransformer
 from ezmsg.sigproc.spectrum import SpectrumSettings, SpectrumTransformer
+from ezmsg.sigproc.wavelets import CWTSettings, CWTTransformer
 from ezmsg.sigproc.window import WindowSettings, WindowTransformer
 
 FS = 100.0
@@ -140,28 +142,78 @@ class TestStreamDimBookkeeping:
         assert out.stream_dim == declared
 
 
-class TestOverridesThatRemain:
-    """The three processors that still need something the default cannot know."""
+class TestChangesTheDefaultNowCovers:
+    """Spectrum, CWT and Filterbank no longer override ``_hash_message``.
+
+    A dtype change on a declared stream changes ``config_id``, which the default
+    resets on; a transform-length change is handled in ``Spectrum._process``.
+    """
 
     @staticmethod
-    def _msg(dtype):
-        rng = np.random.default_rng(5)
-        return _msg(rng.standard_normal((64, 2)).astype(dtype), ["a", "b"])
+    def _declared(data, labels=("a", "b")):
+        m = _msg(data, list(labels))
+        m.config_id = compute_config_id(m)
+        return m
 
-    def test_spectrum_reacts_to_a_dtype_change(self):
+    def test_spectrum_resets_on_a_real_to_complex_change(self):
         """A complex input takes a different branch and a different freq axis."""
+        rng = np.random.default_rng(5)
+        real = self._declared(rng.standard_normal((64, 2)))
+        cplx = self._declared(rng.standard_normal((64, 2)) + 1j * rng.standard_normal((64, 2)))
+        assert real.config_id != cplx.config_id
+
         proc = SpectrumTransformer(SpectrumSettings(axis="time"))
-        proc(self._msg(np.float32))
+        proc(real)
         before = proc._hash
-        proc(self._msg(np.complex64))
+        got = proc(cplx)
         assert proc._hash != before
 
-    def test_spectrum_reacts_to_a_transform_length_change(self):
-        """The FFT is sized by the stream dimension -- the one length the default
-        ignores -- so Spectrum has to fold it back in."""
-        proc = SpectrumTransformer(SpectrumSettings(axis="time"))
+        want = SpectrumTransformer(SpectrumSettings(axis="time"))(cplx)
+        np.testing.assert_allclose(got.data, want.data)
+        np.testing.assert_allclose(
+            got.axes["freq"].value(np.arange(got.data.shape[0])), want.axes["freq"].value(np.arange(want.data.shape[0]))
+        )
+
+    def test_spectrum_follows_a_transform_length_change(self):
+        """The FFT is sized by the stream dimension, which config_id leaves out."""
         rng = np.random.default_rng(6)
-        proc(_msg(rng.standard_normal((64, 2)), ["a", "b"]))
-        before = proc._hash
-        proc(_msg(rng.standard_normal((128, 2)), ["a", "b"]))
-        assert proc._hash != before
+        proc = SpectrumTransformer(SpectrumSettings(axis="time"))
+        short = self._declared(rng.standard_normal((64, 2)))
+        long = self._declared(rng.standard_normal((128, 2)))
+        assert short.config_id == long.config_id
+        proc(short)
+        got = proc(long)
+        want = SpectrumTransformer(SpectrumSettings(axis="time"))(long)
+        assert got.data.shape[got.get_axis_idx("freq")] == want.data.shape[want.get_axis_idx("freq")]
+        np.testing.assert_allclose(got.data, want.data)
+
+    def test_cwt_resets_on_a_real_to_complex_change(self):
+        rng = np.random.default_rng(7)
+        real = self._declared(rng.standard_normal((64, 2)))
+        cplx = self._declared(rng.standard_normal((64, 2)) + 1j * rng.standard_normal((64, 2)))
+
+        def make():
+            return CWTTransformer(CWTSettings(frequencies=np.array([10.0, 20.0]), wavelet="morl", axis="time"))
+
+        proc = make()
+        proc(real)
+        got = proc(cplx)
+        want = make()(cplx)
+        assert np.iscomplexobj(got.data)
+        np.testing.assert_allclose(got.data, want.data)
+
+    def test_filterbank_resets_on_a_real_to_complex_change(self):
+        rng = np.random.default_rng(8)
+        real = self._declared(rng.standard_normal((64, 2)))
+        cplx = self._declared(rng.standard_normal((64, 2)) + 1j * rng.standard_normal((64, 2)))
+        kernels = [np.ones(5) / 5, np.array([1.0, -1.0])]
+
+        def make():
+            return FilterbankTransformer(FilterbankSettings(kernels=kernels, axis="time"))
+
+        proc = make()
+        proc(real)
+        got = proc(cplx)
+        want = make()(cplx)
+        assert np.iscomplexobj(got.data)
+        np.testing.assert_allclose(got.data, want.data)

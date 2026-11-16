@@ -5,6 +5,8 @@ from array_api_compat import get_namespace
 from ezmsg.baseproc import BaseTransformer, BaseTransformerUnit
 from ezmsg.util.messages.axisarray import AxisArray, replace
 
+from .util.segment import SettingsConfigChain
+
 
 class QuantizeSettings(ez.Settings):
     """
@@ -30,7 +32,11 @@ class QuantizeSettings(ez.Settings):
     """
 
 
-class QuantizeTransformer(BaseTransformer[QuantizeSettings, AxisArray, AxisArray]):
+class QuantizeTransformer(SettingsConfigChain, BaseTransformer[QuantizeSettings, AxisArray, AxisArray]):
+    def _config_own(self, message: AxisArray) -> tuple:
+        # The output dtype's width, which is all `bits` decides about the layout (see `_process`).
+        return (next((n for n in (1, 8, 16, 32) if self.settings.bits <= n), 64),)
+
     def _process(
         self,
         message: AxisArray,
@@ -64,7 +70,7 @@ class QuantizeTransformer(BaseTransformer[QuantizeSettings, AxisArray, AxisArray
         data = xp.round(scale_factor * data).astype(dtype)
 
         # Create a new AxisArray with the quantized data
-        return replace(message, data=data)
+        return replace(message, data=data, config_id=self._chained_config_id(message))
 
 
 class QuantizerUnit(BaseTransformerUnit[QuantizeSettings, AxisArray, AxisArray, QuantizeTransformer]):
