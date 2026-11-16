@@ -1057,3 +1057,54 @@ def test_short_first_chunk_is_held_as_a_copy():
     backward(msg)
     assert backward._tail is not None
     assert not np.shares_memory(backward._tail, msg.data)
+
+
+@pytest.mark.parametrize("n_at_change", [137, 3], ids=["chunk", "shorter-than-pad"])
+@pytest.mark.parametrize("coef_type", ["ba", "sos"])
+def test_settings_change_redesigns_backward_stage_and_keeps_its_tail(coef_type, n_at_change):
+    """A live cutoff change redesigns both stages. The held tail goes out at the change, filtered with
+    the old design, so no sample is lost and the time axis stays contiguous. Once the change has
+    settled, the output matches a processor that had the new settings all along (#272)."""
+    fs, order, n_times, chunk, change_at = 1000.0, 4, 4000, 137, 1096
+    x = np.random.default_rng(2).standard_normal((n_times, 2))
+    template = _make_message(x[:0], ["time", "ch"], fs)
+    old, new = (ButterworthZeroPhaseSettings(order=order, cutoff=c, coef_type=coef_type) for c in (50.0, 120.0))
+    starts = list(range(0, change_at, chunk)) + [change_at] + list(range(change_at + n_at_change, n_times, chunk))
+    msgs = [_at(template, x[s:e], s / fs) for s, e in zip(starts, starts[1:] + [n_times])]
+
+    proc, ref = ButterworthZeroPhaseTransformer(old), ButterworthZeroPhaseTransformer(new)
+    outs, ref_outs = [], [ref(m) for m in msgs[:-1]] + [ref.flush(msgs[-1])]
+    for i, m in enumerate(msgs[:-1]):
+        if i == starts.index(change_at):
+            proc.update_settings(new)
+        outs.append(proc(m))
+    outs.append(proc.flush(msgs[-1]))
+
+    backward = proc._procs["backward"]
+    expected = ButterworthBackwardFilterTransformer(new).get_design_function()(fs)
+    for got, want in zip(np.atleast_2d(backward._coefs_cache), np.atleast_2d(expected)):
+        np.testing.assert_allclose(got, want)
+    assert backward._pad_length == _compute_pad_length(order, coef_type, fs, cutoff=120.0)
+
+    # One output per input, every sample out once, each output starting where the previous one ended.
+    assert len(outs) == len(msgs)
+    y = np.concatenate([o.data for o in outs])
+    assert y.shape == x.shape
+    n_before = np.cumsum([0] + [o.data.shape[0] for o in outs[:-1]])
+    for out, n in zip(outs, n_before):
+        if out.data.shape[0]:
+            assert out.axes["time"].offset == pytest.approx(n / fs)
+
+    y_ref = np.concatenate([o.data for o in ref_outs])
+    np.testing.assert_allclose(y[change_at + 1000 :], y_ref[change_at + 1000 :], atol=1e-9)
+
+
+def test_unchanged_or_chunk_size_settings_leave_backward_stage_alone():
+    backward = ButterworthBackwardFilterTransformer(ButterworthZeroPhaseSettings(order=4, cutoff=30.0, coef_type="sos"))
+    backward(make_msg(n_time=200, fs=1000.0))
+    tail, coefs = backward._tail, backward._coefs_cache
+    backward.update_settings(backward.settings)
+    backward.update_settings(mlx_metal_chunk_sizes=(32, 256))
+    assert not backward.state.needs_redesign
+    backward(make_msg(n_time=0, fs=1000.0))
+    assert backward._tail is tail and backward._coefs_cache is coefs

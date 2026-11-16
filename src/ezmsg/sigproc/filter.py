@@ -1013,15 +1013,16 @@ class FilterByDesignTransformer(
 
         changed = _changed_settings_fields(old_settings, self.settings)
 
-        if changed and self.state.filter is not None:
-            if changed == {"mlx_metal_chunk_sizes"}:
+        if changed == {"mlx_metal_chunk_sizes"}:
+            if self.state.filter is not None:
                 with suppress_axis_deprecation():  # the child's axis is ours, not the user's
                     self.state.filter.settings = replace(
                         self.state.filter.settings,
                         mlx_metal_chunk_sizes=self.settings.mlx_metal_chunk_sizes,
                     )
-            else:
-                self.state.needs_redesign = True
+        elif changed:
+            # Not only when there is a child filter: a subclass that filters by itself redesigns on this flag too.
+            self.state.needs_redesign = True
 
     def _design_coefs(self, fs: float) -> FilterCoefsType | None:
         """Design coefficients for ``fs``, apply ``min_phase``, and convert to SOS if requested."""

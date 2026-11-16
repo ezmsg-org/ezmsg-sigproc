@@ -289,13 +289,20 @@ class ButterworthBackwardFilterTransformer(FilterByDesignTransformer[Butterworth
 
         # Check if we need to redesign filter
         if self._coefs_cache is None or self.state.needs_redesign:
+            # The held samples were forward-filtered for the old design: emit them with it, as `flush` does.
+            held = self.flush()
             # Routed through the shared design step so an unsupported min_phase raises.
             self._coefs_cache = self._design_coefs(fs)
             self._pad_length = self._compute_pad_length(fs)
             self._zi_tiled = None  # Invalidate; recomputed on next use.
             self._sos_mx = None
-            self._tail = None
             self.state.needs_redesign = False
+            if held is not None:
+                # One output: the old tail, then whatever the new design gives for this message, which follows it.
+                out = self._process(message)
+                xp = np if is_numpy_array(held.data) else get_namespace(held.data)
+                data = xp.concatenate([held.data, out.data], axis=ax_idx)
+                return replace(out, data=data, axes={**out.axes, axis: held.axes[axis]})
 
         # Early exit if filter is effectively disabled
         if self._coefs_cache is None or self.settings.order <= 0 or message.data.size <= 0:
