@@ -312,6 +312,14 @@ def test_hilbert_envelope_empty_first():
     check_state_not_corrupted(proc, normal)
 
 
+def test_hilbert_envelope_rejects_zero_startup():
+    """Like the plain filters, the envelope has no zero pre-history start-up."""
+    from ezmsg.sigproc.util.startup import StartupMode
+
+    with pytest.raises(ValueError, match="startup=ZERO"):
+        FIRHilbertEnvelopeTransformer(order=20, f_lo=5.0, f_hi=15.0, startup=StartupMode.ZERO)(make_msg())
+
+
 # --- flush: the samples the filter delay holds back ------------------------------------------
 
 FLUSH_FS = 500.0

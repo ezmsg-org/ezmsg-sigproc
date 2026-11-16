@@ -280,6 +280,8 @@ class FIRHilbertEnvelopeTransformer(
     """
 
     def _reset_state(self, message: AxisArray) -> None:
+        if self.settings.startup == StartupMode.ZERO:
+            raise ValueError("startup=ZERO is for filterbanks; a filter starts from CONSTANT at the least.")
         # Start-up priming is done here, over the whole envelope, so the inner filter must not also do it.
         with suppress_axis_deprecation():
             inner_settings = replace(self.settings, startup=StartupMode.CONSTANT)
