@@ -562,8 +562,9 @@ def short_chunks(start=0, attrs=ATTRS, segment=SEGMENT):
 
 
 def _designed_variants():
-    from ezmsg.sigproc import filterbank, fir_hilbert
+    from ezmsg.sigproc import filterbank, fir_hilbert, wavelets
     from ezmsg.sigproc.filterbank import FilterbankMode as FM
+    from ezmsg.sigproc.util.minphase import MinPhaseMode
     from ezmsg.sigproc.util.startup import StartupMode as SM
 
     variants = {}
@@ -587,6 +588,18 @@ def _designed_variants():
             stream,
             run,
             lambda proc: _filter_coefs(proc.state.filter),
+        )
+    # A new CWT design would bring a new child filterbank, and with it new kernels.
+    for wavelet, min_phase, messages, tag in (
+        *(("morl", mp, stream, mp.name) for mp in MinPhaseMode),
+        ("cmor1.5-1.0", MinPhaseMode.NONE, stream, "complex"),
+        ("morl", MinPhaseMode.NONE, short_chunks, "short"),
+    ):
+        variants[f"CWTTransformer-{tag}"] = (
+            lambda w=wavelet, mp=min_phase: wavelets.CWTTransformer(frequencies=[10.0, 20.0], wavelet=w, min_phase=mp),
+            messages,
+            run,
+            lambda proc: proc.state.fbgen.state.prep_kerns,
         )
     return variants
 

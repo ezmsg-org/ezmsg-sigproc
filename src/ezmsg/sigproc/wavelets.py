@@ -136,9 +136,18 @@ class CWTTransformer(BaseStatefulTransformer[CWTSettings, AxisArray, AxisArray, 
             },
             key=message.key,
         )
-        self._state.last_conv_samp = np.zeros(dummy_shape[:-1] + (1,), dtype=self._state.template.data.dtype)
+        self._reset_memory()
         template = self._state.template
         self._state.configs = ConfigChain(self._state.axis, template.axes["freq"].fingerprint, template.data.dtype.kind)
+
+    def _reset_segment(self, message: AxisArray) -> None:
+        # The kernels depend only on the config; the child filterbank sees the new segment and resets its own memory.
+        self._reset_memory()
+
+    def _reset_memory(self) -> None:
+        """Forget the samples seen so far: the last convolved sample the differencing starts from."""
+        template = self._state.template.data
+        self._state.last_conv_samp = np.zeros(template.shape[:-1] + (1,), dtype=template.dtype)
 
     def _process(self, message: AxisArray) -> AxisArray:
         conv_msg = self._state.fbgen.send(message)
