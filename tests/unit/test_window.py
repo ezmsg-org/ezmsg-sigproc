@@ -541,3 +541,17 @@ def test_batcher_channel_major():
     emitted = [o for o in outs if o.data.shape[1]]
     assert all(o.dims == ["ch", "time"] for o in outs)
     assert np.array_equal(np.concatenate([o.data for o in emitted], axis=1), data)
+
+
+def test_new_segment_forgets_samples_still_to_skip():
+    """With a shift longer than the window, the samples still to skip before the next window
+    belong to the old segment: the new one starts a fresh grid."""
+    fs = 100.0
+    first = replace(make_msg(n_time=22, fs=fs), segment=1)  # one window, 8 of 30 skipped
+    after = replace(make_msg(n_time=60, fs=fs), segment=2)
+    proc = WindowTransformer(window_dur=0.2, window_shift=0.3)
+    proc(first)
+    out = proc(after)
+    ref = WindowTransformer(window_dur=0.2, window_shift=0.3)(after)
+    np.testing.assert_array_equal(out.data, ref.data)
+    assert out.axes["win"].offset == ref.axes["win"].offset == 0.0

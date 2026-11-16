@@ -310,6 +310,7 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
             if n_zero:
                 self._state.buffer.write(xp.zeros(zero_shape, dtype=message.data.dtype))
         self._state.buffer_len = n_zero
+        self._state.shift_deficit = 0
 
         # Prepare reusable parts of output. Rebuilt unconditionally: a reset means
         # the sample shape, sample rate or key changed, and every cached value
