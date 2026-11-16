@@ -242,6 +242,23 @@ def test_spectrum_empty_first():
     assert np.all(np.isfinite(result2.data))
 
 
+def test_spectrum_empty_along_stream_dim():
+    """No samples along the transformed stream dim: an empty spectrum, and the state is left alone."""
+    from ezmsg.util.messages.util import replace
+
+    from tests.helpers.empty_time import make_empty_msg, make_msg
+
+    normal, empty = replace(make_msg(), stream_dim="time"), replace(make_empty_msg(), stream_dim="time")
+    proc = SpectrumTransformer(SpectrumSettings(axis="time"))
+    expected = proc(normal)
+    configs = proc.state.configs
+    result = proc(empty)
+    assert result.dims == ["freq", "ch"] and result.data.shape == (0, N_CH)
+    assert result.stream_dim is None and result.axes["freq"].unit == "Hz"
+    assert proc.state.configs is configs
+    assert_messages_equal([proc(normal)], [expected])
+
+
 @requires_mlx
 @pytest.mark.parametrize("transform", [SpectralTransform.REL_DB, SpectralTransform.REL_POWER])
 @pytest.mark.parametrize("output", [SpectralOutput.POSITIVE, SpectralOutput.NEGATIVE, SpectralOutput.FULL])
