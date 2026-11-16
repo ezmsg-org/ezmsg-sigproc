@@ -7,6 +7,7 @@ from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
 from .spectral import OptionsEnum
+from .util.segment import SettingsConfigChain
 
 
 class ActivationFunction(OptionsEnum):
@@ -44,7 +45,14 @@ class ActivationSettings(ez.Settings):
          SIGMOID and EXPIT are equivalent. See :obj:`scipy.special.expit` for more details."""
 
 
-class ActivationTransformer(BaseTransformer[ActivationSettings, AxisArray, AxisArray]):
+class ActivationTransformer(SettingsConfigChain, BaseTransformer[ActivationSettings, AxisArray, AxisArray]):
+    def _config_own(self, message: AxisArray) -> tuple:
+        # Which function, which decides an integer input's output dtype; SIGMOID and EXPIT are one.
+        function = self.settings.function
+        if type(function) is not ActivationFunction:
+            function = ActivationFunction(function.lower())
+        return (ACTIVATIONS[function].__name__,)
+
     def _process(self, message: AxisArray) -> AxisArray:
         if type(self.settings.function) is ActivationFunction:
             func = ACTIVATIONS[self.settings.function]
@@ -56,7 +64,7 @@ class ActivationTransformer(BaseTransformer[ActivationSettings, AxisArray, AxisA
             function = list(ACTIVATIONS.keys())[ActivationFunction.options().index(function)]
             func = ACTIVATIONS[function]
 
-        return replace(message, data=func(message.data))
+        return replace(message, data=func(message.data), config_id=self._chained_config_id(message))
 
 
 class Activation(BaseTransformerUnit[ActivationSettings, AxisArray, AxisArray, ActivationTransformer]):

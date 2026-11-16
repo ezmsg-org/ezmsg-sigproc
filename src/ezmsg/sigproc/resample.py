@@ -22,6 +22,7 @@ from .util.axisarray_buffer import HybridAxisArrayBuffer, HybridAxisBuffer
 from .util.buffer import UpdateStrategy
 from .util.deprecation import warn_axis_deprecated
 from .util.message import has_samples_along
+from .util.segment import ConfigJoin
 
 
 def _as_limit(value: float | None) -> float | None:
@@ -173,6 +174,12 @@ class ResampleState:
     ref_segment: int | None = None
     """The ``segment`` of the last reference message; a change drops the reference buffered before it."""
 
+    ref_config_id: int = 0
+    """The ``config_id`` of the last reference message."""
+
+    configs: ConfigJoin | None = None
+    """Derives the output's config_id from the input's (see :class:`~ezmsg.sigproc.util.segment.ConfigJoin`)."""
+
 
 class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisArray, ResampleState]):
     # Both fields are read per-chunk inside `__next__` / `_process` only;
@@ -222,6 +229,13 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
         self.state.last_write_time = -np.inf
         self.state.reference_output = None
         self.state.stale_ref_pushes = 0
+        self.state.configs = ConfigJoin()
+
+    def _resampled_config_id(self, src: AxisArray) -> int:
+        """The signal's config_id joined with what sets the output grid: the reference's, or the prescribed rate."""
+        if self.settings.resample_rate is None:
+            return self.state.configs.update(src.config_id, self.state.ref_config_id)
+        return self.state.configs.update(src.config_id, own=(self.settings.resample_rate,))
 
     @staticmethod
     def _axis_first_step(ax) -> tuple[float, float]:
@@ -249,6 +263,7 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
             self.state.ref_axis_buffer = None
             self.state.ref_data_buffer = None
         self.state.ref_segment = message.segment
+        self.state.ref_config_id = message.config_id
         if self.state.ref_axis_buffer is None:
             self.state.ref_axis_buffer = HybridAxisBuffer(
                 duration=self.settings.buffer_duration,
@@ -338,6 +353,7 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
             src_axarr = src.peek(0)
             return replace(
                 src_axarr,
+                config_id=self._resampled_config_id(src_axarr),
                 axes={
                     **src_axarr.axes,
                     self.state.axis: ref.peek(0),
@@ -386,6 +402,7 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
             return replace(
                 src_axarr,
                 data=slice_along_axis(src_axarr.data, slice(0, 0), src_ax_idx),
+                config_id=self._resampled_config_id(src_axarr),
                 axes={**src_axarr.axes, self.state.axis: null_ref},
             )
 
@@ -434,6 +451,7 @@ class ResampleProcessor(BaseStatefulProcessor[ResampleSettings, AxisArray, AxisA
         result = replace(
             src_axarr,
             data=resampled_data,
+            config_id=self._resampled_config_id(src_axarr),
             axes={
                 **src_axarr.axes,
                 self.state.axis: out_ax,

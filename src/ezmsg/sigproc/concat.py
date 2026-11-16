@@ -17,7 +17,7 @@ from ezmsg.util.messages.util import replace
 from ezmsg.sigproc.util.channels import AxisFingerprintMemo
 
 from .util.message import with_fingerprint
-from .util.segment import SegmentJoin
+from .util.segment import ConfigJoin, SegmentJoin
 
 logger = logging.getLogger(__name__)
 
@@ -536,6 +536,7 @@ class ConcatState:
     memo_a: _FingerprintMemo = field(default_factory=_FingerprintMemo)
     memo_b: _FingerprintMemo = field(default_factory=_FingerprintMemo)
     segments: SegmentJoin = field(default_factory=SegmentJoin)
+    configs: ConfigJoin = field(default_factory=ConfigJoin)
 
 
 class ConcatProcessor:
@@ -624,6 +625,9 @@ class ConcatProcessor:
         # not, hence the membership check.
         stream_dim = a.stream_dim if a.stream_dim in a.dims else None
         self._state.segments.update(a=a.segment, b=b.segment)
+        # The merged concat axis also depends on attrs promoted into it, which no input id covers.
+        merged = self._state.merged_concat_axis
+        own = (concat_dim, self.settings.new_key, None if merged is None else merged.fingerprint)
         return AxisArray(
             data,
             dims=list(a.dims),
@@ -632,6 +636,7 @@ class ConcatProcessor:
             attrs=attrs,
             stream_dim=stream_dim,
             segment=self._state.segments.segment,
+            config_id=self._state.configs.update(a.config_id, b.config_id, own=own),
         )
 
     def _fingerprint(self, msg: AxisArray, memo: _FingerprintMemo | None = None) -> tuple:

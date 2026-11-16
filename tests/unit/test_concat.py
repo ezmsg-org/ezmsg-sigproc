@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 from ezmsg.util.messages.axisarray import AxisArray, CoordinateAxis
+from ezmsg.util.messages.util import replace
 from frozendict import frozendict
 
 from ezmsg.sigproc.concat import (
@@ -1073,3 +1074,24 @@ class TestTheChunkLengthDoesNotRebuildTheCache:
         proc._concat(self._msg("A", ["c0", "c1"], 40), self._msg("B", ["c0", "c1"], 40))
         with pytest.raises(ValueError, match=r"dimension 'time' has size 40 in A but 37 in B"):
             proc._concat(self._msg("A", ["c0", "c1"], 40), self._msg("B", ["c0", "c1"], 37))
+
+
+class TestConfigId:
+    @staticmethod
+    def _run(proc, id_a, id_b, attrs_b=None):
+        a = replace(_msg_with_attrs(np.ones((4, 2)), ch_labels=["x", "y"]), config_id=id_a)
+        b = replace(_msg_with_attrs(np.ones((4, 2)), ch_labels=["x", "y"], attrs=attrs_b), config_id=id_b)
+        return proc._concat(a, b).config_id
+
+    def test_config_id_joins_both_inputs(self):
+        proc = ConcatProcessor(ConcatSettings(axis="ch"))
+        ids = [self._run(proc, a, b) for a, b in [(1, 2), (1, 2), (3, 2), (3, 4), (0, 4), (3, 0)]]
+        assert 0 not in ids[:4] and ids[0] == ids[1]
+        assert len(set(ids[1:4])) == 3
+        assert ids[4:] == [0, 0]
+
+    def test_promoted_attrs_change_the_config_id(self):
+        """Attrs promoted onto the concat axis change the layout, though neither input's id changes."""
+        proc = ConcatProcessor(ConcatSettings(axis="ch"))
+        ids = [self._run(proc, 1, 2, attrs_b={"gain": g}) for g in (1.0, 1.0, 2.0)]
+        assert ids[0] == ids[1] != ids[2]

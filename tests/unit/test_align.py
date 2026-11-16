@@ -2,6 +2,7 @@
 
 import numpy as np
 from ezmsg.util.messages.axisarray import AxisArray, CoordinateAxis
+from ezmsg.util.messages.util import replace
 from frozendict import frozendict
 
 from ezmsg.sigproc.align import AlignAlongAxisProcessor, AlignAlongAxisSettings
@@ -243,3 +244,25 @@ class TestShapeChange:
         assert pair is not None
         assert pair[0].data.shape == (n, 4)
         assert pair[1].data.shape == (n, 3)
+
+
+class TestConfigId:
+    def test_each_output_keeps_its_own_inputs_config_id(self):
+        proc = AlignAlongAxisProcessor(AlignAlongAxisSettings(axis="time"))
+        n, fs = 5, 100.0
+
+        def step(i, id_a, id_b):
+            a = replace(_make_msg(np.ones((n, 2)), fs=fs, offset=i * n / fs), config_id=id_a)
+            b = replace(_make_msg(np.ones((n, 3)), fs=fs, offset=i * n / fs), config_id=id_b)
+            proc(a)
+            pair = proc.push_b(b)
+            return pair[0].config_id, pair[1].config_id
+
+        # A's id changes at the same shape (e.g. a relabel): A's buffer restarts and carries the new id.
+        assert [step(i, *ids) for i, ids in enumerate([(1, 2), (1, 2), (5, 2), (5, 7), (0, 0)])] == [
+            (1, 2),
+            (1, 2),
+            (5, 2),
+            (5, 7),
+            (0, 0),
+        ]

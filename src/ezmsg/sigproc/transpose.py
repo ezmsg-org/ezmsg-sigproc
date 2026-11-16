@@ -22,6 +22,8 @@ from ezmsg.util.messages.axisarray import (
     replace,
 )
 
+from .util.segment import ConfigChain
+
 
 class TransposeSettings(ez.Settings):
     """
@@ -38,6 +40,8 @@ class TransposeSettings(ez.Settings):
 @processor_state
 class TransposeState:
     axes_ints: tuple[int, ...] | None = None
+    configs: ConfigChain | None = None
+    """Derives the output's config_id from the input's (see :class:`~ezmsg.sigproc.util.segment.ConfigChain`)."""
 
 
 class TransposeTransformer(BaseStatefulTransformer[TransposeSettings, AxisArray, AxisArray, TransposeState]):
@@ -82,6 +86,7 @@ class TransposeTransformer(BaseStatefulTransformer[TransposeSettings, AxisArray,
                 self._state.axes_ints = None
             else:
                 self._state.axes_ints = re_ix
+        self._state.configs = ConfigChain(self._state.axes_ints)
         if self.settings.order is not None and self.settings.order.upper()[0] not in [
             "C",
             "F",
@@ -121,6 +126,7 @@ class TransposeTransformer(BaseStatefulTransformer[TransposeSettings, AxisArray,
                 message,
                 data=data_out,
                 dims=dims_out,
+                config_id=self._state.configs.update(message.config_id),
             )
         return msg_out
 

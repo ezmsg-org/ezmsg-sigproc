@@ -31,6 +31,7 @@ from ezmsg.util.messages.axisarray import (
 
 from .spectral import OptionsEnum
 from .util.message import with_fingerprint
+from .util.segment import ConfigChain, SettingsConfigChain
 
 
 class AggregationFunction(OptionsEnum):
@@ -239,6 +240,8 @@ class RangedAggregateState:
     slices: list[tuple[typing.Any, ...]] | None = None
     out_axis: AxisBase | None = None
     ax_vec: npt.NDArray | None = None
+    configs: ConfigChain | None = None
+    """Derives the output's config_id from the input's (see :class:`~ezmsg.sigproc.util.segment.ConfigChain`)."""
 
 
 class RangedAggregateTransformer(
@@ -292,6 +295,7 @@ class RangedAggregateTransformer(
                 unit=target_axis.unit,
             )
         )
+        self._state.configs = ConfigChain(axis, self._state.out_axis.fingerprint)
 
     def _process(self, message: AxisArray) -> AxisArray:
         axis = self.settings.axis or resolve_feature_dim(message, 0)
@@ -311,6 +315,7 @@ class RangedAggregateTransformer(
             message,
             data=stacked,
             axes={**message.axes, axis: self._state.out_axis},
+            config_id=self._state.configs.update(message.config_id),
         )
 
 
@@ -355,7 +360,7 @@ class AggregateSettings(ez.Settings):
     2, ..., so the result is the index after all."""
 
 
-class AggregateTransformer(BaseTransformer[AggregateSettings, AxisArray, AxisArray]):
+class AggregateTransformer(SettingsConfigChain, BaseTransformer[AggregateSettings, AxisArray, AxisArray]):
     """
     Transformer that aggregates an entire axis using a specified operation.
 
@@ -363,6 +368,10 @@ class AggregateTransformer(BaseTransformer[AggregateSettings, AxisArray, AxisArr
     and preserves the axis (with one value per band), this transformer aggregates the
     entire axis and removes it from the output, reducing dimensionality by one.
     """
+
+    def _config_own(self, message: AxisArray) -> tuple:
+        # The axis removed, and the operation, which can change the dtype.
+        return self.settings.axis, self.settings.operation
 
     def _process(self, message: AxisArray) -> AxisArray:
         axis_idx = message.get_axis_idx(self.settings.axis)
@@ -401,6 +410,7 @@ class AggregateTransformer(BaseTransformer[AggregateSettings, AxisArray, AxisArr
             # Reducing over the dimension messages appended along leaves nothing
             # to append along: each output is one aggregate.
             stream_dim=message.stream_dim if message.stream_dim in new_dims else None,
+            config_id=self._chained_config_id(message),
         )
 
 

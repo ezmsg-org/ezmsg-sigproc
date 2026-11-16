@@ -26,6 +26,7 @@ from .util.buffer import HybridBuffer, UpdateStrategy
 from .util.deprecation import warn_axis_deprecated
 from .util.message import is_empty_along
 from .util.profile import profile_subpub
+from .util.segment import ConfigChain
 from .util.sparse import sliding_win_oneaxis as sparse_sliding_win_oneaxis
 
 
@@ -143,6 +144,10 @@ class WindowState:
 
     empty_out: npt.NDArray | sparse.SparseArray | None = None
     """Cached zero-window output, returned unchanged whenever no window is due."""
+
+    configs: ConfigChain | None = None
+    """Derives the output's config_id from the input's and the window layout, ``anchor`` included:
+    see :class:`~ezmsg.sigproc.util.segment.ConfigChain`."""
 
 
 class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisArray, WindowState]):
@@ -345,7 +350,7 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
             self._anchor_out_axis(axis_info)
 
     def _anchor_out_axis(self, axis_info: AxisArray.LinearAxis) -> None:
-        """Re-anchor the target axis per ``anchor``."""
+        """Re-anchor the target axis per ``anchor`` and refresh the config_id parts that include it."""
         anchor = Anchor(self.settings.anchor)
         if anchor == Anchor.BEGINNING:
             anchored_offset = 0.0
@@ -353,7 +358,11 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
             anchored_offset = -self.settings.window_dur
         else:  # Anchor.MIDDLE
             anchored_offset = -self.settings.window_dur / 2
-        self._state.out_axis = replace(axis_info, offset=anchored_offset)
+        st = self._state
+        st.out_axis = replace(axis_info, offset=anchored_offset)
+        st.configs = ConfigChain(
+            tuple(st.out_dims), st.window_samples, st.out_newaxis.gain, anchored_offset, st.out_stream_dim
+        )
 
     def update_settings(self, new_settings: WindowSettings) -> None:
         # `anchor` changes without a reset, so the axis it moves is re-anchored here rather than checked per message.
@@ -506,6 +515,7 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
             dims=self._state.out_dims,
             axes={**out_axes, _newaxis: self._state.out_newaxis},
             stream_dim=self._state.out_stream_dim,
+            config_id=self._state.configs.update(message.config_id),
         )
         return msg_out
 

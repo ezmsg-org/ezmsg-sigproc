@@ -21,6 +21,7 @@ from ezmsg.util.messages.axisarray import (
 )
 
 from .util.array import is_complex_dtype
+from .util.segment import ConfigChain
 
 
 class OptionsEnum(enum.Enum):
@@ -136,6 +137,11 @@ class SpectrumState:
     f_transform: typing.Callable | None = None
     new_dims: list[str] | None = None
     window: typing.Any = None
+    targ_len: int = 0
+    """Length of the transformed axis the state was built for."""
+    configs: ConfigChain | None = None
+    """Derives the output's config_id from the input's and the new dims, frequency axis and complex output:
+    see :class:`~ezmsg.sigproc.util.segment.ConfigChain`."""
 
 
 class SpectrumTransformer(BaseStatefulTransformer[SpectrumSettings, AxisArray, AxisArray, SpectrumState]):
@@ -237,6 +243,10 @@ class SpectrumTransformer(BaseStatefulTransformer[SpectrumSettings, AxisArray, A
             ]
             + message.dims[ax_idx + 1 :]
         )
+        self.state.targ_len = targ_len
+        fax = self.state.freq_axis
+        complex_out = self.settings.transform == SpectralTransform.RAW_COMPLEX
+        self.state.configs = ConfigChain(tuple(self.state.new_dims), fax.gain, fax.offset, len(freqs), complex_out)
 
         def f_transform(x):
             return x
@@ -265,6 +275,11 @@ class SpectrumTransformer(BaseStatefulTransformer[SpectrumSettings, AxisArray, A
 
     def _process(self, message: AxisArray) -> AxisArray:
         axis = self.settings.axis or resolve_transform_dim(message, self.STREAMING_DIMS)
+        ax_idx = message.get_axis_idx(axis)
+        if message.data.shape[ax_idx] != self.state.targ_len:
+            # `_hash_message` keys on this length, but it is skipped while config_id is declared and unchanged,
+            # and config_id leaves out the length of the stream dimension, which this axis usually is.
+            self._reset_state(message)
 
         new_axes = {k: v for k, v in message.axes.items() if k not in [self.settings.out_axis, axis]}
         new_axes[self.settings.out_axis or axis] = self.state.freq_axis
@@ -277,7 +292,7 @@ class SpectrumTransformer(BaseStatefulTransformer[SpectrumSettings, AxisArray, A
         if self.state.fftshift is not None:
             spec = self.state.fftshift(spec)
         spec = self.state.f_transform(spec)
-        spec = slice_along_axis(spec, self.state.f_sl, message.get_axis_idx(axis))
+        spec = slice_along_axis(spec, self.state.f_sl, ax_idx)
 
         # The transformed axis is consumed: `time` becomes `freq`. If that was
         # the dimension successive messages appended along, the output has none
@@ -285,7 +300,14 @@ class SpectrumTransformer(BaseStatefulTransformer[SpectrumSettings, AxisArray, A
         # concatenate. Windowed input keeps its `win` dimension and so keeps
         # appending along it.
         out_stream_dim = None if message.stream_dim == axis else message.stream_dim
-        msg_out = replace(message, data=spec, dims=self.state.new_dims, axes=new_axes, stream_dim=out_stream_dim)
+        msg_out = replace(
+            message,
+            data=spec,
+            dims=self.state.new_dims,
+            axes=new_axes,
+            stream_dim=out_stream_dim,
+            config_id=self.state.configs.update(message.config_id),
+        )
         return msg_out
 
 

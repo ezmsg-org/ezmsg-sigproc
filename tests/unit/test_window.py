@@ -547,8 +547,8 @@ def test_new_segment_forgets_samples_still_to_skip():
     """With a shift longer than the window, the samples still to skip before the next window
     belong to the old segment: the new one starts a fresh grid."""
     fs = 100.0
-    first = replace(make_msg(n_time=22, fs=fs), segment=1)  # one window, 8 of 30 skipped
-    after = replace(make_msg(n_time=60, fs=fs), segment=2)
+    first = replace(make_msg(n_time=22, fs=fs), segment=1, config_id=5)  # one window, 8 of 30 skipped
+    after = replace(make_msg(n_time=60, fs=fs), segment=2, config_id=5)
     proc = WindowTransformer(window_dur=0.2, window_shift=0.3)
     proc(first)
     out = proc(after)

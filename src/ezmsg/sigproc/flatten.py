@@ -44,6 +44,7 @@ from ezmsg.baseproc import (
 from ezmsg.util.messages.axisarray import AxisArray, CoordinateAxis, replace
 
 from .util.message import with_fingerprint
+from .util.segment import ConfigChain
 
 
 def normalize_axis_label(label):
@@ -130,6 +131,8 @@ class FlattenState:
     output_axis_obj: CoordinateAxis | None = None
 
     output_dims: tuple[str, ...] = ()
+    configs: ConfigChain | None = None
+    """Derives the output's config_id from the input's (see :class:`~ezmsg.sigproc.util.segment.ConfigChain`)."""
 
 
 @dataclass
@@ -302,6 +305,7 @@ class FlattenTransformer(BaseStatefulTransformer[FlattenSettings, AxisArray, Axi
         st.target_inner_shape = target_inner_shape
         st.output_axis_obj = output_axis_obj
         st.output_dims = (sample_axis, output_axis, *rest_axes)
+        st.configs = ConfigChain(st.output_dims, output_axis_obj.fingerprint)
 
     def _process(self, message: AxisArray) -> AxisArray:
         st = self._state
@@ -334,7 +338,14 @@ class FlattenTransformer(BaseStatefulTransformer[FlattenSettings, AxisArray, Axi
             stream_dim = st.sample_axis
         elif stream_dim not in st.output_dims:
             stream_dim = None
-        return replace(message, data=data, dims=list(st.output_dims), axes=axes, stream_dim=stream_dim)
+        return replace(
+            message,
+            data=data,
+            dims=list(st.output_dims),
+            axes=axes,
+            stream_dim=stream_dim,
+            config_id=st.configs.update(message.config_id),
+        )
 
 
 class Flatten(BaseTransformerUnit[FlattenSettings, AxisArray, AxisArray, FlattenTransformer]):

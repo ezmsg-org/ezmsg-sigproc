@@ -24,6 +24,7 @@ from ezmsg.baseproc import (
 from ezmsg.util.messages.axisarray import AxisArray, replace
 
 from .util.message import with_fingerprint
+from .util.segment import SettingsConfigChain
 
 # -- Utility functions for coordinate transformations --
 
@@ -99,7 +100,7 @@ class CoordinateSpacesSettings(ez.Settings):
     """
 
 
-class CoordinateSpacesTransformer(BaseTransformer[CoordinateSpacesSettings, AxisArray, AxisArray]):
+class CoordinateSpacesTransformer(SettingsConfigChain, BaseTransformer[CoordinateSpacesSettings, AxisArray, AxisArray]):
     """
     Transform between Cartesian and polar coordinate systems.
 
@@ -107,6 +108,10 @@ class CoordinateSpacesTransformer(BaseTransformer[CoordinateSpacesSettings, Axis
     - For cart2pol: expects (x, y), outputs (r, theta)
     - For pol2cart: expects (r, theta), outputs (x, y)
     """
+
+    def _config_own(self, message: AxisArray) -> tuple:
+        # The mode relabels the axis.
+        return self.settings.axis or resolve_feature_dim(message), self.settings.mode == CoordinateMode.CART2POL
 
     def _process(self, message: AxisArray) -> AxisArray:
         xp = get_namespace(message.data)
@@ -147,7 +152,7 @@ class CoordinateSpacesTransformer(BaseTransformer[CoordinateSpacesSettings, Axis
                 new_labels = np.array(["x", "y"])
             axes = {**axes, axis: with_fingerprint(replace(axes[axis], data=new_labels))}
 
-        return replace(message, data=result, axes=axes)
+        return replace(message, data=result, axes=axes, config_id=self._chained_config_id(message))
 
 
 class CoordinateSpaces(

@@ -20,6 +20,7 @@ from ezmsg.util.messages.util import replace
 from .filterbank import FilterbankMode, MinPhaseMode, filterbank
 from .util.deprecation import warn_axis_deprecated
 from .util.message import with_fingerprint
+from .util.segment import ConfigChain
 
 
 class CWTSettings(ez.Settings):
@@ -53,6 +54,8 @@ class CWTState:
     template: AxisArray | None = None
     fbgen: typing.Generator[AxisArray, AxisArray, None] | None = None
     last_conv_samp: npt.NDArray | None = None
+    configs: ConfigChain | None = None
+    """Derives the output's config_id from the input's (see :class:`~ezmsg.sigproc.util.segment.ConfigChain`)."""
 
 
 class CWTTransformer(BaseStatefulTransformer[CWTSettings, AxisArray, AxisArray, CWTState]):
@@ -138,6 +141,8 @@ class CWTTransformer(BaseStatefulTransformer[CWTSettings, AxisArray, AxisArray, 
             key=message.key,
         )
         self._state.last_conv_samp = np.zeros(dummy_shape[:-1] + (1,), dtype=self._state.template.data.dtype)
+        template = self._state.template
+        self._state.configs = ConfigChain(self._state.axis, template.axes["freq"].fingerprint, template.data.dtype.kind)
 
     def _process(self, message: AxisArray) -> AxisArray:
         conv_msg = self._state.fbgen.send(message)
@@ -165,6 +170,7 @@ class CWTTransformer(BaseStatefulTransformer[CWTSettings, AxisArray, AxisArray, 
             },
             attrs=message.attrs,
             segment=message.segment,
+            config_id=self._state.configs.update(message.config_id),
         )
 
 

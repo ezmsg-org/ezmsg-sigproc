@@ -4,7 +4,7 @@ import asyncio
 import copy
 
 import numpy as np
-from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.axisarray import AxisArray, chain_config_id
 from frozendict import frozendict
 
 from ezmsg.sigproc.math.add import (
@@ -245,3 +245,38 @@ class TestAddState:
 
         assert not state1.queue_a.empty()
         assert state2.queue_a.empty()
+
+
+def _declared(config_id: int) -> AxisArray:
+    return AxisArray(
+        np.ones((2, 2)),
+        dims=["time", "ch"],
+        axes=frozendict({"time": AxisArray.TimeAxis(fs=100.0)}),
+        config_id=config_id,
+    )
+
+
+class TestAddConfigId:
+    def test_config_id_joins_both_inputs(self):
+        processor = AddProcessor()
+
+        def run(id_a, id_b):
+            processor.push_a(_declared(id_a))
+            processor.push_b(_declared(id_b))
+            return processor().config_id
+
+        ids = [run(a, b) for a, b in [(1, 2), (1, 2), (3, 2), (3, 4), (0, 4), (3, 0)]]
+        assert ids[:4] == [chain_config_id(1, 2)] * 2 + [chain_config_id(3, 2), chain_config_id(3, 4)]
+        assert ids[4:] == [0, 0]  # an undeclared input makes the output undeclared
+
+    def test_config_id_is_chained_only_when_an_input_id_changes(self, monkeypatch):
+        import ezmsg.sigproc.util.segment as segment_mod
+
+        calls = []
+        monkeypatch.setattr(segment_mod, "chain_config_id", lambda *p: calls.append(p) or 9)
+        processor = AddProcessor()
+        for ids in [(1, 2)] * 5 + [(3, 2)] * 5:
+            processor.push_a(_declared(ids[0]))
+            processor.push_b(_declared(ids[1]))
+            processor()
+        assert calls == [(1, 2), (3, 2)]

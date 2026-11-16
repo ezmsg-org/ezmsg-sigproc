@@ -59,6 +59,7 @@ from .util.array import xp_copy
 from .util.binning import BinSchedule, BinStep
 from .util.deprecation import warn_axis_deprecated
 from .util.message import is_empty_along, with_fingerprint
+from .util.segment import ConfigChain
 
 
 class BinnedAggregateSettings(ez.Settings):
@@ -142,6 +143,9 @@ class BinnedAggregateState:
     per message -- and since it is the same object every time, downstream
     identity checks on the axis stay cheap. ``None`` for a scalar operation."""
 
+    configs: ConfigChain | None = None
+    """Derives the output's config_id from the input's (see :class:`~ezmsg.sigproc.util.segment.ConfigChain`)."""
+
 
 class BinnedAggregateTransformer(
     BaseStatefulTransformer[BinnedAggregateSettings, AxisArray, AxisArray, BinnedAggregateState]
@@ -197,6 +201,10 @@ class BinnedAggregateTransformer(
             else None
         )
         self._state.carry = None
+        metric = self._state.metric_axis
+        self._state.configs = ConfigChain(
+            self._state.axis, schedule.output_gain, None if metric is None else metric.fingerprint
+        )
 
     @property
     def _operations(self) -> tuple[AggregationFunction, ...]:
@@ -261,6 +269,7 @@ class BinnedAggregateTransformer(
             data=data,
             dims=self._out_dims(message),
             axes=self._out_axes(message, step),
+            config_id=self._state.configs.update(message.config_id),
         )
 
     def _process(self, message: AxisArray) -> AxisArray:
@@ -314,6 +323,7 @@ class BinnedAggregateTransformer(
             data=stacked,
             dims=self._out_dims(message),
             axes=self._out_axes(message, step),
+            config_id=self._state.configs.update(message.config_id),
         )
 
 

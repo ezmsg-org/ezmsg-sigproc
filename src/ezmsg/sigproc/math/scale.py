@@ -11,17 +11,23 @@ from ezmsg.baseproc import BaseTransformer, BaseTransformerUnit
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.messages.util import replace
 
+from ..util.segment import SettingsConfigChain
+
 
 class ScaleSettings(ez.Settings):
     scale: float = 1.0
     """Factor by which to scale the data magnitude."""
 
 
-class ScaleTransformer(BaseTransformer[ScaleSettings, AxisArray, AxisArray]):
+class ScaleTransformer(SettingsConfigChain, BaseTransformer[ScaleSettings, AxisArray, AxisArray]):
+    def _config_own(self, message: AxisArray) -> tuple:
+        # Scaling at all can change an integer input's dtype; scale 1.0 passes the input, and its id, through.
+        return ()
+
     def _process(self, message: AxisArray) -> AxisArray:
         if self.settings.scale == 1.0:
             return message
-        return replace(message, data=self.settings.scale * message.data)
+        return replace(message, data=self.settings.scale * message.data, config_id=self._chained_config_id(message))
 
 
 class Scale(BaseTransformerUnit[ScaleSettings, AxisArray, AxisArray, ScaleTransformer]):
