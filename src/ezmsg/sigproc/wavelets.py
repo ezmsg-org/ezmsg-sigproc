@@ -145,8 +145,9 @@ class CWTTransformer(BaseStatefulTransformer[CWTSettings, AxisArray, AxisArray, 
         # Prepend with last_conv_samp before doing diff
         dat = np.concatenate((self._state.last_conv_samp, conv_msg.data), axis=-1)
         coef = self._state.neg_rt_scales * np.diff(dat, axis=-1)
-        # Store last_conv_samp for next iteration
-        self._state.last_conv_samp = conv_msg.data[..., -1:]
+        # Store last_conv_samp for next iteration; a message with no samples has none to store.
+        if conv_msg.data.shape[-1]:
+            self._state.last_conv_samp = conv_msg.data[..., -1:]
 
         if self._state.template.data.dtype.kind != "c":
             coef = coef.real

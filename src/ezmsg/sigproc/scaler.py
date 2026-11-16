@@ -89,7 +89,8 @@ class RiverAdaptiveStandardScalerTransformer(
             k = sorted(y.keys())
             result.append(np.array([y[_] for _ in k]).reshape(sample.shape))
 
-        result = np.stack(result)
+        # River yields Python floats, so a message with no samples gets float64 too.
+        result = np.stack(result) if result else np.empty(data.shape, dtype=np.float64)
         result = np.moveaxis(result, 0, axis_idx)
         return replace(message, data=result)
 

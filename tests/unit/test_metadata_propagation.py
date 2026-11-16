@@ -570,3 +570,130 @@ def test_window_anchor_moves_the_within_window_axis_without_a_reset():
     assert after.axes["time"].offset == -0.5
     # Each window's first sample keeps its absolute time: the window axis moves by as much as the samples' offset.
     assert after.axes["win"].offset + after.axes["time"].offset == pytest.approx(ref.axes["win"].offset)
+
+
+# ---------------------------------------------------------------------------
+# A message with no samples (e.g. one that ends a stream) must change nothing about what the
+# real data after it gives.
+# ---------------------------------------------------------------------------
+
+
+def _eos_cases():
+    from ezmsg.sigproc import (
+        adaptive_lnc,
+        binned_aggregate,
+        butterworthfilter,
+        detrend,
+        downsample,
+        ewma,
+        filterbank,
+        filterbankdesign,
+        fir_hilbert,
+        kaiser,
+        multibandpow,
+        rollingscaler,
+        scaler,
+        window,
+    )
+    from ezmsg.sigproc.aggregate import AggregationFunction as AF
+    from ezmsg.sigproc.util.startup import StartupMode as SM
+
+    band = kaiser.KaiserFilterSettings(cutoff=[10.0, 20.0], ripple=40.0, width=5.0, pass_zero=False)
+    variants = {
+        # Start-up modes that build state from the first samples after a reset.
+        **{
+            f"ButterworthFilterTransformer-{m.name}": lambda m=m: butterworthfilter.ButterworthFilterTransformer(
+                order=4, cutoff=5.0, startup=m
+            )
+            for m in (SM.FIRST_CHUNK, SM.BUFFERED)
+        },
+        **{
+            f"FilterbankTransformer-{m.name}": lambda m=m: filterbank.FilterbankTransformer(
+                kernels=[np.ones(5) / 5, np.ones(9) / 9], startup=m
+            )
+            for m in (SM.ZERO, SM.FIRST_CHUNK, SM.BUFFERED)
+        },
+        "FilterbankDesignTransformer-BUFFERED": lambda: filterbankdesign.FilterbankDesignTransformer(
+            filters=[band], startup=SM.BUFFERED
+        ),
+        **{
+            f"FIRHilbertEnvelopeTransformer-{m.name}": lambda m=m: fir_hilbert.FIRHilbertEnvelopeTransformer(startup=m)
+            for m in (SM.FIRST_CHUNK, SM.BUFFERED)
+        },
+        "MultiBandEnvelopePowerTransformer-BUFFERED": lambda: multibandpow.MultiBandEnvelopePowerTransformer(
+            bands=[(10.0, 20.0)], startup=SM.BUFFERED
+        ),
+        **{
+            f"AdaptiveLNCTransformer-{w.name}-{c.name}": lambda w=w, c=c: adaptive_lnc.AdaptiveLNCTransformer(
+                warm_start=w, cancel_method=c
+            )
+            for w in adaptive_lnc.WarmStart
+            for c in (adaptive_lnc.CancelMethod.NOTCH, adaptive_lnc.CancelMethod.SUBTRACT)
+        },
+        # Statistics seeded from the first samples.
+        "EWMATransformer-reset_on_resume": lambda: ewma.EWMATransformer(reset_on_resume=True),
+        "DetrendTransformer-reset_on_resume": lambda: detrend.DetrendTransformer(reset_on_resume=True),
+        "AdaptiveStandardScalerTransformer-reset_on_resume": lambda: scaler.AdaptiveStandardScalerTransformer(
+            reset_on_resume=True
+        ),
+        "RollingScalerProcessor-update_with_signal": lambda: rollingscaler.RollingScalerProcessor(
+            update_with_signal=True
+        ),
+        # Grids and phases placed from the first message.
+        "BinnedAggregateTransformer-minmax": lambda: binned_aggregate.BinnedAggregateTransformer(
+            operation=(AF.MIN, AF.MAX)
+        ),
+        "BinnedAggregateTransformer-fixed": lambda: binned_aggregate.BinnedAggregateTransformer(
+            bin_duration=0.03, fractional=False
+        ),
+        "DownsampleTransformer-3": lambda: downsample.DownsampleTransformer(factor=3),
+        "WindowTransformer-1to1": lambda: window.WindowTransformer(window_dur=0.5),
+        "WindowTransformer-no-pad": lambda: window.WindowTransformer(
+            window_dur=0.5, window_shift=0.2, zero_pad_until="none"
+        ),
+        # Shift longer than the window: samples between windows are skipped, counted across messages.
+        "WindowTransformer-sparse": lambda: window.WindowTransformer(window_dur=0.2, window_shift=0.3),
+    }
+    return {**CASES, **{k: (v, stream, run) for k, v in variants.items()}}
+
+
+EOS_CASES = _eos_cases()
+
+
+def _one(drive):
+    """Driver for a lone message, without per-stream extras such as the sampler's triggers."""
+    return _resample if drive is _resample else run
+
+
+def _no_samples(out):
+    return out is None or out.data.size == 0
+
+
+def _assert_finite(outs):
+    """For what has no reference to compare with; the rest may be as non-finite as the data makes it."""
+    for out in outs:
+        if out is not None and np.asarray(out.data).dtype.kind in "fc":
+            assert np.all(np.isfinite(np.asarray(out.data))), out
+
+
+@pytest.mark.parametrize("name", sorted(EOS_CASES))
+def test_an_empty_first_message_changes_nothing(name):
+    """S1: a fresh processor's first message has no samples (and an offset the data does not continue)."""
+    factory, messages, drive = EOS_CASES[name]
+    data = messages()
+    empty = _head(data[0], 0)
+    ax = empty.axes[empty.stream_dim]
+    empty = replace(empty, axes={**empty.axes, empty.stream_dim: replace(ax, offset=ax.offset - GAP)})
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        if name in EMPTY_UNSUPPORTED:
+            with pytest.raises(EMPTY_UNSUPPORTED[name]):
+                factory()(empty)
+            return
+        proc = factory()
+        first = _one(drive)(proc, [empty])
+        outs = drive(proc, data)
+        expected = drive(factory(), data)
+    assert all(_no_samples(o) for o in first)
+    _assert_finite(first)
+    _assert_same(outs, expected)

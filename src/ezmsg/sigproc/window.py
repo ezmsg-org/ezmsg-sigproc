@@ -128,6 +128,9 @@ class WindowState:
     shift_deficit: int = 0
     """ Number of incoming samples to ignore. Only relevant when shift > window."""
 
+    pad_pending: bool = False
+    """The reset's message had no samples to size input-relative zero-padding by; reset again on the next."""
+
     newaxis_warned: bool = False
 
     out_newaxis: AxisArray.LinearAxis | None = None
@@ -288,7 +291,10 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
             req_samples = self._state.window_shift_samples
         else:  # i.e. zero_pad_until == "input"
             req_samples = message.data.shape[axis_idx]
-        n_zero = max(0, self._state.window_samples - req_samples)
+        # Padding sized by a message with no samples (e.g. an end-of-stream marker) would be a whole
+        # window of zeros, emitted as if it were data: pad nothing, and size it from the next message.
+        self._state.pad_pending = req_samples == 0
+        n_zero = 0 if self._state.pad_pending else max(0, self._state.window_samples - req_samples)
         # Capacity has to cover a full window plus whatever a single message can
         # add on top of it; "grow" absorbs anything larger (e.g. an offline chunk
         # spanning many windows).
@@ -399,6 +405,8 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
         axis = resolve_configured_stream_dim(self, message, self.settings.axis)
         axis_idx = message.get_axis_idx(axis)
         axis_info = message.get_axis(axis)
+        if self._state.pad_pending:
+            self._request_reset()
 
         # Timestamp of the oldest buffered sample, computed before the new data
         # lands so `buffer_len` still describes the backlog it follows.
@@ -450,7 +458,7 @@ class WindowTransformer(BaseStatefulTransformer[WindowSettings, AxisArray, AxisA
         out_axes[axis] = self._state.out_axis
 
         # How we update .data and .axes[newaxis] depends on the windowing mode.
-        if self.settings.window_shift is None:
+        if self.settings.window_shift is None and not self._state.pad_pending:
             # one-to-one mode -- Each send yields exactly one window containing only the most recent samples.
             if self._state.buffer_len > self._state.window_samples:
                 self._drop_front(self._state.buffer_len - self._state.window_samples, axis_idx)
