@@ -269,6 +269,12 @@ class RangedAggregateTransformer(
 
     def _reset_state(self, message: AxisArray) -> None:
         axis = self.settings.axis or resolve_feature_dim(message, 0)
+        # The stream dim, as the reset hash resolves it: its offset is left out, so ax_vec would go stale.
+        if axis in (self.STREAMING_DIMS if message.stream_dim is None else (message.stream_dim,)):
+            raise ValueError(
+                f"RangedAggregate cannot aggregate along the stream dim {axis!r}: its coordinates change "
+                "with every message. Set axis to a feature axis such as 'freq' or 'ch'."
+            )
         target_axis = message.get_axis(axis)
         ax_idx = message.get_axis_idx(axis)
 

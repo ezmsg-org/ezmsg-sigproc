@@ -661,6 +661,21 @@ def test_ranged_aggregate_coordinate_axis_string_labels():
     assert np.array_equal(out.data, np.stack([msg.data[:, :2].mean(axis=1), msg.data[:, 2:].mean(axis=1)], axis=1))
 
 
+@pytest.mark.parametrize("stream_dim", [None, "win"], ids=["undeclared", "declared"])
+def test_ranged_aggregate_rejects_stream_dim(stream_dim):
+    """The stream dim's coordinates move every chunk, so bands cached along it would go stale."""
+    axis = stream_dim or "time"
+    msg = AxisArray(
+        data=np.zeros((10, 3)),
+        dims=[axis, "ch"],
+        axes={axis: AxisArray.TimeAxis(fs=100.0, offset=0.0)},
+        stream_dim=stream_dim,
+    )
+    xformer = RangedAggregateTransformer(RangedAggregateSettings(axis=axis, bands=[(0.0, 0.05)]))
+    with pytest.raises(ValueError, match="stream dim"):
+        xformer(msg)
+
+
 # ---- shared slice runner ----------------------------------------------------
 
 
