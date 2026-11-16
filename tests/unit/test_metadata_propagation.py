@@ -556,22 +556,62 @@ DESIGNED = {
 }
 
 
+def short_chunks(start=0, attrs=ATTRS, segment=SEGMENT):
+    """20-sample messages, shorter than a 50-tap kernel."""
+    return [msg(i, n_time=20, attrs=attrs, segment=segment) for i in range(5 * start, 5 * (start + N_MSGS))]
+
+
+def _designed_variants():
+    from ezmsg.sigproc import filterbank, fir_hilbert
+    from ezmsg.sigproc.filterbank import FilterbankMode as FM
+    from ezmsg.sigproc.util.startup import StartupMode as SM
+
+    variants = {}
+    for messages, kernels, tag in (
+        (stream, [np.ones(5) / 5, np.ones(9) / 9], ""),
+        (short_chunks, [np.ones(50) / 50, np.ones(30) / 30], "-short"),
+    ):
+        for mode in FM:
+            for startup in SM:
+                if mode == FM.FFT and startup in (SM.FIRST_CHUNK, SM.BUFFERED):
+                    continue  # unsupported: raises
+                variants[f"FilterbankTransformer{tag}-{mode.name}-{startup.name}"] = (
+                    lambda k=kernels, m=mode, s=startup: filterbank.FilterbankTransformer(kernels=k, mode=m, startup=s),
+                    messages,
+                    run,
+                    lambda proc: proc.state.prep_kerns,
+                )
+    for startup in (SM.CONSTANT, SM.FIRST_CHUNK, SM.BUFFERED):
+        variants[f"FIRHilbertEnvelopeTransformer-{startup.name}"] = (
+            lambda s=startup: fir_hilbert.FIRHilbertEnvelopeTransformer(startup=s),
+            stream,
+            run,
+            lambda proc: _filter_coefs(proc.state.filter),
+        )
+    return variants
+
+
+DESIGNED_CASES = {**{k: (*CASES[k], v) for k, v in DESIGNED.items()}, **_designed_variants()}
+
+
 def _at_double_rate(m):
     ax = m.axes[m.stream_dim]
     return replace(m, axes={**m.axes, m.stream_dim: replace(ax, gain=ax.gain / 2)})
 
 
-@pytest.mark.parametrize("name", sorted(DESIGNED))
+@pytest.mark.parametrize("name", sorted(DESIGNED_CASES))
 def test_a_new_segment_keeps_the_design_but_not_the_filter_memory(name):
-    factory, messages, drive = CASES[name]
-    design = DESIGNED[name]
+    factory, messages, drive, design = DESIGNED_CASES[name]
     post = _after_gap(messages)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         proc = factory()
         drive(proc, _before_gap(messages))
         coefs = design(proc)
-        uninterrupted = _keeps_everything(copy.deepcopy(proc), factory, post, drive)
+        # A twin rather than a deepcopy: FFT-mode filterbank state holds scipy.fft callables, which do not copy.
+        twin = factory()
+        drive(twin, _before_gap(messages))
+        uninterrupted = _keeps_everything(twin, factory, post, drive)
         outs = drive(proc, post)
         assert design(proc) is coefs
         _assert_same(outs, drive(factory(), post))

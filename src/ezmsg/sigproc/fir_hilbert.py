@@ -284,8 +284,16 @@ class FIRHilbertEnvelopeTransformer(
         with suppress_axis_deprecation():
             inner_settings = replace(self.settings, startup=StartupMode.CONSTANT)
         self._state.filter = FIRHilbertFilterTransformer(settings=inner_settings)
-        self._state.delay_buf = None
         self._state.dly = None
+        self._reset_memory(message)
+
+    def _reset_segment(self, message: AxisArray) -> None:
+        # The design depends only on the config; the inner filter sees the new segment and resets its own memory.
+        self._reset_memory(message)
+
+    def _reset_memory(self, message: AxisArray) -> None:
+        """Forget the samples seen so far: the real part's delay buffer and the start-up state."""
+        self._state.delay_buf = None
         # Copied empty, not viewed, so the input's buffer is not kept alive.
         axis_idx = message.get_axis_idx(resolve_configured_stream_dim(self, message, self.settings.axis))
         self._state.template = replace(message, data=slice_along_axis(message.data, slice(0, 0), axis_idx).copy())
@@ -397,8 +405,9 @@ class FIRHilbertEnvelopeTransformer(
             config_id=st.last_config_id,
         )
         tail = self._envelope(held)
-        st.next_offset = None
-        self._request_reset()
+        # Units flush at every gap, so start afresh without redesigning: the padding sits in the inner FIR's memory.
+        self._reset_memory(st.template)
+        st.filter.state.filter._request_reset()
         if out is None or out.data.shape[axis_idx] == 0:
             return tail
         return replace(out, data=np.concatenate([out.data, tail.data], axis=axis_idx))

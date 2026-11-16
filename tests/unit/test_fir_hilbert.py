@@ -429,16 +429,25 @@ def test_hilbert_envelope_flush_with_final_message():
     np.testing.assert_allclose(t, t_ref, rtol=0, atol=1e-12)
 
 
+@pytest.mark.parametrize("startup", ["CONSTANT", "FIRST_CHUNK", "BUFFERED"])
 @pytest.mark.parametrize("segment", [3, 4], ids=["same-segment", "new-segment"])
-def test_hilbert_envelope_restarts_after_flush(segment):
+def test_hilbert_envelope_restarts_after_flush(segment, startup):
     """The padding the tail was pushed out with is not real input, so whatever comes next starts
-    the filter afresh: no tail sample is emitted again."""
-    x = _flush_signal(400)
-    proc = _env()
+    the filter afresh: no tail sample is emitted again. The design is kept, as units flush at every gap."""
+    from ezmsg.sigproc.util.startup import StartupMode
+
+    x = _flush_signal(800)
+    proc = _env(startup=StartupMode[startup])
     _env_feed(proc, x[:300], 50)
-    proc.flush()
-    nxt = _env_msg(x[300:], 300, segment=segment)
-    np.testing.assert_array_equal(proc(nxt).data, _env()(nxt).data)
+    coefs = proc.state.filter.state.filter.settings.coefs
+    assert proc.flush() is not None
+    fresh = _env(startup=StartupMode[startup])
+    for s in (300, 550):  # two messages, so BUFFERED start-up releases too
+        nxt = _env_msg(x[s : s + 250], s, segment=segment)
+        out, ref = proc(nxt), fresh(nxt)
+        assert out.axes == ref.axes
+        np.testing.assert_array_equal(out.data, ref.data)
+    assert out.data.size and proc.state.filter.state.filter.settings.coefs is coefs
 
 
 def test_hilbert_envelope_flush_releases_unfilled_buffer():

@@ -199,8 +199,7 @@ class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArra
                 f"startup={self.settings.startup} is not supported in FFT mode (resolved from "
                 f"mode={self.settings.mode}). Use mode=CONV, or startup CONSTANT or ZERO."
             )
-        self._state.startup_held = []
-        self._state.startup_pending = self.settings.startup != StartupMode.ZERO
+        self._reset_memory()
         # Overlap-add carry left by a unit constant input: tail[j] = sum(k[j + 1 :]).
         self._state.const_tail = np.array(
             [np.pad(np.cumsum(k[::-1])[::-1][1:], (0, max_kernel_len - k.size)) for k in kernels]
@@ -255,6 +254,16 @@ class FilterbankTransformer(BaseStatefulTransformer[FilterbankSettings, AxisArra
             self._state.prep_kerns = np.array([self._state.fft(_) for _ in kernels])
             self._state.prep_kerns = np.expand_dims(self._state.prep_kerns, -2)
             # TODO: If fft_kernels have significant stretches of zeros, convert to sparse array.
+
+    def _reset_segment(self, message: AxisArray) -> None:
+        # The kernels depend only on the config; FFT mode's windower sees the new segment and resets itself.
+        self._reset_memory()
+
+    def _reset_memory(self) -> None:
+        """Forget the samples seen so far: the overlap-add tail and the start-up state."""
+        self._state.tail = np.zeros_like(self._state.tail)
+        self._state.startup_held = []
+        self._state.startup_pending = self.settings.startup != StartupMode.ZERO
 
     def _prepare_kernels(self, gain: float) -> list[npt.NDArray]:
         """Apply ``min_phase`` and, with ``compensate_delay``, align the kernels on one delay. Logs the delays."""
