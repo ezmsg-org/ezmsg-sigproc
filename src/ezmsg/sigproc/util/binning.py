@@ -32,6 +32,18 @@ output identical regardless of how the input stream is chunked, and reproduces
 ``EventRate``'s grid (gain, offset, bin count). The closed form ``int(m * spb)``
 is also more numerically stable than an iterative carry accumulator: there is no
 drift to accumulate over a long stream.
+
+Phase
+-----
+By default the grid starts at the stream's first sample. A non-zero ``phase``
+moves it to ``stream_start + phase + k * bin_duration``: the boundaries become
+``B(m) = int(m * spb) - p`` for ``m >= 1``, where ``p`` is ``-phase`` in whole
+input samples, taken modulo the bin width (``0 <= p < int(spb)``). ``B(0)`` stays
+at the stream's first sample, so the first bin is ``p`` samples short. Its
+output label is its nominal grid start, ``p`` samples before the stream starts,
+so the output axis stays linear. A negative phase lets a grid line up with an
+upstream stage that holds samples back, e.g. a zero-phase filter that releases
+each message's last ``pad_length`` samples only with the next message.
 """
 
 from dataclasses import dataclass, field
@@ -88,10 +100,14 @@ class BinSchedule:
             bins span a *fixed* ``int(bin_duration * fs)`` samples and the
             output gain is ``int(bin_duration * fs) / fs`` (sample-locked,
             matching :obj:`Window`).
+        phase: Offset of the grid from the stream start, in seconds (default 0).
+            Rounded to whole input samples; the first bin is shortened. See the
+            module docstring.
     """
 
     bin_duration: float
     fractional: bool = True
+    phase: float = 0.0
 
     fs: float | None = field(default=None, init=False)
     """Input sample rate, set by :meth:`reset`."""
@@ -104,6 +120,9 @@ class BinSchedule:
 
     carry_count: int = field(default=0, init=False)
     """Trailing input samples in the open partial bin, carried across chunks."""
+
+    phase_samples: int = field(default=0, init=False)
+    """``-phase`` in whole input samples, modulo the bin width; every boundary after the first is this much earlier."""
 
     _out_gain: float = field(default=0.0, init=False)
 
@@ -137,6 +156,8 @@ class BinSchedule:
         self.fs = fs
         self.spb = spb
         self._out_gain = self.bin_duration if self.fractional else spb / fs
+        # Modulo int(spb), not spb, so the first bin always holds at least one sample.
+        self.phase_samples = round(-self.phase * fs) % max(int(spb), 1)
         self.n_bins_done = 0
         self.carry_count = 0
 
@@ -159,33 +180,35 @@ class BinSchedule:
             :attr:`carry_count` are updated to reflect the bins it reports closed.
         """
         spb = self.spb
+        p = self.phase_samples
         m_done = self.n_bins_done
         n_carry = self.carry_count
 
         # Global sample index of carry[0] (== bin boundary B(m_done)); the
         # incoming chunk's first new sample follows the carried samples.
-        in_done = int(m_done * spb)
+        in_done = max(int(m_done * spb) - p, 0)
         data0_global = in_done + n_carry
         avail_end = data0_global + n_new
 
         # Nominal start time of the first (m_done-th) output bin. Derived from the
         # global bin index, so it is identical regardless of chunking and matches
-        # EventRate's nominal offset (== stream_start + m_done * output_gain).
-        output_offset = in_offset - data0_global * gain_in + m_done * self._out_gain
+        # EventRate's nominal offset (== stream_start + m_done * output_gain, less
+        # the phase shift).
+        output_offset = in_offset - (data0_global + p) * gain_in + m_done * self._out_gain
 
         # Global bin boundaries B(m) = int(m * spb) for the bins that complete
         # within the data available so far. Indexing by the *global* m (not a
         # per-chunk offset) is what makes the output chunk-invariant.
         cut_points: list[int] = []
-        if spb > 0 and avail_end >= int((m_done + 1) * spb):
-            # A bin m completes once B(m) = int(m*spb) <= avail_end, i.e.
-            # m < (avail_end + 1) / spb. int((avail_end + 1) / spb) is a correct
+        if spb > 0 and avail_end >= int((m_done + 1) * spb) - p:
+            # A bin m completes once B(m) = int(m*spb) - p <= avail_end, i.e.
+            # m < (avail_end + p + 1) / spb. int((avail_end + p + 1) / spb) is a correct
             # upper bound on the largest such m (even when spb < 1, where a
             # plain int(avail_end/spb) could undercount); +2 is slack, and the
             # `candidates <= avail_end` filter below trims any overshoot.
-            k_est = max(int((avail_end + 1) / spb) - m_done, 0) + 2
+            k_est = max(int((avail_end + p + 1) / spb) - m_done, 0) + 2
             ms = m_done + 1 + np.arange(k_est)
-            candidates = (ms * spb).astype(np.int64)
+            candidates = (ms * spb).astype(np.int64) - p
             b_global = candidates[candidates <= avail_end]
             cut_points = (b_global - in_done).tolist()
 

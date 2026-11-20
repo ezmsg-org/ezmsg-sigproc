@@ -1,6 +1,8 @@
 import asyncio
 import copy
+import functools
 import logging
+import pickle
 
 import numpy as np
 import pytest
@@ -14,6 +16,11 @@ from ezmsg.sigproc.binned_aggregate import (
     BinnedAggregate,
     BinnedAggregateSettings,
     BinnedAggregateTransformer,
+)
+from ezmsg.sigproc.butterworthzerophase import (
+    ButterworthZeroPhaseSettings,
+    ButterworthZeroPhaseTransformer,
+    compute_pad_length,
 )
 from ezmsg.sigproc.math.pow import PowSettings, PowTransformer
 from ezmsg.sigproc.window import WindowSettings, WindowTransformer
@@ -760,3 +767,54 @@ def test_unit_end_of_stream_marker_flushes_nothing_more():
     assert (first.segment, first.data.shape, first.axes["time"].offset) == (3, (2, 1), pytest.approx(10.0))
     np.testing.assert_array_equal(first.data, 0.0)
     assert unit.processor.flush() is None
+
+
+def _shifted_pad(settings: ButterworthZeroPhaseSettings, fs: float) -> float:
+    return -compute_pad_length(settings, fs) / fs
+
+
+@pytest.mark.parametrize("fractional", [True, False])
+@pytest.mark.parametrize("fs", [30000.0, 31250.0])
+def test_phase_shifts_the_grid(fs: float, fractional: bool):
+    """Bins fall on stream_start + phase + k * bin_duration; the first is short; chunking does not matter."""
+    bin_dur, shift = 0.01, 36
+    sig = np.random.default_rng(3).standard_normal((20000, 2))
+    spb = bin_dur * fs if fractional else float(int(bin_dur * fs))
+    ends = [int(m * spb) - shift for m in range(1, int((sig.shape[0] + shift) / spb) + 1)]
+    ref = np.stack([sig[s:e].mean(axis=0) for s, e in zip([0] + ends[:-1], ends)])
+
+    for block_size in (1, 300, 20000):
+        proc = BinnedAggregateTransformer(bin_duration=bin_dur, fractional=fractional, phase=-shift / fs)
+        out = _run(proc, _sig_msgs(sig, fs, block_size))
+        np.testing.assert_allclose(np.concatenate([m.data for m in out]), ref, rtol=0, atol=1e-12)
+        # The short first bin is labelled with its nominal grid start, before the stream begins.
+        assert out[0].axes["time"].offset == pytest.approx(-shift / fs)
+
+
+@pytest.mark.parametrize("fs", [30000.0, 31250.0])
+def test_callable_phase_aligns_bins_with_zero_phase_output(fs: float):
+    """With phase = -pad_length / fs, each zero-phase output message after the first closes exactly one bin."""
+    bp = ButterworthZeroPhaseSettings(order=4, cuton=250.0, cutoff=5000.0, coef_type="sos")
+    seen: list[float] = []
+
+    def phase(rate: float) -> float:
+        seen.append(rate)
+        return _shifted_pad(bp, rate)
+
+    bin_dur = 0.01
+    step = int(bin_dur * fs)
+    sig = np.random.default_rng(4).standard_normal((step * 30, 2))
+    filt = ButterworthZeroPhaseTransformer(bp)
+    proc = BinnedAggregateTransformer(bin_duration=bin_dur, fractional=False, phase=phase)
+    for i, msg in enumerate(_sig_msgs(sig, fs, step)):
+        y = filt(msg)
+        out = proc(y)
+        if i == 0:
+            continue
+        # The message's samples are exactly one bin: it closes that bin and leaves nothing open.
+        assert out.data.shape[0] == 1
+        assert out.axes["time"].offset == pytest.approx(y.axes["time"].offset)
+        assert proc.state.schedule.carry_count == 0
+    assert seen == [fs]
+    # The settings stay picklable when the callable is a partial of a module-level function.
+    pickle.loads(pickle.dumps(BinnedAggregateSettings(phase=functools.partial(_shifted_pad, bp))))

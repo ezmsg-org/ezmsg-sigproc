@@ -141,6 +141,18 @@ class BinnedAggregateSettings(ez.Settings):
     ``int(bin_duration * fs)`` samples and the output gain is
     ``int(bin_duration * fs) / fs`` (sample-locked, matching :obj:`Window`)."""
 
+    phase: float | typing.Callable[[float], float] = 0.0
+    """Offset of the bin grid from the stream start, in seconds: boundaries fall at
+    ``stream_start + phase + k * bin_duration``, rounded to whole input samples, and
+    the first bin is shortened (see :obj:`~ezmsg.sigproc.util.binning.BinSchedule`).
+
+    A callable is called with the input sample rate at reset, for a phase that
+    depends on it. For example, ``-compute_pad_length(bp_settings, fs) / fs`` puts
+    each bin's end where a :obj:`~ezmsg.sigproc.butterworthzerophase.ButterworthZeroPhase`
+    upstream ends its output messages, so a bin closes with the message that
+    completes it rather than with the next one. Use a module-level function (or
+    a :func:`functools.partial` of one) so the settings stay picklable."""
+
 
 @processor_state
 class BinnedAggregateState:
@@ -217,11 +229,14 @@ class BinnedAggregateTransformer(
     def _reset_state(self, message: AxisArray) -> None:
         self._state.axis = resolve_configured_stream_dim(self, message, self.settings.axis, legacy_default="time")
         axis_info = message.get_axis(self._state.axis)
+        fs = 1.0 / axis_info.gain
+        phase = self.settings.phase
         schedule = BinSchedule(
             bin_duration=self.settings.bin_duration,
             fractional=self.settings.fractional,
+            phase=phase(fs) if callable(phase) else phase,
         )
-        schedule.reset(1.0 / axis_info.gain)
+        schedule.reset(fs)
         self._state.schedule = schedule
         self._state.metric_axis = (
             with_fingerprint(
