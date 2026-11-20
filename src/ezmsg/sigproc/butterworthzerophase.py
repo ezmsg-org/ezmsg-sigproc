@@ -71,6 +71,90 @@ class ButterworthZeroPhaseSettings(ButterworthFilterSettings):
     """
 
 
+def compute_pad_length(settings: ButterworthZeroPhaseSettings, fs: float) -> int:
+    """
+    Number of samples :obj:`ButterworthZeroPhase` holds back at sampling rate ``fs``.
+
+    The pad_length is determined by finding where the impulse response decays
+    to `settle_cutoff` fraction of its peak value. This is then optionally
+    capped by `max_pad_duration`.
+
+    Each output message stops ``pad_length`` samples short of the end of the input
+    received so far; those samples are emitted with the next message. A pure
+    function of the settings, so a downstream stage can align to the hold-back
+    before the stream starts (e.g. by shifting a bin grid by ``-pad_length / fs``).
+
+    Args:
+        settings: The zero-phase filter's settings.
+        fs: Sampling frequency in Hz.
+
+    Returns:
+        Number of samples for the pad length.
+    """
+    # Design the filter to compute impulse response
+    coefs = butter_design_fun(
+        fs,
+        order=settings.order,
+        cuton=settings.cuton,
+        cutoff=settings.cutoff,
+        coef_type=settings.coef_type,
+        wn_hz=settings.wn_hz,
+    )
+    if coefs is None:
+        # Filter design failed or is disabled
+        return 0
+
+    # Generate impulse response - use a generous length initially
+    # Start with scipy's heuristic as minimum, then extend if needed
+    if settings.coef_type == "ba":
+        min_length = 3 * (settings.order + 1)
+    else:
+        n_sections = (settings.order + 1) // 2
+        min_length = 3 * n_sections * 2
+
+    # Use 10x the minimum as initial impulse length, or at least 10000 samples
+    # (10000 samples allows for ~333ms at 30kHz, covering most practical cases)
+    impulse_length = max(min_length * 10, 10000)
+
+    # Cap impulse length computation if max_pad_duration is set
+    if settings.max_pad_duration is not None:
+        max_samples = int(settings.max_pad_duration * fs)
+        impulse_length = min(impulse_length, max_samples + 1)
+
+    impulse = np.zeros(impulse_length)
+    impulse[0] = 1.0
+
+    if settings.coef_type == "ba":
+        b, a = coefs
+        h = scipy.signal.lfilter(b, a, impulse)
+    else:
+        h = scipy.signal.sosfilt(coefs, impulse)
+
+    # Find where impulse response settles to settle_cutoff of peak
+    abs_h = np.abs(h)
+    peak = abs_h.max()
+    if peak == 0:
+        return min_length
+
+    threshold = settings.settle_cutoff * peak
+    above_threshold = np.where(abs_h > threshold)[0]
+
+    if len(above_threshold) == 0:
+        pad_length = min_length
+    else:
+        pad_length = above_threshold[-1] + 1
+
+    # Ensure at least the scipy heuristic minimum
+    pad_length = max(pad_length, min_length)
+
+    # Apply max_pad_duration cap if set
+    if settings.max_pad_duration is not None:
+        max_samples = int(settings.max_pad_duration * fs)
+        pad_length = min(pad_length, max_samples)
+
+    return int(pad_length)
+
+
 class ButterworthBackwardFilterTransformer(FilterByDesignTransformer[ButterworthFilterSettings, BACoeffs | SOSCoeffs]):
     """
     Backward (acausal) Butterworth filter with buffering.
@@ -123,74 +207,8 @@ class ButterworthBackwardFilterTransformer(FilterByDesignTransformer[Butterworth
         return super()._design_coefs(fs)
 
     def _compute_pad_length(self, fs: float) -> int:
-        """
-        Compute pad length based on the filter's impulse response settling time.
-
-        The pad_length is determined by finding where the impulse response decays
-        to `settle_cutoff` fraction of its peak value. This is then optionally
-        capped by `max_pad_duration`.
-
-        Args:
-            fs: Sampling frequency in Hz.
-
-        Returns:
-            Number of samples for the pad length.
-        """
-        # Design the filter to compute impulse response
-        coefs = self.get_design_function()(fs)
-        if coefs is None:
-            # Filter design failed or is disabled
-            return 0
-
-        # Generate impulse response - use a generous length initially
-        # Start with scipy's heuristic as minimum, then extend if needed
-        if self.settings.coef_type == "ba":
-            min_length = 3 * (self.settings.order + 1)
-        else:
-            n_sections = (self.settings.order + 1) // 2
-            min_length = 3 * n_sections * 2
-
-        # Use 10x the minimum as initial impulse length, or at least 10000 samples
-        # (10000 samples allows for ~333ms at 30kHz, covering most practical cases)
-        impulse_length = max(min_length * 10, 10000)
-
-        # Cap impulse length computation if max_pad_duration is set
-        if self.settings.max_pad_duration is not None:
-            max_samples = int(self.settings.max_pad_duration * fs)
-            impulse_length = min(impulse_length, max_samples + 1)
-
-        impulse = np.zeros(impulse_length)
-        impulse[0] = 1.0
-
-        if self.settings.coef_type == "ba":
-            b, a = coefs
-            h = scipy.signal.lfilter(b, a, impulse)
-        else:
-            h = scipy.signal.sosfilt(coefs, impulse)
-
-        # Find where impulse response settles to settle_cutoff of peak
-        abs_h = np.abs(h)
-        peak = abs_h.max()
-        if peak == 0:
-            return min_length
-
-        threshold = self.settings.settle_cutoff * peak
-        above_threshold = np.where(abs_h > threshold)[0]
-
-        if len(above_threshold) == 0:
-            pad_length = min_length
-        else:
-            pad_length = above_threshold[-1] + 1
-
-        # Ensure at least the scipy heuristic minimum
-        pad_length = max(pad_length, min_length)
-
-        # Apply max_pad_duration cap if set
-        if self.settings.max_pad_duration is not None:
-            max_samples = int(self.settings.max_pad_duration * fs)
-            pad_length = min(pad_length, max_samples)
-
-        return pad_length
+        """Compute pad length for ``fs``; see :func:`compute_pad_length`."""
+        return compute_pad_length(self.settings, fs)
 
     def _reset_segment(self, message: AxisArray) -> None:
         # Unlike the other filter-by-design stages this one has no child: its memory is the carried-over tail.

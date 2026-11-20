@@ -53,10 +53,10 @@ def eventrate_grid(chunk_lengths, fs, bin_duration):
     return ends, offsets
 
 
-def schedule_grid(chunk_lengths, fs, bin_duration, fractional):
+def schedule_grid(chunk_lengths, fs, bin_duration, fractional, phase=0.0):
     """Drive a BinSchedule over the same chunking and return the global bin-end
     samples and the per-nonempty-chunk output offsets."""
-    sched = BinSchedule(bin_duration=bin_duration, fractional=fractional)
+    sched = BinSchedule(bin_duration=bin_duration, fractional=fractional, phase=phase)
     sched.reset(fs)
     gain_in = 1.0 / fs
     global_start = 0
@@ -65,8 +65,8 @@ def schedule_grid(chunk_lengths, fs, bin_duration, fractional):
     for n in chunk_lengths:
         m_before = sched.n_bins_done
         step = sched.advance(n_new=n, in_offset=global_start * gain_in, gain_in=gain_in)
-        # Global bin end of bin m (1-indexed global) is int(m * spb).
-        ends.extend(int(m * sched.spb) for m in range(m_before + 1, sched.n_bins_done + 1))
+        # Global bin end of bin m (1-indexed global) is int(m * spb) - phase_samples.
+        ends.extend(int(m * sched.spb) - sched.phase_samples for m in range(m_before + 1, sched.n_bins_done + 1))
         if step.n_bins > 0:
             offsets.append(step.output_offset)
         global_start += n
@@ -144,3 +144,53 @@ def test_carry_count_tracks_open_bin():
     # 10 carried + 10 new = 20 -> exactly 1 more bin, no leftover.
     assert step.n_bins == 1
     assert step.carry_count == 0
+
+
+CHUNKINGS = [[50000], [1] * 50000, [7] * 700 + [101] * 90 + [36010], [300] * 166 + [200], [263] * 190 + [30]]
+
+
+@pytest.mark.parametrize("fractional", [True, False])
+@pytest.mark.parametrize("fs", [30000.0, 30012.0, 31250.0])
+@pytest.mark.parametrize("phase", [-0.0012, 0.0033, -0.0212])
+def test_phase_grid_is_chunk_invariant(fs, fractional, phase):
+    """With a phase, boundaries and offsets still do not depend on the chunking."""
+    ref = schedule_grid(CHUNKINGS[0], fs, 0.01, fractional, phase)
+    for chunks in CHUNKINGS[1:]:
+        assert schedule_grid(chunks, fs, 0.01, fractional, phase)[0] == ref[0]
+
+
+@pytest.mark.parametrize("fractional", [True, False])
+@pytest.mark.parametrize("fs", [30000.0, 30012.0, 31250.0])
+def test_phase_shifts_boundaries_and_shortens_the_first_bin(fs, fractional):
+    """phase = -36 samples moves every boundary 36 samples earlier; bin 0 is short."""
+    bin_duration = 0.01
+    phase = -36 / fs
+    ends0, _ = schedule_grid([50000], fs, bin_duration, fractional)
+    ends, offsets = schedule_grid([50000], fs, bin_duration, fractional, phase)
+    # One more bin closes: the shifted grid's last boundary is 36 samples earlier.
+    assert ends[: len(ends0)] == [e - 36 for e in ends0]
+    assert ends[0] == ends0[0] - 36  # the short first bin
+    # The first bin is labelled with its nominal grid start, before the stream starts.
+    assert offsets[0] == pytest.approx(phase)
+
+
+def test_phase_is_taken_modulo_the_bin_width():
+    """Phases a whole number of bins apart give the same grid."""
+    fs, bin_duration = 30000.0, 0.01
+    ref, _ = schedule_grid([50000], fs, bin_duration, True, -0.0012)
+    for phase in (0.0088, -0.0112, 0.0188):
+        assert schedule_grid([50000], fs, bin_duration, True, phase)[0] == ref
+
+
+def test_phase_keeps_the_offsets_on_the_grid():
+    """Each message's offset is the nominal start of its first bin: stream_start + phase + (m - 1) * bin."""
+    fs, bin_duration, phase = 30000.0, 0.01, -0.0012
+    sched = BinSchedule(bin_duration=bin_duration, phase=phase)
+    sched.reset(fs)
+    for i in range(10):
+        m = sched.n_bins_done
+        step = sched.advance(n_new=300, in_offset=5.0 + i * 0.01, gain_in=1 / fs)
+        assert step.n_bins == 1
+        assert step.output_offset == pytest.approx(5.0 + phase + m * bin_duration)
+        # Each 300-sample message closes exactly the bin that ends 36 samples before its end.
+        assert step.carry_count == 36
