@@ -36,7 +36,7 @@ Additionally, we also consider adaptive stateful transformers, which are statefu
 The decision tree for this classification can be found in the `ezmsg-baseproc documentation
 <https://www.ezmsg.org/ezmsg-baseproc/guides/ProcessorsBase.html#implementing-a-custom-standalone-processor>`_.
 
-The leaf nodes of the decision tree are abstract base classes provided in `ezmsg.sigproc.base` for implementing standalone processors. The table below summarizes these base classes.
+The leaf nodes of the decision tree are abstract base classes provided in `ezmsg.baseproc` for implementing standalone processors. The table below summarizes these base classes.
 
 Abstract implementations (Base Classes) for standalone processors
 ***************************************************************************************
@@ -45,7 +45,7 @@ Abstract implementations (Base Classes) for standalone processors
 Generic TypeVars
 ===================
 
-In this table, we summarize the generic TypeVars used in the processor class protocols and abstract base classes provided in `ezmsg.sigproc.base`.
+In this table, we summarize the generic TypeVars used in the processor class protocols and abstract base classes provided in `ezmsg.baseproc`.
 
 .. list-table:: 
    :widths: 5 20 30
@@ -70,7 +70,7 @@ In this table, we summarize the generic TypeVars used in the processor class pro
 
 Processor Class Protocols
 ===========================
-In this table, we summarize the processor class protocols used to define the abstract base classes provided in `ezmsg.sigproc.base`. Each protocol corresponds to a specific processor type and characteristics as outlined in the decision tree linked above.
+In this table, we summarize the processor class protocols used to define the abstract base classes provided in `ezmsg.baseproc`. Each protocol corresponds to a specific processor type and characteristics as outlined in the decision tree linked above.
 
 +-----+-----------------------+--------+-------+------------------------+--------+-----------------+
 | Idx | Class                 | Parent | State | ``__call__`` signature | @state | ``partial_fit`` |
@@ -100,7 +100,7 @@ Note: ``__call__`` and ``partial_fit`` both have asynchronous alternatives: ``__
 Processor Base Classes
 ========================
 
-In this table, we summarize the abstract base classes provided in `ezmsg.sigproc.base` for implementing standalone signal processors. Each base class corresponds to a specific processor type and protocol, as outlined in the decision tree linked above.
+In this table, we summarize the abstract base classes provided in `ezmsg.baseproc` for implementing standalone signal processors. Each base class corresponds to a specific processor type and protocol, as outlined in the decision tree linked above.
 
 .. list-table:: 
    :widths: 5 20 5 5 30
